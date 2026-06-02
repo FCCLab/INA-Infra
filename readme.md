@@ -1,15 +1,19 @@
 # Bring up Nephio
 
-```
-kpt fn render network-config
-kpt live init network-config
-kpt live apply network-config --reconcile-timeout=15m --output=table
-```
+## Cluster networking
+
+| Layer | CIDR / address | Notes |
+|-------|----------------|--------|
+| **Pods** | `10.244.0.0/16` (node slice `/24`) | Flannel; pod IPs e.g. `10.244.0.x` |
+| **Services** | `10.96.0.0/12` | ClusterIP; DNS at `10.96.0.10` |
+| **DNS** | CoreDNS (`kube-dns`) | In-cluster names: `*.svc.cluster.local` |
+
+Examples: `gitea.gitea.svc.cluster.local:3000`, `api.porch-system`, `resource-backend-controller-grpc-svc.backend-system.svc.cluster.local:9999`.
+
+## Bring up steps
 
 ```
-kpt fn render resource-backend
-kpt live init resource-backend
-kpt live apply resource-backend --reconcile-timeout=15m --output=table
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=10.1.101.10
 ```
 
 ```
@@ -25,14 +29,12 @@ kpt live apply gitea --reconcile-timeout 15m --output=table
 ```
 
 ```
-kpt pkg get --for-deployment https://github.com/nephio-project/catalog/nephio/core/porch@origin/main
 kpt fn render porch
 kpt live init porch
 kpt live apply porch --reconcile-timeout=15m --output=table
 ```
 
 ```
-kpt pkg get --for-deployment https://github.com/nephio-project/catalog.git/nephio/core/nephio-operator@origin/main
 kpt fn render nephio-operator
 kpt live init nephio-operator
 kpt live apply nephio-operator --reconcile-timeout=15m --output=table
@@ -50,23 +52,37 @@ stringData:
     username: nephio
     password: secret
 EOF
+```
 
-kubectl -n nephio-system get secret git-user-secret
-kubectl -n nephio-system get secret git-user-secret -o jsonpath='{.data.username}' | base64 -d; echo
-kubectl -n nephio-system get secret git-user-secret -o jsonpath='{.data.password}' | base64 -d; echo
+Use the same Gitea credentials as `bringup/gitea/secret-git-user.yaml`. A separate `git-user-secret` exists in namespace **`gitea`** for the Gitea chart.
+
+```
+kpt fn render resource-backend
+kpt live init resource-backend
+kpt live apply resource-backend --reconcile-timeout=15m --output=table
 ```
 
 ```
-kpt pkg get --for-deployment https://github.com/nephio-project/catalog.git/nephio/optional/stock-repos@origin/main
+kpt fn render network-config
+kpt live init network-config
+kpt live apply network-config --reconcile-timeout=15m --output=table
+```
+
+```
 kpt fn render stock-repos
 kpt live init stock-repos
 kpt live apply stock-repos --reconcile-timeout=15m --output=table
 ```
 
 ```
-kpt pkg get --for-deployment https://github.com/nephio-project/catalog.git/nephio/optional/webui@origin/main
-
 kpt fn render webui
 kpt live init webui
 kpt live apply webui --reconcile-timeout=15m --output=table --inventory-policy=adopt
 ```
+
+## Notes
+
+- **kube-rbac-proxy**: use `quay.io/brancz/kube-rbac-proxy:v0.8.0` (not `gcr.io/kubebuilder/...`).
+- **porch**: `bringup/porch` includes `0-functionconfigs.yaml` and flag fixes for current `nephio/*:latest` images.
+- **Porch / function-runner logs** (`localhost:4318 connection refused`): OpenTelemetry has no collector in-cluster; safe to ignore or set `OTEL_SDK_DISABLED=true` on those deployments.
+- **Bare metal provisioning** (Metal3/Ironic) is optional and documented separately; not required for this single-node lab.
