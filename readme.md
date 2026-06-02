@@ -62,3 +62,11 @@ kpt fn render stock-repos
 kpt live init stock-repos
 kpt live apply stock-repos --reconcile-timeout=15m --output=table
 ```
+
+```
+kpt pkg get --for-deployment https://github.com/nephio-project/catalog.git/nephio/optional/webui@origin/main
+
+kpt fn render webui
+kpt live init webui
+kpt live apply webui --reconcile-timeout=15m --output=table --inventory-policy=adopt
+```
