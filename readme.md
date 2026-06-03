@@ -98,6 +98,18 @@ kubectl wait --for=condition=Ready repositories.config.porch.kpt.dev/mgmt --time
 
 Git credentials in `000-mgmt-repos.yaml` match `bringup/gitea/secret-git-user.yaml` (`nephio` / `secret`).
 
+## Central workload cluster
+
+Second kubeadm cluster on `10.1.101.22` (kubeconfig cluster name **central**). See [docs/new_cluster.md](docs/new_cluster.md).
+
+```bash
+export KUBECONFIG=$HOME/.kube/config:$HOME/.kube/config-central
+kubectl --context=central@central get nodes
+kubectl --context=mgmt@mgmt get nodes
+```
+
+If you still have `~/.kube/config-core`, rename it: `mv ~/.kube/config-core ~/.kube/config-central`.
+
 ## Notes
 
 - **kube-rbac-proxy**: use `quay.io/brancz/kube-rbac-proxy:v0.8.0` (not `gcr.io/kubebuilder/...`).

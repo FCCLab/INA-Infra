@@ -10,9 +10,9 @@ Rename the cluster and user in a kubeconfig. Defaults to the current context.
 A timestamped backup is created next to the config file.
 
 Examples:
-  $(basename "$0") core nephio
-  $(basename "$0") core nephio ~/.kube/config
-  KUBECONFIG=/etc/kubernetes/admin.conf sudo -E $(basename "$0") core nephio
+  $(basename "$0") central central ~/.kube/config-central
+  $(basename "$0") mgmt mgmt ~/.kube/config
+  KUBECONFIG=/etc/kubernetes/admin.conf sudo -E $(basename "$0") central central
 EOF
 }
 

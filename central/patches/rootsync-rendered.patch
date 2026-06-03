@@ -1,0 +1,24 @@
+--- rootsync.yaml
++++ rootsync.yaml
+@@ -1,16 +1,16 @@
+ apiVersion: configsync.gke.io/v1beta1
+ kind: RootSync
+-metadata: # kpt-merge: config-management-system/example-cluster-name
+-  name: example-cluster-name
++metadata: # kpt-merge: config-management-system/central-repo
++  name: central-repo
+   namespace: config-management-system
+   annotations:
+-    internal.kpt.dev/upstream-identifier: 'configsync.gke.io|RootSync|config-management-system|example-cluster-name'
++    internal.kpt.dev/upstream-identifier: 'configsync.gke.io|RootSync|config-management-system|central-repo'
+ spec:
+   sourceFormat: unstructured
+   git:
+-    repo: http://172.18.0.200:3000/nephio/example-cluster-name.git
++    repo: http://10.1.101.10:3000/nephio/central-repo.git
+     branch: main
+     auth: token
+     secretRef:
+-      name: example-cluster-name-access-token-configsync
++      name: central-repo-access-token-configsync
+     period: 15s

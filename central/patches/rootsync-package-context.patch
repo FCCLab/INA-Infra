@@ -1,0 +1,9 @@
+--- package-context.yaml
++++ package-context.yaml
+@@ -6,5 +6,5 @@
+     internal.kpt.dev/upstream-identifier: '|ConfigMap|default|kptfile.kpt.dev'
+ data:
+-  name: example-rootsync
+-  clusterName: example-cluster-name
++  name: central-repo
++  clusterName: central-repo

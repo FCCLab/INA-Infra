@@ -1,0 +1,10 @@
+apiVersion: infra.nephio.org/v1alpha1
+kind: Repository
+metadata: # kpt-merge: default/example-cluster-name
+  name: central-repo
+  namespace: default
+  annotations:
+    internal.kpt.dev/upstream-identifier: infra.nephio.org|Repository|default|example-cluster-name
+spec:
+  description: central-repo repository
+  defaultBranch: main
