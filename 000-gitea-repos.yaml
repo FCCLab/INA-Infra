@@ -1,0 +1,48 @@
+---
+# Create empty Gitea repos required by Nephio/Porch.
+# Apply once after Gitea is running:
+#   kubectl apply -f 000-gitea-repos.yaml
+#   kubectl wait --for=condition=complete job/gitea-init-repos -n gitea --timeout=120s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-init-repos
+  namespace: gitea
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init
+        image: curlimages/curl:8.5.0
+        env:
+        - name: GITEA_URL
+          value: http://gitea.gitea.svc.cluster.local:3000
+        - name: GIT_USER
+          valueFrom:
+            secretKeyRef:
+              name: git-user-secret
+              key: username
+        - name: GIT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: git-user-secret
+              key: password
+        command:
+        - sh
+        - -ec
+        - |
+          for repo in mgmt mgmt-staging; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -u "${GIT_USER}:${GIT_PASS}" \
+              -X POST "${GITEA_URL}/api/v1/user/repos" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\":\"${repo}\",\"auto_init\":true,\"private\":false}")
+            if [ "$code" = "201" ] || [ "$code" = "409" ]; then
+              echo "repo ${repo}: ok (HTTP ${code})"
+            else
+              echo "repo ${repo}: failed (HTTP ${code})" >&2
+              exit 1
+            fi
+          done

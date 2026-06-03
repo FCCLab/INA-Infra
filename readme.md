@@ -80,6 +80,24 @@ kpt live init webui
 kpt live apply webui --reconcile-timeout=15m --output=table --inventory-policy=adopt
 ```
 
+## Management cluster Git repos
+
+Apply in order after the bringup steps above.
+
+| Order | File | Role |
+|-------|------|------|
+| 1 | `000-gitea-repos.yaml` | One-shot Job: creates empty Gitea repos `mgmt` and `mgmt-staging` (with `auto_init`) so Porch can push packages. |
+| 2 | `000-mgmt-repos.yaml` | Registers Porch deployment repos: `git-user-secret` in `default`, plus `mgmt-staging` (bootstrap) and `mgmt` (deployment) pointing at Gitea. |
+
+```
+kubectl apply -f 000-gitea-repos.yaml
+kubectl wait --for=condition=complete job/gitea-init-repos -n gitea --timeout=120s
+kubectl apply -f 000-mgmt-repos.yaml
+kubectl wait --for=condition=Ready repositories.config.porch.kpt.dev/mgmt --timeout=120s
+```
+
+Git credentials in `000-mgmt-repos.yaml` match `bringup/gitea/secret-git-user.yaml` (`nephio` / `secret`).
+
 ## Notes
 
 - **kube-rbac-proxy**: use `quay.io/brancz/kube-rbac-proxy:v0.8.0` (not `gcr.io/kubebuilder/...`).

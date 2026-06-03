@@ -1,0 +1,48 @@
+---
+# Porch deployment repositories for the management cluster.
+# Requires 000-gitea-repos.yaml (Gitea repos) and stock-repos bringup.
+# Apply:
+#   kubectl apply -f 000-mgmt-repos.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-user-secret
+  namespace: default
+type: kubernetes.io/basic-auth
+stringData:
+  username: nephio
+  password: secret
+---
+apiVersion: config.porch.kpt.dev/v1alpha1
+kind: Repository
+metadata:
+  name: mgmt-staging
+  namespace: default
+  annotations:
+    nephio.org/staging: "true"
+spec:
+  deployment: false
+  type: git
+  git:
+    branch: main
+    createBranch: true
+    directory: /
+    repo: http://gitea.gitea.svc.cluster.local:3000/nephio/mgmt-staging.git
+    secretRef:
+      name: git-user-secret
+---
+apiVersion: config.porch.kpt.dev/v1alpha1
+kind: Repository
+metadata:
+  name: mgmt
+  namespace: default
+spec:
+  deployment: true
+  type: git
+  git:
+    branch: main
+    createBranch: true
+    directory: /
+    repo: http://gitea.gitea.svc.cluster.local:3000/nephio/mgmt.git
+    secretRef:
+      name: git-user-secret
