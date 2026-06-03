@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="${PATCHES_DIR:-$SCRIPT_DIR/patches}"
 ROOTSYNC_DIR="${ROOTSYNC_DIR:-$SCRIPT_DIR/rootsync}"
 GITEA_HOST="${GITEA_HOST:-10.1.101.10}"
+GITEA_PORT="${GITEA_PORT:-30519}"
 REPO_NAME="${REPO_NAME:-central-repo}"
 
 usage() {
@@ -55,7 +56,7 @@ fix_rendered_rootsync() {
     -e "s|nephio/example-cluster-name\\.git|nephio/${REPO_NAME}.git|g" \
     -e "s/example-rootsync-access-token-configsync/${REPO_NAME}-access-token-configsync/g" \
     -e "s/example-cluster-name-access-token-configsync/${REPO_NAME}-access-token-configsync/g" \
-    -e "s|http://[0-9.]*:3000/nephio/${REPO_NAME}\\.git|http://${GITEA_HOST}:3000/nephio/${REPO_NAME}.git|g" \
+    -e "s|http://[0-9.]*:[0-9]*/nephio/${REPO_NAME}\\.git|http://${GITEA_HOST}:${GITEA_PORT}/nephio/${REPO_NAME}.git|g" \
     "$yaml"
 }
 
@@ -85,7 +86,7 @@ if [[ "$MODE" == all || "$MODE" == rendered ]]; then
   apply_patch "$PATCHES_DIR/rootsync-rendered.patch" || true
   apply_patch "$PATCHES_DIR/rootsync-rendered-after-kpt-fn.patch" || true
   fix_rendered_rootsync
-  echo "Normalized rootsync.yaml for repo=${REPO_NAME} gitea=${GITEA_HOST}:3000"
+  echo "Normalized rootsync.yaml for repo=${REPO_NAME} gitea=${GITEA_HOST}:${GITEA_PORT}"
 fi
 
 echo ""

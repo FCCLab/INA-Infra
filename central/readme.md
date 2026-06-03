@@ -237,22 +237,85 @@ kpt live apply storageclass-local-path --output=table
 
 ### Step 9 — Deploy OAI database + operators (mgmt)
 
-On **mgmt**, apply PackageVariants (adapt [test-infra OAI manifests](https://github.com/nephio-project/test-infra/tree/main/e2e/tests/oai)) so **`downstream.repo: central-repo`** and selectors match `WorkloadCluster` label `nephio.org/site-type: core`.
+On **mgmt**, deploy the database PackageVariantSet. Upstream is **Gitea `oai-packages`** (branch `v5`) with fixed Kptfiles under `central/oai-packages/` — push first:
+
+```bash
+cd central
+chmod +x push-oai-packages-to-gitea.sh
+export GITEA_HOST=10.1.101.10 GITEA_PORT=30519 GITEA_USER=nephio GITEA_PASS=secret
+./push-oai-packages-to-gitea.sh
+
+export KUBECONFIG=$HOME/.kube/config
+kubectl --context=mgmt@mgmt apply -f repo-oai-packages-gitea.yaml
+./sync-oai-packages-repo.sh
+
+export KUBECONFIG=$HOME/.kube/config
+kubectl --context=mgmt@mgmt apply -f 002-database.yaml
+kubectl --context=mgmt@mgmt get packagevariantsets,packagevariants | grep -E 'core-oai|database|NAME'
+```
+
+**Stuck or re-applying** (Porch lock, wrong Gitea URL, no `central-repo` revision):
 
 ```bash
 export KUBECONFIG=$HOME/.kube/config
-export BRANCH=v6   # match catalog @v6 package revisions on mgmt
-
-# Example: database PackageVariantSet targets WorkloadCluster site-type=core
-# Clone/adjust 002-database.yaml and 002-operators.yaml from test-infra:
-#   - downstream.repo: central-repo
-#   - oai-cp-operators injector / repo name: central-repo
-
-# envsubst < 002-database.yaml | kubectl apply -f -   # copy from test-infra/e2e/tests/oai, set downstream.repo: central-repo
-# envsubst < 002-operators.yaml | kubectl apply -f -
+./reapply-database.sh
 ```
 
-Use **porchctl** or **Nephio Web UI** to propose → approve → publish package revisions into `central-repo.git`. Config Sync on central then applies them.
+The script patches `central-repo` to `http://gitea.gitea.svc.cluster.local:3000/nephio/central-repo.git` (reachable from porch pods), restarts `porch-server`, deletes the stale `PackageVariant`, and applies `002-database.yaml` again.
+
+`002-database.yaml` is adapted from [test-infra `e2e/tests/oai`](https://github.com/nephio-project/test-infra/blob/main/e2e/tests/oai/002-database.yaml): upstream **`oai-packages`** / `database` / workspace **`v5`** (Gitea), downstream **`central-repo`**, selector `nephio.org/site-type: core`.
+
+The PackageVariant controller creates a downstream `database` revision in **`central-repo`**. It must reach lifecycle **`Published`** before Config Sync on central deploys MySQL. With `approval.nephio.org/policy: initial`, the Nephio approval controller may do this automatically — check lifecycle first.
+
+**Install porchctl** (once, on a host with mgmt kubeconfig): [Setup porchctl](https://docs.porch.nephio.org/docs/1_getting-started/setup-porchctl/).
+
+#### Propose and approve (publish) the database package
+
+In Porch, **`rpkg approve` publishes** the revision (Draft → Proposed → Published). There is no separate `publish` subcommand.
+
+```bash
+export KUBECONFIG=$HOME/.kube/config
+
+# Downstream only: REPO must be central-repo (grep database alone matches upstream)
+kubectl --context=mgmt@mgmt get packagerevisions -n default -o custom-columns=\
+'NAME:.metadata.name,PKG:.spec.packageName,REPO:.spec.repository,LIFE:.spec.lifecycle,REV:.spec.revision' \
+  | grep -E 'central-repo|NAME'
+
+# Expect: PKG=database, REPO=central-repo, LIFE=Draft or Proposed, REV=0
+# NOT oai-core-packages.database.main (upstream placeholder, REV=-1; porchctl errors on it)
+
+kubectl --context=mgmt@mgmt get packagevariant oai-common-central-repo-database \
+  -o jsonpath='ready={.status.conditions[?(@.type=="Ready")].status} msg={.status.conditions[?(@.type=="Ready")].message}{"\n"}'
+
+RPKG=central-repo.database.packagevariant-1
+
+# Skip propose if LIFE=Proposed; skip both if LIFE=Published
+porchctl rpkg propose -n default central-repo.database.packagevariant-1
+porchctl rpkg approve -n default central-repo.database.packagevariant-1
+
+kubectl --context=mgmt@mgmt get packagerevision "$RPKG" -n default -o jsonpath='{.spec.repository}/{.spec.packageName} {.spec.lifecycle} rev={.spec.revision}{"\n"}'
+```
+
+**Nephio Web UI** (alternative): repo **`central-repo`** → package **`database`** → **Propose** → **Approve** (same as approve/publish above).
+
+**PackageVariant `Ready=False` and *placeholder package revision*?** Porch cloned the downstream draft but cannot link upstream `oai-core-packages.database.main` (REV `-1`). You can still publish **`central-repo.database.packagevariant-1`** when it appears in `Draft` — use the Web UI quickly if `porchctl` errors. Long-term: upgrade porch/porchctl or bootstrap a non-placeholder upstream workspace.
+
+**No `central-repo` / `database` row?** The PackageVariant must create it first:
+
+```bash
+kubectl --context=mgmt@mgmt describe packagevariant oai-common-central-repo-database
+kubectl --context=mgmt@mgmt logs -n porch-system deploy/porch-controllers --tail=50
+```
+
+If status says *another request is already in progress*, wait a few minutes or restart `porch-controllers` / `porch-server` on mgmt, then re-check `get packagerevisions | grep central-repo`.
+
+If a revision stays **Proposed** and never publishes, check the approval controller on mgmt (`kubectl --context=mgmt@mgmt get pods -n nephio-system`) or reject and retry:
+
+```bash
+porchctl rpkg reject -n default "$RPKG"   # Proposed → Draft, only if stuck
+```
+
+For OAI operators, still adapt `002-operators.yaml` from test-infra (`downstream.repo: central-repo`, injector name `central-repo`), then run the same **propose** / **approve** flow on each new revision.
 
 ### Step 10 — Verify OAI on central
 

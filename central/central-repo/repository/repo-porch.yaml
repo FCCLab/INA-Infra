@@ -11,7 +11,7 @@ spec:
   git:
     branch: main
     directory: /
-    repo: http://172.18.0.200:3000/nephio/central-repo.git
+    repo: http://gitea.gitea.svc.cluster.local:3000/nephio/central-repo.git
     secretRef:
       name: central-repo-access-token-porch
   type: git

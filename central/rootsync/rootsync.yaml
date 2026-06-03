@@ -8,7 +8,7 @@ metadata: # kpt-merge: config-management-system/central-repo
 spec:
   sourceFormat: unstructured
   git:
-    repo: http://10.1.101.10:3000/nephio/central-repo.git
+    repo: http://10.1.101.10:30519/nephio/central-repo.git
     branch: main
     auth: token
     secretRef:

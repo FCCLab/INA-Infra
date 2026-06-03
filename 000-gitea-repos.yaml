@@ -33,7 +33,7 @@ spec:
         - sh
         - -ec
         - |
-          for repo in mgmt mgmt-staging; do
+          for repo in mgmt mgmt-staging oai-packages; do
             code=$(curl -s -o /dev/null -w "%{http_code}" \
               -u "${GIT_USER}:${GIT_PASS}" \
               -X POST "${GITEA_URL}/api/v1/user/repos" \

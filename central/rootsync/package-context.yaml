@@ -8,3 +8,5 @@ metadata: # kpt-merge: /kptfile.kpt.dev
 data:
   name: central-repo
   clusterName: central-repo
+  giteaHost: 10.1.101.10
+  giteaPort: "30519"
