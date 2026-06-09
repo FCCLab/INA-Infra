@@ -1,0 +1,23 @@
+---
+# OAI control-plane operators for central (5G SA core NFs: AMF, SMF, NRF, UDM, UDR, AUSF).
+#
+# Prerequisite: 002-database published; oai-packages on Gitea (./push-oai-packages-to-gitea.sh).
+#
+#   kubectl --context=mgmt@mgmt apply -f 003-operators-cp.yaml
+# Then propose + approve central-repo/oai-cp-operators (readme Step 9).
+apiVersion: config.porch.kpt.dev/v1alpha1
+kind: PackageVariant
+metadata:
+  name: oai-cp-operators
+spec:
+  upstream:
+    repo: oai-packages
+    package: oai-cp-operators
+    workspaceName: v5
+  downstream:
+    repo: central-repo
+    package: oai-cp-operators
+  annotations:
+    approval.nephio.org/policy: initial
+  injectors:
+  - name: central-repo

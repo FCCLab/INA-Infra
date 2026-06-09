@@ -26,3 +26,7 @@ spec:
       downstream:
         repo: central-repo
         package: database
+      annotations:
+        approval.nephio.org/policy: initial
+      injectors:
+      - nameExpr: target.name
