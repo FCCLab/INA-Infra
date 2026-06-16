@@ -18,3 +18,8 @@ upstreamLock:
     commit: origin/main
 info:
   description: porch
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess

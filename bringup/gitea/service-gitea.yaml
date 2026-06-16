@@ -8,17 +8,18 @@ metadata: # kpt-merge: gitea/gitea
     app.kubernetes.io/name: gitea
     app.kubernetes.io/instance: gitea
   annotations:
-    metallb.universe.tf/loadBalancerIPs: 172.18.0.200
+    metallb.universe.tf/loadBalancerIPs: 10.1.132.51
     internal.kpt.dev/upstream-identifier: '|Service|gitea|gitea'
 spec:
   type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
   ports:
   - name: ssh
     port: 22
     targetPort: 22
     protocol: TCP
   - name: http
-    port: 3000
+    port: 80
     targetPort: 3000
   selector:
     app.kubernetes.io/name: gitea

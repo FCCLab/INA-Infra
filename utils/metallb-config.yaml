@@ -5,7 +5,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - 10.1.132.50-10.1.132.60 # The dedicated single-interface IP range
+    - 10.1.132.50-10.1.132.70
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement

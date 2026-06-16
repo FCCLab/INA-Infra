@@ -20,3 +20,8 @@ upstreamLock:
     commit: origin/main
 info:
   description: Some stock external repositories to start with
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess

@@ -20,3 +20,8 @@ upstreamLock:
     commit: origin/main
 info:
   description: nephio controller
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess

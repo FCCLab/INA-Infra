@@ -9,8 +9,7 @@ configMapMetadata:
   name: nephio-webui-config
   namespace: nephio-webui
 params:
-  scheme: http
-  hostname: localhost
+  baseUrl: http://10.1.132.52
   port: "7007"
   resourcesNamespace: default
   authProvider: oidc
@@ -19,7 +18,7 @@ data:
   key: app-config.nephio.yaml
   value: |
     app:
-      baseUrl: {{.scheme}}://{{.hostname}}:{{.port}}
+      baseUrl: {{.baseUrl}}
 
     # Backstage backend configuration
     backend:
@@ -28,7 +27,7 @@ data:
       # reachable not just from within the backend host, but from all of your
       # callers. When its value is "http://localhost:7007", it's strictly private
       # and can't be reached by others.
-      baseUrl: {{.scheme}}://{{.hostname}}:{{.port}}
+      baseUrl: {{.baseUrl}}
 
       listen:
         port: {{.port}}

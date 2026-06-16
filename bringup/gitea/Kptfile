@@ -20,3 +20,8 @@ upstreamLock:
     commit: origin/v6
 info:
   description: Gitea package to deploy a gitea server in a gitea namespace
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess

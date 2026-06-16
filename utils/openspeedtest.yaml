@@ -34,6 +34,8 @@ kind: Service
 metadata:
   name: openspeedtest-service
   namespace: default
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 10.1.132.50
 spec:
   type: LoadBalancer
   allocateLoadBalancerNodePorts: false

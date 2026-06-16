@@ -6,3 +6,8 @@ metadata:
     config.kubernetes.io/local-config: "true"
 info:
   description: Local-path provisioner and default StorageClass for single-node/lab clusters
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess
