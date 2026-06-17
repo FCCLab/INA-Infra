@@ -1,0 +1,83 @@
+apiVersion: v1
+data:
+  setup_tun.py: |
+    #!/usr/bin/env python3
+
+    import click
+    import ipaddress
+    import iptc
+    from pyroute2 import IPRoute
+    from pyroute2.netlink import NetlinkError
+
+
+    def handle_ip_string(ctx, param, value):
+        try:
+            ret = ipaddress.ip_network(value)
+            return ret
+        except ValueError:
+            raise click.BadParameter(f'{value} is not a valid IP range.')
+
+
+    def iptables_add_masquerade(if_name, ip_range):
+        chain = iptc.Chain(iptc.Table(iptc.Table.NAT), "POSTROUTING")
+        rule = iptc.Rule()
+        rule.src = ip_range
+        rule.out_interface = if_name
+        target = iptc.Target(rule, "MASQUERADE")
+        rule.target = target
+        chain.insert_rule(rule)
+
+
+    def iptables_allow_all(if_name):
+        chain = iptc.Chain(iptc.Table(iptc.Table.FILTER), "INPUT")
+        rule = iptc.Rule()
+        rule.in_interface = if_name
+        target = iptc.Target(rule, "ACCEPT")
+        rule.target = target
+        chain.insert_rule(rule)
+
+
+    @click.command()
+    @click.option("--if_name", default="ogstun", help="TUN interface name.")
+    @click.option("--ip_range", default='10.45.0.0/24', callback=handle_ip_string,
+                  help="IP range of the TUN interface.")
+    def main(if_name, ip_range):
+        first_ip = next(ip_range.hosts(), None)
+        if not first_ip:
+            raise ValueError('Invalid IP range.')
+
+        first_ip_addr = first_ip.exploded
+        ip_netmask = ip_range.prefixlen
+
+        ipr = IPRoute()
+        try:
+            ipr.link('add', ifname=if_name, kind='tuntap', mode='tun')
+        except NetlinkError as e:
+            if e.code != 17:
+                raise
+
+        dev = ipr.link_lookup(ifname=if_name)[0]
+        ipr.link('set', index=dev, state='down')
+        try:
+            ipr.addr('add', index=dev, address=first_ip_addr, mask=ip_netmask)
+        except NetlinkError as e:
+            if e.code != 17:
+                raise
+        ipr.link('set', index=dev, state='up')
+
+        try:
+            ipr.route('add', dst=ip_range.with_prefixlen, gateway=first_ip_addr)
+        except NetlinkError:
+            pass
+
+        iptables_add_masquerade(if_name, ip_range.with_prefixlen)
+        iptables_allow_all(if_name)
+
+
+    if __name__ == "__main__":
+        main()
+kind: ConfigMap
+metadata:
+  creationTimestamp: null
+  name: open5gs-setup-tun
+  namespace: open5gs

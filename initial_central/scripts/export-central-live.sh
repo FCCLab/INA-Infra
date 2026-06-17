@@ -19,7 +19,7 @@ merge_kubeconfig_for_central
 require_kubectl_context "$CTX"
 
 # Platform + workload namespaces on central (extend when OAI NFs are deployed).
-NAMESPACES="${EXPORT_NAMESPACES:-local-path-storage default metallb-system kubernetes-dashboard}"
+NAMESPACES="${EXPORT_NAMESPACES:-local-path-storage default metallb-system kubernetes-dashboard open5gs}"
 
 KINDS="${EXPORT_KINDS:-configmap secret service serviceaccount deployment statefulset daemonset ingress networkpolicy role rolebinding}"
 

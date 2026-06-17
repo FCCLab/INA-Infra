@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: open5gs-5gc
+  name: open5gs-5gc
+  namespace: open5gs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: open5gs-5gc
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: open5gs-5gc
+    spec:
+      containers:
+      - args:
+        - 5gc
+        - -c
+        - open5gs-5gc.yml
+        env:
+        - name: OPEN5GS_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        envFrom:
+        - configMapRef:
+            name: open5gs-env
+        image: 10.1.132.30:5000/5gc-open5gs-5gc:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          exec:
+            command:
+            - nc
+            - -z
+            - 127.0.0.20
+            - "7777"
+          failureThreshold: 20
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 3
+        name: open5gs-5gc
+        ports:
+        - containerPort: 9999
+          name: webui
+          protocol: TCP
+        - containerPort: 38412
+          name: ngap
+          protocol: SCTP
+        - containerPort: 2152
+          name: gtpu
+          protocol: UDP
+        readinessProbe:
+          exec:
+            command:
+            - nc
+            - -z
+            - 127.0.0.20
+            - "7777"
+          failureThreshold: 30
+          initialDelaySeconds: 60
+          periodSeconds: 5
+          timeoutSeconds: 3
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /open5gs/subscriber_db.csv
+          name: subscriber-db
+          readOnly: true
+          subPath: subscriber_db.csv
+        - mountPath: /data/db
+          name: mongodb-data
+      volumes:
+      - configMap:
+          name: open5gs-subscriber-db
+        name: subscriber-db
+      - emptyDir: {}
+        name: mongodb-data

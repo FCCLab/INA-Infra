@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-env
+  namespace: open5gs
+data:
+  MONGODB_IP: "127.0.0.1"
+  NGAP_BIND_ADDR: "0.0.0.0"
+  AMF_LOG_LEVEL: "debug"
+  UE_IP_BASE: "10.45.0"
+  N6_IP: "10.1.132.61"
+  UPF_ADVERTISE_IP: "10.1.132.61"
+  DEBUG: "false"
+  SUBSCRIBER_DB: "subscriber_db.csv"
+  NETWORK_NAME_FULL: "srsRAN"
+  NETWORK_NAME_SHORT: "srsRAN"
+  TZ: "Europe/Madrid"
