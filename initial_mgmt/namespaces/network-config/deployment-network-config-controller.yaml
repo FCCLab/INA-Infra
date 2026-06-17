@@ -1,16 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  annotations:
-    configmanagement.gke.io/managed: enabled
-    configmanagement.gke.io/source-path: namespaces/network-config/deployment-network-config-controller.yaml
-    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
-    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
-    configsync.gke.io/manager: :root_mgmt
-    configsync.gke.io/resource-id: apps_deployment_network-config_network-config-controller
   labels:
     app.kubernetes.io/managed-by: configmanagement.gke.io
-    configsync.gke.io/declared-version: v1
   name: network-config-controller
   namespace: network-config
 spec:

@@ -2,6 +2,7 @@
 
 | VIP | Cluster | Service |
 |-----|---------|---------|
+| 10.1.132.30 | mgmt | Docker Registry |
 | 10.1.132.40 | mgmt | Kubernetes Dashboard |
 | 10.1.132.41 | central | Kubernetes Dashboard |
 | 10.1.132.50 | mgmt | OpenSpeedTest |

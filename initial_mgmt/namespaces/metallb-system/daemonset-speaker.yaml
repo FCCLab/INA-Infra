@@ -2,18 +2,11 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   annotations:
-    configmanagement.gke.io/managed: enabled
-    configmanagement.gke.io/source-path: namespaces/metallb-system/daemonset-speaker.yaml
-    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
-    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
-    configsync.gke.io/manager: :root_mgmt
-    configsync.gke.io/resource-id: apps_daemonset_metallb-system_speaker
     deprecated.daemonset.template.generation: '1'
   labels:
     app: metallb
     app.kubernetes.io/managed-by: configmanagement.gke.io
     component: speaker
-    configsync.gke.io/declared-version: v1
   name: speaker
   namespace: metallb-system
 spec:

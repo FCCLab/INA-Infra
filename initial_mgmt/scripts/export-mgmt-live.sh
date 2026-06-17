@@ -15,7 +15,7 @@ OUT_DIR="${OUT_DIR:-$CLUSTER_DIR}"
 CTX="${KCTX:-mgmt@mgmt}"
 
 # App namespaces currently running on mgmt (edit if you add/remove components).
-NAMESPACES="${EXPORT_NAMESPACES:-gitea porch-system porch-fn-system nephio-system nephio-webui backend-system network-config kubernetes-dashboard metallb-system local-path-storage default}"
+NAMESPACES="${EXPORT_NAMESPACES:-gitea porch-system porch-fn-system nephio-system nephio-webui backend-system network-config kubernetes-dashboard metallb-system local-path-storage registry default}"
 
 # Namespaced kinds to capture (skip Pods/RS/Endpoints — noise).
 KINDS="${EXPORT_KINDS:-configmap secret service serviceaccount deployment statefulset daemonset ingress networkpolicy role rolebinding}"
@@ -77,6 +77,12 @@ strip_ann_prefixes = (
     "meta.helm.sh/",
     "internal.kpt.dev/",
     "config.k8s.io/",
+    "configmanagement.gke.io/",
+    "configsync.gke.io/",
+)
+strip_label_prefixes = (
+    "configmanagement.gke.io/",
+    "configsync.gke.io/",
 )
 
 for path in args:
@@ -101,6 +107,12 @@ for path in args:
                 ann.pop(k, None)
         if not ann:
             meta.pop("annotations", None)
+        labels = meta.get("labels") or {}
+        for k in list(labels):
+            if any(k.startswith(p) for p in strip_label_prefixes):
+                labels.pop(k, None)
+        if not labels:
+            meta.pop("labels", None)
         spec = doc.get("spec") or {}
         if doc.get("kind") == "Service":
             for k in ("clusterIP", "clusterIPs", "healthCheckNodePort", "externalTrafficPolicy",
@@ -143,6 +155,9 @@ for ns in $NAMESPACES; do
       fi
       # Skip default/kubernetes service noise in default ns.
       if [[ "$ns" == "default" && "$kind" == "service" && "$name" == "kubernetes" ]]; then
+        continue
+      fi
+      if [[ "$kind" == "configmap" && "$name" == "kube-root-ca.crt" ]]; then
         continue
       fi
       out="$ns_dir/${kind}-${name}.yaml"
