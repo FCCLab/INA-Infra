@@ -25,5 +25,15 @@ data:
     \      backgroundImageUrl: https://raw.githubusercontent.com/nephio-project/kpt-backstage-plugins/main/packages/app/public/nephio-background.png\n"
 kind: ConfigMap
 metadata:
+  annotations:
+    configmanagement.gke.io/managed: enabled
+    configmanagement.gke.io/source-path: namespaces/nephio-webui/configmap-nephio-webui-config.yaml
+    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
+    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
+    configsync.gke.io/manager: :root_mgmt
+    configsync.gke.io/resource-id: _configmap_nephio-webui_nephio-webui-config
+  labels:
+    app.kubernetes.io/managed-by: configmanagement.gke.io
+    configsync.gke.io/declared-version: v1
   name: nephio-webui-config
   namespace: nephio-webui

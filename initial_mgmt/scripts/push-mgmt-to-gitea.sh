@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Push mgmt-live-export/ to Gitea nephio/mgmt; bootstrap RootSync only if missing.
 #
-#   ./scripts/export-mgmt-live.sh
-#   ./scripts/push-mgmt-to-gitea.sh
+#   ./initial_mgmt/scripts/export-mgmt-live.sh
+#   ./initial_mgmt/scripts/push-mgmt-to-gitea.sh
 #
 # Requires: git, curl; Gitea repo nephio/mgmt already exists.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SRC_DIR="${SRC_DIR:-$REPO_ROOT/initial_mgmt}"
+CLUSTER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SRC_DIR="${SRC_DIR:-$CLUSTER_DIR}"
 WORK_DIR="${WORK_DIR:-/tmp/nephio-mgmt-git-$$}"
 
 GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
@@ -45,7 +46,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -d "$SRC_DIR/namespaces" ]]; then
-  echo "error: run ./scripts/export-mgmt-live.sh first (missing $SRC_DIR)" >&2
+  echo "error: run ./initial_mgmt/scripts/export-mgmt-live.sh first (missing $SRC_DIR)" >&2
   exit 1
 fi
 

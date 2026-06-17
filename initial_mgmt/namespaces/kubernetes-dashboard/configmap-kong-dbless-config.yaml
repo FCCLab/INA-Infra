@@ -13,10 +13,18 @@ data:
     \ paths:\n          - /\n        strip_path: false\n"
 kind: ConfigMap
 metadata:
+  annotations:
+    configmanagement.gke.io/managed: enabled
+    configmanagement.gke.io/source-path: namespaces/kubernetes-dashboard/configmap-kong-dbless-config.yaml
+    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
+    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
+    configsync.gke.io/manager: :root_mgmt
+    configsync.gke.io/resource-id: _configmap_kubernetes-dashboard_kong-dbless-config
   labels:
     app.kubernetes.io/instance: kubernetes-dashboard
-    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/managed-by: configmanagement.gke.io
     app.kubernetes.io/part-of: kubernetes-dashboard
+    configsync.gke.io/declared-version: v1
     helm.sh/chart: kubernetes-dashboard-7.14.0
   name: kong-dbless-config
   namespace: kubernetes-dashboard

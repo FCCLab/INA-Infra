@@ -1,13 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    configmanagement.gke.io/managed: enabled
+    configmanagement.gke.io/source-path: namespaces/kubernetes-dashboard/deployment-kubernetes-dashboard-auth.yaml
+    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
+    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
+    configsync.gke.io/manager: :root_mgmt
+    configsync.gke.io/resource-id: apps_deployment_kubernetes-dashboard_kubernetes-dashboard-auth
   labels:
     app.kubernetes.io/component: auth
     app.kubernetes.io/instance: kubernetes-dashboard
-    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/managed-by: configmanagement.gke.io
     app.kubernetes.io/name: kubernetes-dashboard-auth
     app.kubernetes.io/part-of: kubernetes-dashboard
     app.kubernetes.io/version: 1.14.0
+    configsync.gke.io/declared-version: v1
     helm.sh/chart: kubernetes-dashboard-7.14.0
   name: kubernetes-dashboard-auth
   namespace: kubernetes-dashboard

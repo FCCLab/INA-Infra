@@ -6,7 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MGMT_CTX="${MGMT_CTX:-mgmt@mgmt}"
 CENTRAL_CTX="${KCTX:-central@central}"
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config:$HOME/.kube/config-central}"
+# shellcheck source=merge-kubeconfig-central.sh
+source "$SCRIPT_DIR/merge-kubeconfig-central.sh"
+merge_kubeconfig_for_central
+require_kubectl_context "$MGMT_CTX"
+require_kubectl_context "$CENTRAL_CTX"
 
 cd "$REPO_ROOT"
 

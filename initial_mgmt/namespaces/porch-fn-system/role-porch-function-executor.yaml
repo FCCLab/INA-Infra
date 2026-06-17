@@ -1,6 +1,16 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  annotations:
+    configmanagement.gke.io/managed: enabled
+    configmanagement.gke.io/source-path: namespaces/porch-fn-system/role-porch-function-executor.yaml
+    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
+    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
+    configsync.gke.io/manager: :root_mgmt
+    configsync.gke.io/resource-id: rbac.authorization.k8s.io_role_porch-fn-system_porch-function-executor
+  labels:
+    app.kubernetes.io/managed-by: configmanagement.gke.io
+    configsync.gke.io/declared-version: v1
   name: porch-function-executor
   namespace: porch-fn-system
 rules:

@@ -8,7 +8,7 @@ This uses **Config Sync unstructured** format (plain YAML), not Porch kpt packag
 
 ```bash
 cd ~/nephio-network-slicing
-chmod +x scripts/export-mgmt-live.sh scripts/push-mgmt-to-gitea.sh
+chmod +x initial_mgmt/scripts/export-mgmt-live.sh initial_mgmt/scripts/push-mgmt-to-gitea.sh
 
 kubectl config use-context mgmt@mgmt
 
@@ -20,8 +20,8 @@ Config Sync must already run on mgmt (`config-management-system` namespace). Roo
 ## Export + push current config
 
 ```bash
-./scripts/export-mgmt-live.sh          # writes initial_mgmt/
-./scripts/push-mgmt-to-gitea.sh       # pushes initial_mgmt/ → Gitea
+./initial_mgmt/scripts/export-mgmt-live.sh          # writes initial_mgmt/
+./initial_mgmt/scripts/push-mgmt-to-gitea.sh       # pushes initial_mgmt/ → Gitea
 ```
 
 Browse: http://10.1.132.51:3000/nephio/mgmt
@@ -29,7 +29,7 @@ Browse: http://10.1.132.51:3000/nephio/mgmt
 ## Day-2 workflow
 
 1. Edit YAML under `initial_mgmt/` (or clone Gitea repo and push).
-2. `./scripts/push-mgmt-to-gitea.sh`
+2. `./initial_mgmt/scripts/push-mgmt-to-gitea.sh`
 3. Config Sync reconciles within ~15s.
 
 Check sync status:
@@ -42,14 +42,14 @@ Check sync status:
 Re-export after manual hotfixes:
 
 ```bash
-./scripts/export-mgmt-live.sh && ./scripts/push-mgmt-to-gitea.sh
+./initial_mgmt/scripts/export-mgmt-live.sh && ./initial_mgmt/scripts/push-mgmt-to-gitea.sh
 ```
 
 Custom output dir:
 
 ```bash
-OUT_DIR=initial_mgmt ./scripts/export-mgmt-live.sh
-./scripts/push-mgmt-to-gitea.sh -s initial_mgmt
+OUT_DIR=initial_mgmt ./initial_mgmt/scripts/export-mgmt-live.sh
+./initial_mgmt/scripts/push-mgmt-to-gitea.sh -s initial_mgmt
 ```
 
 ## Layout
@@ -78,7 +78,7 @@ initial_mgmt/
 OpenSpeedTest URL after sync: **http://10.1.132.50**
 
 ```bash
-SKIP_SECRETS=1 ./scripts/export-mgmt-live.sh   # omit Secrets
+SKIP_SECRETS=1 ./initial_mgmt/scripts/export-mgmt-live.sh   # omit Secrets
 ```
 
 **`central-repo`** for the workload cluster is unchanged — still use Porch Approve for OAI on central.

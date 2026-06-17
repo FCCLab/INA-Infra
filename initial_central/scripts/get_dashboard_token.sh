@@ -7,7 +7,6 @@ SERVICE_ACCOUNT="${DASHBOARD_SA:-admin-user}"
 DASHBOARD_URL="${DASHBOARD_URL:-https://10.1.132.41}"
 TOKEN_DURATION="${TOKEN_DURATION:-24h}"
 KCTX="${KCTX:-central@central}"
-TOKEN_DURATION="${TOKEN_DURATION:-24h}"
 
 # central@central lives in ~/.kube/config-central; merge it even when the shell
 # already sets KUBECONFIG to mgmt-only (~/.kube/config).

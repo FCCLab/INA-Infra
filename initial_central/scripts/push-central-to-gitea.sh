@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Push initial_central/ to Gitea nephio/central-repo; bootstrap RootSync only if missing.
 #
-#   ./scripts/export-central-live.sh
-#   ./scripts/push-central-to-gitea.sh
+#   ./initial_central/scripts/export-central-live.sh
+#   ./initial_central/scripts/push-central-to-gitea.sh
 #
 # Requires: git; Gitea repo nephio/central-repo; token on mgmt from central/central-repo package.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SRC_DIR="${SRC_DIR:-$REPO_ROOT/initial_central}"
+CLUSTER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SRC_DIR="${SRC_DIR:-$CLUSTER_DIR}"
 WORK_DIR="${WORK_DIR:-/tmp/nephio-central-git-$$}"
 
 GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
@@ -20,7 +21,10 @@ GITEA_REPO="${GITEA_REPO:-central-repo}"
 ROOTSYNC_NAME="${ROOTSYNC_NAME:-central-repo}"
 MGMT_CTX="${MGMT_CTX:-mgmt@mgmt}"
 CTX="${KCTX:-central@central}"
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config:$HOME/.kube/config-central}"
+# shellcheck source=../../scripts/merge-kubeconfig-central.sh
+source "$REPO_ROOT/scripts/merge-kubeconfig-central.sh"
+merge_kubeconfig_for_central
+require_kubectl_context "$CTX"
 
 GIT_URL="http://${GITEA_USER}:${GITEA_PASS}@${GITEA_HOST}:${GITEA_PORT}/nephio/${GITEA_REPO}.git"
 GITEA_REPO_URL="http://${GITEA_HOST}:${GITEA_PORT}/nephio/${GITEA_REPO}.git"
@@ -52,7 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -d "$SRC_DIR/namespaces" && ! -d "$SRC_DIR/cluster" ]]; then
-  echo "error: run ./scripts/export-central-live.sh first (missing $SRC_DIR)" >&2
+  echo "error: run ./initial_central/scripts/export-central-live.sh first (missing $SRC_DIR)" >&2
   exit 1
 fi
 
@@ -90,7 +94,7 @@ if kubectl --context="$CTX" get "rootsync/${ROOTSYNC_NAME}" -n config-management
 fi
 
 echo "RootSync not found — bootstrapping token + RootSync on central ..."
-"$SCRIPT_DIR/setup-central-rootsync-token.sh"
+"$REPO_ROOT/scripts/setup-central-rootsync-token.sh"
 
 if ! kubectl --context="$CTX" get secret central-repo-access-token-configsync -n config-management-system >/dev/null 2>&1; then
   echo "warning: central-repo-access-token-configsync not ready — apply RootSync manually later" >&2

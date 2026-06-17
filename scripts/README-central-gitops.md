@@ -21,10 +21,10 @@ kubectl --context=mgmt@mgmt get token central-repo-access-token-configsync -n de
 ## Export + push
 
 ```bash
-chmod +x scripts/export-central-live.sh scripts/push-central-to-gitea.sh
+chmod +x initial_central/scripts/export-central-live.sh initial_central/scripts/push-central-to-gitea.sh
 
-./scripts/export-central-live.sh          # writes initial_central/
-./scripts/push-central-to-gitea.sh        # pushes → Gitea, bootstraps RootSync if needed
+./initial_central/scripts/export-central-live.sh          # writes initial_central/
+./initial_central/scripts/push-central-to-gitea.sh        # pushes → Gitea, bootstraps RootSync if needed
 ```
 
 Browse: http://10.1.132.51:3000/nephio/central-repo
@@ -32,7 +32,7 @@ Browse: http://10.1.132.51:3000/nephio/central-repo
 ## Day-2 workflow
 
 1. Edit YAML under `initial_central/` (or clone Gitea repo and push).
-2. `./scripts/push-central-to-gitea.sh`
+2. `./initial_central/scripts/push-central-to-gitea.sh`
 3. Config Sync reconciles within ~15s.
 
 ```bash
@@ -63,15 +63,15 @@ initial_central/
 Extend namespaces when OAI workloads are deployed:
 
 ```bash
-EXPORT_NAMESPACES="local-path-storage oai5g oai-cp" ./scripts/export-central-live.sh
+EXPORT_NAMESPACES="local-path-storage oai5g oai-cp" ./initial_central/scripts/export-central-live.sh
 ```
 
 **Note:** Porch **Approve** also writes OAI packages into `nephio/central-repo`. This export path is for live cluster baseline GitOps (like `initial_mgmt/` on mgmt).
 
 ## RootSync bootstrap
 
-- Token secret is created on **mgmt**; copied to **central** `config-management-system` by `push-central-to-gitea.sh` or `setup-central-rootsync-token.sh`.
+- Token secret is created on **mgmt**; copied to **central** `config-management-system` by `initial_central/scripts/push-central-to-gitea.sh` or `scripts/setup-central-rootsync-token.sh`.
 - RootSync name: **`central-repo`**
 - Git repo: **`http://10.1.132.51:3000/nephio/central-repo.git`**
 
-If RootSync exists with a stale Gitea URL, `push-central-to-gitea.sh` patches it to the current `GITEA_HOST`/`GITEA_PORT`.
+If RootSync exists with a stale Gitea URL, `initial_central/scripts/push-central-to-gitea.sh` patches it to the current `GITEA_HOST`/`GITEA_PORT`.

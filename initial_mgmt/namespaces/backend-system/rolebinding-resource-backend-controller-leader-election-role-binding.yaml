@@ -1,13 +1,21 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
+  annotations:
+    configmanagement.gke.io/managed: enabled
+    configmanagement.gke.io/source-path: namespaces/backend-system/rolebinding-resource-backend-controller-leader-election-role-binding.yaml
+    configmanagement.gke.io/token: fa352451d6fec752b063f38b22c05ecb5aeda19c
+    configsync.gke.io/git-context: '{"repo":"http://10.1.132.51:3000/nephio/mgmt.git","branch":"main","rev":"HEAD"}'
+    configsync.gke.io/manager: :root_mgmt
+    configsync.gke.io/resource-id: rbac.authorization.k8s.io_rolebinding_backend-system_resource-backend-controller-leader-election-role-binding
   labels:
     app.kubernetes.io/component: tbd
     app.kubernetes.io/instance: tbd
-    app.kubernetes.io/managed-by: kpt
+    app.kubernetes.io/managed-by: configmanagement.gke.io
     app.kubernetes.io/name: resource-backend
     app.kubernetes.io/part-of: resource-backend
     app.kubernetes.io/version: tbd
+    configsync.gke.io/declared-version: v1
   name: resource-backend-controller-leader-election-role-binding
   namespace: backend-system
 roleRef:
