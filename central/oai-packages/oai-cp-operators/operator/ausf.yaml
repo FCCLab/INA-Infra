@@ -36,20 +36,20 @@ rules:
     resources: [customresourcedefinitions]
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: ["ref.nephio.org"]
-    resources: [configs,config]
+    resources: [configs, config]
     verbs: [list, watch, update, patch, get]
   - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: [roles,rolebindings]
+    resources: [roles, rolebindings]
     verbs: [get, create, delete, patch]
   - apiGroups: ["workload.nephio.org"]
-    resources: [nfdeployments,nfdeployments/status,nfconfigs,nfdeployments/finalizers]
+    resources: [nfdeployments, nfdeployments/status, nfconfigs, nfdeployments/finalizers]
     verbs: [get, list, watch, update, patch]
   - apiGroups: [""]
-    resources: [pods,serviceaccounts,configmaps,services,services/finalizers,serviceaccounts/finalizers]
-    verbs:  [get, list, watch, create, update, patch, delete]
-  - apiGroups: ["apps","extensions"]
-    resources: [deployments,deployments/status,deployments/finalizers]
-    verbs:  [get, list, watch, create, update, patch, delete]
+    resources: [pods, serviceaccounts, configmaps, services, services/finalizers, serviceaccounts/finalizers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps", "extensions"]
+    resources: [deployments, deployments/status, deployments/finalizers]
+    verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["k8s.cni.cncf.io"]
     resources: [network-attachment-definitions]
     verbs: [get, list, watch, create, update, patch, delete]
@@ -113,25 +113,7 @@ metadata:
   name: oai-ausf-op-conf
   namespace: oai-cn-operators
 data:
-  ausf.yaml: |
-    nfInterfaces:
-      sbi: 'eth0'
-    ports: 
-      - name: 'http'
-        port: 80
-        protocol: TCP
-    compute:
-      req:
-        cpu: '100m'
-        memory: '256Mi'
-      limits:
-        cpu: '100m'
-        memory: '256Mi'
-    logLevel: info
-    image: 'docker.io/oaisoftwarealliance/oai-ausf:v2.0.1'
-    fqdn:
-      udm: oai-udm
-      nrf: oai-nrf
+  ausf.yaml: "nfInterfaces:\n  sbi: 'eth0'\nports: \n  - name: 'http'\n    port: 80\n    protocol: TCP\ncompute:\n  req:\n    cpu: '100m'\n    memory: '256Mi'\n  limits:\n    cpu: '100m'\n    memory: '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-ausf:v2.0.1'\nfqdn:\n  udm: oai-udm\n  nrf: oai-nrf\n"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -198,25 +180,25 @@ spec:
         image: "docker.io/arorasagar/oai-ausf-controller:v2.0.1"
         imagePullPolicy: Always
         env:
-          - name: 'NF_TYPE'
-            value: 'ausf'
-          - name: 'DEPLOYMENT_FETCH_INTERVAL'
-            value: '1'
-          - name: 'DEPLOYMENT_FETCH_ITERATIONS'
-            value: '100'
-          - name: 'NF_CONF_PATH'
-            value: '/tmp/nf/ausf.yaml'
-          - name: 'OP_CONF_PATH'
-            value: '/tmp/op/ausf.yaml'
-          - name: 'TESTING'
-            value: 'no'
-          - name: 'KUBERNETES_BASE_URL'
-            value: 'https://kubernetes.default.svc'
+        - name: 'NF_TYPE'
+          value: 'ausf'
+        - name: 'DEPLOYMENT_FETCH_INTERVAL'
+          value: '1'
+        - name: 'DEPLOYMENT_FETCH_ITERATIONS'
+          value: '100'
+        - name: 'NF_CONF_PATH'
+          value: '/tmp/nf/ausf.yaml'
+        - name: 'OP_CONF_PATH'
+          value: '/tmp/op/ausf.yaml'
+        - name: 'TESTING'
+          value: 'no'
+        - name: 'KUBERNETES_BASE_URL'
+          value: 'https://kubernetes.default.svc'
         volumeMounts:
-          - mountPath: /tmp/op
-            name: opconf
-          - mountPath: /tmp/nf
-            name: nfconf
+        - mountPath: /tmp/op
+          name: opconf
+        - mountPath: /tmp/nf
+          name: nfconf
         resources:
           requests:
             memory: "128Mi"
@@ -224,12 +206,12 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "50m"
-        # livenessProbe:
-        #   httpGet:
-        #     path: /healthz
-        #     port: 8080
-        #   initialDelaySeconds: 2
-        #   periodSeconds: 5
+            # livenessProbe:
+            #   httpGet:
+            #     path: /healthz
+            #     port: 8080
+            #   initialDelaySeconds: 2
+            #   periodSeconds: 5
       volumes:
       - configMap:
           name: oai-ausf-op-conf

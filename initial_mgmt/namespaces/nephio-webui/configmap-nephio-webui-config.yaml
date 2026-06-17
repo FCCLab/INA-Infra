@@ -1,0 +1,29 @@
+apiVersion: v1
+data:
+  app-config.nephio.yaml: "app:\n  baseUrl: http://localhost:7007\n\n# Backstage backend\
+    \ configuration\nbackend:\n  # Note that the baseUrl should be the URL that the\
+    \ browser and other clients\n  # should use when communicating with the backend,\
+    \ i.e. it needs to be\n  # reachable not just from within the backend host, but\
+    \ from all of your\n  # callers. When its value is \"http://localhost:7007\",\
+    \ it's strictly private\n  # and can't be reached by others.\n  baseUrl: http://localhost:7007\n\
+    \n  listen:\n    port: 7007\n\n  # Content Security Policy\n  csp:\n    # Allows\
+    \ images to be pulled from GitHub and Nephio\n    img-src: [\"'self'\", 'data:',\
+    \ 'https://raw.githubusercontent.com']\n    upgrade-insecure-requests: false\n\
+    \nauth:\n  # see https://backstage.io/docs/auth/ to learn about auth providers\n\
+    \  providers:\n    google:\n      development:\n        clientId: ${AUTH_GOOGLE_CLIENT_ID}\n\
+    \        clientSecret: ${AUTH_GOOGLE_CLIENT_SECRET}\n    okta:\n      development:\n\
+    \        clientId: ${AUTH_OKTA_CLIENT_ID}\n        clientSecret: ${AUTH_OKTA_CLIENT_SECRET}\n\
+    \        audience: ${AUTH_OKTA_AUDIENCE}\n        authServerId: ${AUTH_OKTA_AUTH_SERVER_ID}\n\
+    \        idp: ${AUTH_OKTA_IDP}\n\n# Config as Data Plugin configuration\nconfigAsData:\n\
+    \  # The namespace where Porch managed resources live.\n  resourcesNamespace:\
+    \ default\n\n  # Do not use Config Sync\n  gitOpsDeliveryTool: none\n\n  # Management\
+    \ cluster configuration\n  clusterLocatorMethod:\n    authProvider: ${AUTH_PROVIDER}\n\
+    \n    # For authProvider: oidc\n    oidcTokenProvider: ${AUTH_OIDC_TOKEN_PROVIDER}\n\
+    \n    # For authProvider: service-account\n    serviceAccountToken: ${AUTH_SERVICE_ACCOUNT_TOKEN}\n\
+    \n  # Nephio branding customizations\n  branding:\n    title: Nephio\n    header:\n\
+    \      logoUrl: https://raw.githubusercontent.com/nephio-project/kpt-backstage-plugins/main/packages/app/public/nephio_logo_colorwhite_horizontal.svg\n\
+    \      backgroundImageUrl: https://raw.githubusercontent.com/nephio-project/kpt-backstage-plugins/main/packages/app/public/nephio-background.png\n"
+kind: ConfigMap
+metadata:
+  name: nephio-webui-config
+  namespace: nephio-webui

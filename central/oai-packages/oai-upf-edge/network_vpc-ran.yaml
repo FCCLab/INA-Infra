@@ -23,8 +23,8 @@ spec:
         nephio.org/network-name: n3
     interfaces:
     - kind: bridgedomain
-      bridgeDomainName: vpc-ran 
-  bridgeDomains: 
+      bridgeDomainName: vpc-ran
+  bridgeDomains:
   - name: vpc-ran
     interfaces:
     - kind: interface

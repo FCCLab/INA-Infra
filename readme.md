@@ -86,7 +86,7 @@ Apply in order after the bringup steps above.
 
 | Order | File | Role |
 |-------|------|------|
-| 1 | `000-gitea-repos.yaml` | One-shot Job: creates empty Gitea repos `mgmt` and `mgmt-staging` (with `auto_init`) so Porch can push packages. |
+| 1 | `000-gitea-repos.yaml` | One-shot Job: creates empty Gitea repos `mgmt`, `mgmt-staging`, and `central-repo` (`auto_init`) via `/api/v1/user/repos`. |
 | 2 | `000-mgmt-repos.yaml` | Registers Porch deployment repos: `git-user-secret` in `default`, plus `mgmt-staging` (bootstrap) and `mgmt` (deployment) pointing at Gitea. |
 
 ```
@@ -97,6 +97,14 @@ kubectl wait --for=condition=Ready repositories.config.porch.kpt.dev/mgmt --time
 ```
 
 Git credentials in `000-mgmt-repos.yaml` match `bringup/gitea/secret-git-user.yaml` (`nephio` / `secret`).
+
+| Gitea repo | Browse | Purpose |
+|------------|--------|---------|
+| **mgmt** | [http://10.1.132.51:3000/nephio/mgmt](http://10.1.132.51:3000/nephio/mgmt) | Management cluster deployment packages |
+| **mgmt-staging** | [http://10.1.132.51:3000/nephio/mgmt-staging](http://10.1.132.51:3000/nephio/mgmt-staging) | Mgmt bootstrap / staging |
+| **central-repo** | [http://10.1.132.51:3000/nephio/central-repo](http://10.1.132.51:3000/nephio/central-repo) | Central workload cluster packages |
+
+Gitea UI: `http://10.1.132.51:3000` (port **80** on the same VIP also works).
 
 ## Central workload cluster
 
@@ -109,6 +117,12 @@ kubectl --context=mgmt@mgmt get nodes
 ```
 
 If you still have `~/.kube/config-core`, rename it: `mv ~/.kube/config-core ~/.kube/config-central`.
+
+On the mgmt node, kubeadm leaves context `kubernetes-admin@kubernetes`. Rename for docs/scripts that use `mgmt@mgmt`:
+
+```bash
+./rename.sh mgmt mgmt ~/.kube/config
+```
 
 ## Notes
 

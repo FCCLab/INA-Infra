@@ -24,3 +24,18 @@ pipeline:
   mutators:
     - image: ghcr.io/kptdev/krm-functions-catalog/starlark:v0.4.3
       configPath: set-values.yaml
+status:
+  conditions:
+    - type: Rendered
+      status: "False"
+      reason: RenderFailed
+      message: |
+        pkg.render: pkg .:
+        	pipeline.run: exec: "docker": executable file not found in $PATH
+        docker must be running to use this command
+        To install docker, follow the instructions at https://docs.docker.com/get-docker/.
+  renderStatus:
+    mutationSteps:
+      - image: ghcr.io/kptdev/krm-functions-catalog/starlark:v0.4.3
+        exitCode: 1
+    errorSummary: 'ghcr.io/kptdev/krm-functions-catalog/starlark:v0.4.3: exit code 1'

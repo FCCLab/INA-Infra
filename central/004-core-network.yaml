@@ -1,4 +1,3 @@
----
 # OAI 5G SA control-plane network functions for workload clusters labeled site-type=core.
 #
 # Deploy order (after database + cp-operators are published):

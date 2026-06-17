@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCHES_DIR="${PATCHES_DIR:-$SCRIPT_DIR/patches}"
 ROOTSYNC_DIR="${ROOTSYNC_DIR:-$SCRIPT_DIR/rootsync}"
-GITEA_HOST="${GITEA_HOST:-10.1.101.10}"
-GITEA_PORT="${GITEA_PORT:-30519}"
+GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
+GITEA_PORT="${GITEA_PORT:-3000}"
 REPO_NAME="${REPO_NAME:-central-repo}"
 
 usage() {
@@ -23,7 +23,7 @@ Options:
 
 Environment:
   ROOTSYNC_DIR   Path to rootsync package (default: central/rootsync)
-  GITEA_HOST     Mgmt Gitea host reachable from central (default: 10.1.101.10)
+  GITEA_HOST     Mgmt Gitea host reachable from central (default: 10.1.132.51)
   REPO_NAME      Deployment repo name (default: central-repo)
 
 Examples:

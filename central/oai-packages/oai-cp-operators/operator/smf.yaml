@@ -36,20 +36,20 @@ rules:
     resources: [customresourcedefinitions]
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: ["ref.nephio.org"]
-    resources: [configs,config]
+    resources: [configs, config]
     verbs: [list, watch, update, patch, get]
   - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: [roles,rolebindings]
+    resources: [roles, rolebindings]
     verbs: [get, create, delete, patch]
   - apiGroups: ["workload.nephio.org"]
-    resources: [nfdeployments,nfdeployments/status,nfconfigs,nfdeployments/finalizers]
+    resources: [nfdeployments, nfdeployments/status, nfconfigs, nfdeployments/finalizers]
     verbs: [get, list, watch, update, patch]
   - apiGroups: [""]
-    resources: [pods,serviceaccounts,configmaps,services,services/finalizers,serviceaccounts/finalizers]
-    verbs:  [get, list, watch, create, update, patch, delete]
-  - apiGroups: ["apps","extensions"]
-    resources: [deployments,deployments/status,deployments/finalizers]
-    verbs:  [get, list, watch, create, update, patch, delete]
+    resources: [pods, serviceaccounts, configmaps, services, services/finalizers, serviceaccounts/finalizers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps", "extensions"]
+    resources: [deployments, deployments/status, deployments/finalizers]
+    verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["k8s.cni.cncf.io"]
     resources: [network-attachment-definitions]
     verbs: [get, list, watch, create, update, patch, delete]
@@ -113,36 +113,7 @@ metadata:
   name: oai-smf-op-conf
   namespace: oai-cn-operators
 data:
-  smf.yaml: |
-    nad: 
-      parent: 'eth0'
-      create: False
-    nfInterfaces:
-      n4: 'n4'
-      sbi: 'eth0'
-    ports:
-      - name: 'n4'
-        port: 8805
-        protocol: UDP
-      - name: 'sbi'
-        port: 80
-        protocol: TCP
-    logLevel: info
-    image: 'docker.io/oaisoftwarealliance/oai-smf:v2.0.1'
-    ueSettings:
-      mtu: 1500
-      secondary: 1.1.1.1
-    fqdn:
-      nrf: 'oai-nrf'
-      udm: 'oai-udm'
-      amf: 'oai-amf'
-    compute:
-      req:
-        cpu: '100m'
-        memory: '512Mi'
-      limits:
-        cpu: '100m'
-        memory: '512Mi'
+  smf.yaml: "nad: \n  parent: 'eth0'\n  create: False\nnfInterfaces:\n  n4: 'n4'\n  sbi: 'eth0'\nports:\n  - name: 'n4'\n    port: 8805\n    protocol: UDP\n  - name: 'sbi'\n    port: 80\n    protocol: TCP\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-smf:v2.0.1'\nueSettings:\n  mtu: 1500\n  secondary: 1.1.1.1\nfqdn:\n  nrf: 'oai-nrf'\n  udm: 'oai-udm'\n  amf: 'oai-amf'\ncompute:\n  req:\n    cpu: '100m'\n    memory: '512Mi'\n  limits:\n    cpu: '100m'\n    memory: '512Mi'\n"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -282,25 +253,25 @@ spec:
         image: "docker.io/arorasagar/oai-smf-controller:v2.0.1"
         imagePullPolicy: Always
         env:
-          - name: 'NF_TYPE'
-            value: 'smf'
-          - name: 'DEPLOYMENT_FETCH_INTERVAL'
-            value: '1'
-          - name: 'DEPLOYMENT_FETCH_ITERATIONS'
-            value: '100'
-          - name: 'NF_CONF_PATH'
-            value: '/tmp/nf/smf.yaml'
-          - name: 'OP_CONF_PATH'
-            value: '/tmp/op/smf.yaml'
-          - name: 'TESTING'
-            value: 'no'
-          - name: 'KUBERNETES_BASE_URL'
-            value: 'https://kubernetes.default.svc'
+        - name: 'NF_TYPE'
+          value: 'smf'
+        - name: 'DEPLOYMENT_FETCH_INTERVAL'
+          value: '1'
+        - name: 'DEPLOYMENT_FETCH_ITERATIONS'
+          value: '100'
+        - name: 'NF_CONF_PATH'
+          value: '/tmp/nf/smf.yaml'
+        - name: 'OP_CONF_PATH'
+          value: '/tmp/op/smf.yaml'
+        - name: 'TESTING'
+          value: 'no'
+        - name: 'KUBERNETES_BASE_URL'
+          value: 'https://kubernetes.default.svc'
         volumeMounts:
-          - mountPath: /tmp/op
-            name: opconf
-          - mountPath: /tmp/nf
-            name: nfconf
+        - mountPath: /tmp/op
+          name: opconf
+        - mountPath: /tmp/nf
+          name: nfconf
         resources:
           requests:
             memory: "128Mi"
@@ -308,12 +279,12 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "50m"
-        # livenessProbe:
-        #   httpGet:
-        #     path: /healthz
-        #     port: 8080
-        #   initialDelaySeconds: 2
-        #   periodSeconds: 5
+            # livenessProbe:
+            #   httpGet:
+            #     path: /healthz
+            #     port: 8080
+            #   initialDelaySeconds: 2
+            #   periodSeconds: 5
       volumes:
       - configMap:
           name: oai-smf-op-conf

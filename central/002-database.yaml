@@ -1,4 +1,3 @@
----
 # OAI MySQL database PackageVariantSet for workload clusters labeled site-type=core.
 #
 # Upstream: Gitea oai-packages (fixed Kptfiles), branch/workspace v5 — not GitHub oai-core-packages.

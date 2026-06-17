@@ -15,8 +15,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OAI_DIR="${OAI_DIR:-$SCRIPT_DIR/oai-packages}"
-GITEA_HOST="${GITEA_HOST:-10.1.101.10}"
-GITEA_PORT="${GITEA_PORT:-30519}"
+GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
+GITEA_PORT="${GITEA_PORT:-3000}"
 GITEA_USER="${GITEA_USER:-nephio}"
 GITEA_PASS="${GITEA_PASS:-secret}"
 GITEA_ORG="${GITEA_ORG:-nephio}"

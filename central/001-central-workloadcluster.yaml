@@ -1,4 +1,3 @@
----
 # Register the kubeadm workload cluster "central" (10.1.101.22) with Nephio on mgmt.
 # Apply on the management cluster after central Kubernetes is Ready:
 #   kubectl --context=mgmt@mgmt apply -f 001-central-workloadcluster.yaml

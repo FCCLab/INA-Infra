@@ -1,4 +1,3 @@
----
 # Porch blueprint repo: fixed OAI packages on mgmt Gitea (push with push-oai-packages-to-gitea.sh).
 # Apply after Gitea repo exists and branch v5 is pushed:
 #   kubectl --context=mgmt@mgmt apply -f repo-oai-packages-gitea.yaml

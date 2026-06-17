@@ -21,3 +21,8 @@ upstreamLock:
 info:
   site: https://nephio.org
   description: Package for configSync.
+status:
+  conditions:
+    - type: Rendered
+      status: "True"
+      reason: RenderSuccess

@@ -1,0 +1,10 @@
+apiVersion: infra.nephio.org/v1alpha1
+kind: Token
+metadata:
+  name: mgmt-access-token-configsync
+  namespace: config-management-system
+  annotations:
+    nephio.org/gitops: configsync
+    nephio.org/app: tobeinstalledonremotecluster
+    nephio.org/remote-namespace: config-management-system
+spec: {}

@@ -1,0 +1,8 @@
+apiVersion: infra.nephio.org/v1alpha1
+kind: Repository
+metadata:
+  name: mgmt
+  namespace: default
+spec:
+  description: mgmt repository
+  defaultBranch: main
