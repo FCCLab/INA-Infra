@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: metallb-webhook-service
+  namespace: metallb-system
+spec:
+  clusterIP: 10.101.164.182
+  clusterIPs:
+  - 10.101.164.182
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    component: controller
+  sessionAffinity: None
+  type: ClusterIP

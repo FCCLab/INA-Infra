@@ -19,7 +19,7 @@ NAMESPACES="${EXPORT_NAMESPACES:-local-path-storage default metallb-system kuber
 
 KINDS="${EXPORT_KINDS:-configmap secret service serviceaccount deployment statefulset daemonset ingress networkpolicy role rolebinding}"
 
-CLUSTER_KINDS="${EXPORT_CLUSTER_KINDS:-storageclass}"
+CLUSTER_KINDS="${EXPORT_CLUSTER_KINDS:-storageclass clusterrole clusterrolebinding}"
 
 usage() {
   cat <<EOF
@@ -133,6 +133,10 @@ for ns in $NAMESPACES; do
       [[ -z "$item" ]] && continue
       name="${item#*/}"
       if [[ "$ns" == "default" && "$kind" == "service" && "$name" == "kubernetes" ]]; then
+        continue
+      fi
+      # Auto-injected by the API server; managing it causes Config Sync KNV2005 fights.
+      if [[ "$kind" == "configmap" && "$name" == "kube-root-ca.crt" ]]; then
         continue
       fi
       out="$ns_dir/${kind}-${name}.yaml"
