@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Deploy per-host site netplan (utils/netplan/<host>/60-nephio.yaml) to workload VMs.
+# Deploy per-host netplan (55-nephio-mgmt.yaml + 60-nephio.yaml) to workload VMs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
 NETPLAN_DIR="${NETPLAN_DIR:-$REPO_ROOT/utils/netplan}"
-NETPLAN_NAME="${NETPLAN_NAME:-60-nephio.yaml}"
-REMOTE_NETPLAN="/etc/netplan/${NETPLAN_NAME}"
+
+NETPLAN_MGMT="${NETPLAN_MGMT:-55-nephio-mgmt.yaml}"
+NETPLAN_SITE="${NETPLAN_SITE:-60-nephio.yaml}"
+MGMT_GATEWAY="${MGMT_GATEWAY:-10.1.132.1}"
 
 ALL_HOSTS=(
   central-0 central-1
@@ -20,20 +22,20 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [server-name ...]
 
-Copy utils/netplan/<host>/${NETPLAN_NAME} to each host and run netplan apply.
-With no arguments, deploys to all central, regional, edge, and ue nodes.
+Copy utils/netplan/<host>/${NETPLAN_MGMT} and ${NETPLAN_SITE} to each host
+and run netplan apply. With no arguments, deploys to all workload nodes.
 
-Mgmt stays in /etc/netplan/50-cloud-init.yaml (enp1s0).
-Site NIC enp7s0 is defined in ${NETPLAN_NAME}.
+${NETPLAN_MGMT}  enp1s0 mgmt IP, default via ${MGMT_GATEWAY}, DNS Pi-hole
+${NETPLAN_SITE}  enp7s0 site IP on 10.1.137.0/24
 
 Examples:
   $(basename "$0")
-  $(basename "$0") central-0 regional-0
+  $(basename "$0") regional-0 regional-1
 
 Environment:
-  SSH_CONFIG    SSH config file (default: utils/ssh_config/config)
-  NETPLAN_DIR   Source tree (default: utils/netplan)
-  NETPLAN_NAME  Filename on remote (default: 60-nephio.yaml)
+  SSH_CONFIG     SSH config file (default: utils/ssh_config/config)
+  NETPLAN_DIR    Source tree (default: utils/netplan)
+  MGMT_GATEWAY   Default route gateway (default: 10.1.132.1)
 EOF
 }
 
@@ -42,13 +44,9 @@ site_ip_from_file() {
   grep -E '^[[:space:]]*-[[:space:]]*10\.1\.137\.' "$file" | head -1 | awk '{print $2}' | tr -d '/24'
 }
 
-is_virtual_iface() {
-  local ifc="$1"
-  [[ "$ifc" =~ ^(flannel|cni|docker|br-|veth|cali|tunl|kube|virbr) ]]
-}
-
 remote_apply_netplan() {
-  local netplan_src="$1"
+  local mgmt_src="$1"
+  local site_src="$2"
 
   if [[ "$EUID" -ne 0 ]]; then
     echo "Please run as root (use sudo)." >&2
@@ -56,13 +54,13 @@ remote_apply_netplan() {
   fi
 
   local site_ip prefix=24 ifc
-  site_ip="$(site_ip_from_file "$netplan_src")"
+  site_ip="$(site_ip_from_file "$site_src")"
   if [[ -z "$site_ip" ]]; then
-    echo "error: could not read site IP from ${netplan_src}" >&2
+    echo "error: could not read site IP from ${site_src}" >&2
     exit 1
   fi
 
-  echo "=== Applying ${REMOTE_NETPLAN} (site ${site_ip}/${prefix}) ==="
+  echo "=== Applying netplan (mgmt default via ${MGMT_GATEWAY}, site ${site_ip}/${prefix}) ==="
 
   rm -f /etc/netplan/99-nephio-site.yaml
 
@@ -75,9 +73,12 @@ remote_apply_netplan() {
     fi
   done < <(ip -o link show | awk -F': ' 'NR>1 {gsub(/^ /,"",$2); print $2}')
 
-  install -m 600 "$netplan_src" "$REMOTE_NETPLAN"
+  install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
+  install -m 600 "$site_src" "/etc/netplan/${NETPLAN_SITE}"
   netplan apply
 
+  echo "Routes:"
+  ip -4 route show default || true
   echo "Addresses:"
   ip -4 -br addr show enp1s0 enp7s0 2>/dev/null || ip -4 -br addr
   echo "=== Done ==="
@@ -85,19 +86,26 @@ remote_apply_netplan() {
 
 run_remote() {
   local server_name="$1"
-  local local_file="${NETPLAN_DIR}/${server_name}/${NETPLAN_NAME}"
-  local remote_src="/tmp/${NETPLAN_NAME}.$$"
+  local mgmt_file="${NETPLAN_DIR}/${server_name}/${NETPLAN_MGMT}"
+  local site_file="${NETPLAN_DIR}/${server_name}/${NETPLAN_SITE}"
+  local remote_mgmt="/tmp/${NETPLAN_MGMT}.$$"
+  local remote_site="/tmp/${NETPLAN_SITE}.$$"
 
-  if [[ ! -f "$local_file" ]]; then
-    echo "error: missing ${local_file}" >&2
+  if [[ ! -f "$mgmt_file" ]]; then
+    echo "error: missing ${mgmt_file}" >&2
+    return 1
+  fi
+  if [[ ! -f "$site_file" ]]; then
+    echo "error: missing ${site_file}" >&2
     return 1
   fi
 
   echo ">>> ${server_name}"
-  scp -q -F "$SSH_CONFIG" "$local_file" "${server_name}:${remote_src}"
+  scp -q -F "$SSH_CONFIG" "$mgmt_file" "${server_name}:${remote_mgmt}"
+  scp -q -F "$SSH_CONFIG" "$site_file" "${server_name}:${remote_site}"
   scp -q -F "$SSH_CONFIG" "$0" "${server_name}:/tmp/setup_ip.$$"
   ssh -F "$SSH_CONFIG" -t "$server_name" \
-    "sudo SETUP_IP_REMOTE=1 bash /tmp/setup_ip.$$ '${remote_src}'; ec=\$?; rm -f /tmp/setup_ip.$$ '${remote_src}'; exit \$ec"
+    "sudo SETUP_IP_REMOTE=1 bash /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; ec=\$?; rm -f /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; exit \$ec"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -106,11 +114,11 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 if [[ "${SETUP_IP_REMOTE:-}" == "1" ]]; then
-  if [[ -z "${1:-}" ]]; then
-    echo "Usage: SETUP_IP_REMOTE=1 $0 <netplan-file>" >&2
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: SETUP_IP_REMOTE=1 $0 <mgmt-netplan> <site-netplan>" >&2
     exit 1
   fi
-  remote_apply_netplan "$1"
+  remote_apply_netplan "$1" "$2"
   exit 0
 fi
 
