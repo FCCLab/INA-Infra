@@ -5,6 +5,7 @@
 #   Nephio-Central-{0,1}  eth* -> br-int-central
 #   Nephio-Regional-{0,1} eth* -> br-int-regional
 #   Nephio-Edge-{0,1}     eth* -> br-int-edge
+#   Nephio-UE-{0,1}       eth* -> br-int-ue
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,19 +15,22 @@ VM_PREFIX="${NEPHIO_VM_PREFIX:-Nephio-}"
 BR_INT_CENTRAL="br-int-central"
 BR_INT_REGIONAL="br-int-regional"
 BR_INT_EDGE="br-int-edge"
+BR_INT_UE="br-int-ue"
 
-ALL_SITES=(central regional edge)
+ALL_SITES=(central regional edge ue)
 
 declare -A SITE_BRIDGE=(
   [central]="$BR_INT_CENTRAL"
   [regional]="$BR_INT_REGIONAL"
   [edge]="$BR_INT_EDGE"
+  [ue]="$BR_INT_UE"
 )
 
 declare -A SITE_VMS=(
   [central]="Central-0 Central-1"
   [regional]="Regional-0 Regional-1"
   [edge]="Edge-0 Edge-1"
+  [ue]="UE-0 UE-1"
 )
 
 log() { printf '==> %s\n' "$*"; }
@@ -44,7 +48,7 @@ vm_name() {
 }
 
 # Stable per-site / per-node MAC (52:54:00 is QEMU/KVM OUI).
-# Site byte matches bridge host octet: central=10 (0x0a), regional=11 (0x0b), edge=12 (0x0c).
+# Site byte matches bridge host octet: central=10 (0x0a) … ue=13 (0x0d).
 site_mac() {
   local site="$1" node="$2"
   local site_byte node_byte
@@ -52,6 +56,7 @@ site_mac() {
     central) site_byte=0x0a ;;
     regional) site_byte=0x0b ;;
     edge) site_byte=0x0c ;;
+    ue) site_byte=0x0d ;;
     *)
       echo "unknown site: $site" >&2
       return 1
@@ -189,11 +194,11 @@ parse_sites() {
         site="${site// /}"
         site="${site,,}"
         case "$site" in
-          central|regional|edge) sites+=("$site") ;;
+          central|regional|edge|ue) sites+=("$site") ;;
           "")
             ;;
           *)
-            echo "Unknown site: $site (expected central, regional, or edge)" >&2
+            echo "Unknown site: $site (expected central, regional, edge, or ue)" >&2
             exit 1
             ;;
         esac
@@ -245,12 +250,13 @@ Attach Nephio workload VM NICs to testbed internal bridges:
   central  -> $BR_INT_CENTRAL  (${VM_PREFIX}Central-0, ${VM_PREFIX}Central-1)
   regional -> $BR_INT_REGIONAL (${VM_PREFIX}Regional-0, ${VM_PREFIX}Regional-1)
   edge     -> $BR_INT_EDGE     (${VM_PREFIX}Edge-0, ${VM_PREFIX}Edge-1)
+  ue       -> $BR_INT_UE       (${VM_PREFIX}UE-0, ${VM_PREFIX}UE-1)
 
 Sites may be listed as separate args or comma-separated:
-  $(basename "$0") attach central regional edge
-  $(basename "$0") attach central,regional,edge
+  $(basename "$0") attach central regional edge ue
+  $(basename "$0") attach central,regional,edge,ue
 
-Omit sites to operate on all three. Requires host bridges from:
+Omit sites to operate on all four. Requires host bridges from:
   sudo ${SCRIPT_DIR}/bringup_switches.sh up --bridges
 
 Environment:

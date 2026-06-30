@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUEST_BRIDGE="${SCRIPT_DIR}/guest-bridge.sh"
 GUEST_MGMT="${SCRIPT_DIR}/guest-mgmt.sh"
+GUEST_LATENCY="${SCRIPT_DIR}/guest-latency.sh"
 # System libvirt cannot read ~/…; store disks where qemu can access them.
 IMAGE_DIR="${VM_SW_IMAGE_DIR:-/var/lib/libvirt/images/vm-sw}"
 BASE_IMAGE="${VM_SW_BASE_IMAGE:-${IMAGE_DIR}/alpine-cloud.qcow2}"
@@ -17,7 +18,7 @@ ALPINE_IMAGE_URL="${VM_SW_ALPINE_IMAGE_URL:-}"
 VM_RAM_MB="${VM_SW_RAM_MB:-512}"
 VM_VCPUS="${VM_SW_VCPUS:-1}"
 # Bump when the provisioning recipe changes incompatibly.
-BUILD_RECIPE_VERSION=3
+BUILD_RECIPE_VERSION=12
 
 LIBVIRT_MGMT_NET="${VM_SW_MGMT_NETWORK:-default}"
 
@@ -186,8 +187,9 @@ file_sha256() {
 }
 
 cloud_init_user_data() {
-  local name="$1" sw_renames="$2" sw_mgmt_rename="${3:-}"
+  local name="$1" sw_renames="$2" sw_mgmt_rename="${3:-}" sw_latency="${4:-}"
   local mgmt_write_files="" mgmt_runcmd="" mgmt_packages=""
+  local latency_write_files="" latency_runcmd=""
 
   if [[ -n "$sw_mgmt_rename" ]]; then
     mgmt_packages="
@@ -207,6 +209,28 @@ $(sed 's/^/      /' "$GUEST_MGMT")
   - /etc/local.d/vm-sw-mgmt.start
   - rc-update add sshd default 2>/dev/null || true
   - rc-service sshd start 2>/dev/null || true"
+  fi
+
+  if [[ -n "$sw_latency" ]]; then
+    latency_write_files="
+  - path: /usr/local/sbin/guest-latency.sh
+    permissions: '0755'
+    content: |
+$(sed 's/^/      /' "$GUEST_LATENCY")
+  - path: /etc/local.d/vm-sw-z-latency.start
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      # Runs after bridge + mgmt (alphabetically last vm-sw-*.start).
+      PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"
+      export PATH
+      export SW_LATENCY=\"${sw_latency}\"
+      apk add --no-cache iproute2 kmod 2>/dev/null || true
+      modprobe ifb numifbs=2 2>/dev/null || modprobe ifb 2>/dev/null || true
+      sleep 2
+      SW_LATENCY_PHASE=bridge /usr/local/sbin/guest-latency.sh || true"
+    latency_runcmd="
+  - /etc/local.d/vm-sw-z-latency.start"
   fi
 
   cat <<EOF
@@ -229,6 +253,7 @@ package_update: true
 packages:
   - bridge-utils
   - iproute2
+  - kmod
   - htop
   - nload
   - iftop${mgmt_packages}
@@ -248,20 +273,22 @@ $(sed 's/^/      /' "$GUEST_BRIDGE")
     permissions: '0755'
     content: |
       #!/bin/sh
+      PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      export PATH
       export SW_RENAMES="${sw_renames}"
+      export SW_LATENCY="${sw_latency}"
       /usr/local/sbin/guest-bridge.sh
   - path: /etc/local.d/vm-sw-console.start
     permissions: '0755'
     content: |
       #!/bin/sh
       grep -q '^ttyS0:' /etc/inittab || echo 'ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100' >> /etc/inittab
-      kill -HUP 1 2>/dev/null || true${mgmt_write_files}
+      kill -HUP 1 2>/dev/null || true${mgmt_write_files}${latency_write_files}
 runcmd:
   - echo 'sw:sw' | chpasswd
   - rc-update add local default 2>/dev/null || true
-  - rc-service local start 2>/dev/null || true
   - /etc/local.d/vm-sw-console.start
-  - /etc/local.d/vm-sw-bridge.start${mgmt_runcmd}
+  - /etc/local.d/vm-sw-bridge.start${mgmt_runcmd}${latency_runcmd}
 EOF
 }
 
@@ -271,24 +298,31 @@ vm_build_fingerprint() {
   local -a bridges=("$@")
   local sw_renames="${VM_RENAMES[$name]}"
   local sw_mgmt="${VM_MGMT_RENAME[$name]:-}"
-  local base_hash guest_hash mgmt_hash cloud_hash bridges_str="${bridges[*]}"
+  local sw_latency="${VM_LATENCY[$name]:-}"
+  local base_hash guest_hash mgmt_hash latency_hash cloud_hash bridges_str="${bridges[*]}"
 
   base_hash="$(file_sha256 "$BASE_IMAGE")"
   guest_hash="$(file_sha256 "$GUEST_BRIDGE")"
   mgmt_hash=""
+  latency_hash=""
   if [[ -f "$GUEST_MGMT" ]]; then
     mgmt_hash="$(file_sha256 "$GUEST_MGMT")"
   fi
-  cloud_hash="$(cloud_init_user_data "$name" "$sw_renames" "$sw_mgmt" | sha256sum | awk '{print $1}')"
+  if [[ -f "$GUEST_LATENCY" ]]; then
+    latency_hash="$(file_sha256 "$GUEST_LATENCY")"
+  fi
+  cloud_hash="$(cloud_init_user_data "$name" "$sw_renames" "$sw_mgmt" "$sw_latency" | sha256sum | awk '{print $1}')"
 
   printf '%s\n' \
     "$BUILD_RECIPE_VERSION" \
     "$base_hash" \
     "$guest_hash" \
     "$mgmt_hash" \
+    "$latency_hash" \
     "$cloud_hash" \
     "$sw_renames" \
     "$sw_mgmt" \
+    "$sw_latency" \
     "$bridges_str" \
     "$LIBVIRT_MGMT_NET" \
     "$VM_RAM_MB" \
@@ -357,14 +391,14 @@ ensure_vm_image() {
   log "Creating overlay $disk"
   run qemu-img create -f qcow2 -F qcow2 -b "$BASE_IMAGE" "$disk"
   fix_image_permissions
-  write_cloud_init "$name" "${VM_RENAMES[$name]}" "${VM_MGMT_RENAME[$name]:-}"
+  write_cloud_init "$name" "${VM_RENAMES[$name]}" "${VM_MGMT_RENAME[$name]:-}" "${VM_LATENCY[$name]:-}"
   fp="$(vm_build_fingerprint "$name" "${bridges[@]}")"
   vm_write_build_stamp "$name" "$fp"
   JUST_BUILT_VMS+=("$name")
 }
 
 write_cloud_init() {
-  local name="$1" sw_renames="$2" sw_mgmt_rename="${3:-}"
+  local name="$1" sw_renames="$2" sw_mgmt_rename="${3:-}" sw_latency="${4:-}"
   local seed_dir
   seed_dir="$(mktemp -d)"
 
@@ -373,7 +407,7 @@ instance-id: ${name}-$(date +%s)
 local-hostname: ${name}
 EOF
 
-  cloud_init_user_data "$name" "$sw_renames" "$sw_mgmt_rename" >"${seed_dir}/user-data"
+  cloud_init_user_data "$name" "$sw_renames" "$sw_mgmt_rename" "$sw_latency" >"${seed_dir}/user-data"
 
   run cloud-localds "$(vm_seed "$name")" "${seed_dir}/user-data" "${seed_dir}/meta-data"
   rm -rf "$seed_dir"
@@ -550,6 +584,14 @@ declare -A VM_MGMT_RENAME=(
   ["$SW_UE"]="eth2:inf-mgmt"
 )
 
+# netem on interconnect ports (iface:delay, ingress + egress via tc + ifb).
+# Netem on inf-lower only (lower tier toward the next site down the chain).
+# br-ext-cr: central inf-lower | br-ext-re: regional inf-lower
+declare -A VM_LATENCY=(
+  ["$SW_CENTRAL"]="inf-lower:10ms"
+  ["$SW_REGIONAL"]="inf-lower:10ms"
+)
+
 ensure_libvirt_mgmt_network() {
   if ! virsh net-info "$LIBVIRT_MGMT_NET" &>/dev/null; then
     echo "Libvirt network '$LIBVIRT_MGMT_NET' not found (install libvirt default network)." >&2
@@ -640,7 +682,7 @@ Commands:
   status   Show libvirt state
 
 Build fingerprint (auto-rebuild) includes: base image, guest-bridge.sh,
-guest-mgmt.sh, cloud-init recipe, NIC bridges, SW_RENAMES/mgmt network, RAM/vCPU.
+guest-mgmt.sh, guest-latency.sh, cloud-init recipe, NIC bridges, latency/mgmt, RAM/vCPU.
 Stamp file per VM: \${IMAGE_DIR}/<name>.build
 
 Site-switch VMs: ${ALL_VMS[*]}

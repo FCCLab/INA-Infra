@@ -38,7 +38,9 @@ Each site is laid out top to bottom: **VMs → internal bridge → site switch (
 | `inf-lower` | lower tier | `br-ext-cr` / `br-ext-re` / `br-ext-eu` |
 | `inf-mgmt` | management (routed) | libvirt `default` NAT (`virbr0`) |
 
-Central: `inf-internal` + `inf-lower` (`br-ext-cr`). UE: `inf-internal` + `inf-upper` (`br-ext-eu`).
+Central: `inf-internal` + `inf-lower` (`br-ext-cr`). Regional: `inf-internal` + `inf-upper` (`br-ext-cr`) + `inf-lower` (`br-ext-re`). UE: `inf-internal` + `inf-upper` (`br-ext-eu`).
+
+**Interconnect latency:** 10 ms netem on **`inf-lower` only** (never `inf-upper`) — central `inf-lower` (`br-ext-cr`), regional `inf-lower` (`br-ext-re`). See [Interconnect latency](#interconnect-latency-netem).
 
 Each vm-sw also has **`inf-mgmt`** on libvirt’s **`default`** network (Virt-Manager: “Virtual network 'default' : NAT”, host `virbr0`, typically `192.168.122.0/24`). `inf-mgmt` is **not** bridged to site `br0` — use it for SSH/ping/internet from the host.
 
@@ -147,6 +149,7 @@ virsh net-dhcp-leases default
 # or: virsh domifaddr vm-sw-central
 
 ssh sw@192.168.122.x   # password: sw
+# or: sshpass -p sw ssh sw@192.168.122.x
 ping -c 2 192.168.122.x
 ```
 
@@ -158,6 +161,11 @@ ping -c 2 1.1.1.1
 ```
 
 Recreate vm-sw after changing mgmt NIC wiring: `sudo ./bringup_switches.sh down --wipe && sudo ./bringup_switches.sh up`
+
+```bash
+sudo virsh console --force vm-sw-central   # if "Active console session exists"
+# escape: Ctrl + ]  (not Ctrl+C)
+```
 
 ## Host interface names
 
@@ -190,7 +198,220 @@ vm-sw scripts and guest bridge setup: [`vm-sw/`](vm-sw/).
 
 VM disk images are stored under `/var/lib/libvirt/images/vm-sw` (override with `VM_SW_IMAGE_DIR`). Local `testbed/vm-sw/images/` is gitignored.
 
-Guest login: user **`sw`**, password **`sw`**. Cloud-init (package install) runs only when a per-VM qcow2 is **created or rebuilt**. Each disk has a `.build` fingerprint (base image, `guest-bridge.sh`, cloud-init recipe, NIC layout); `up` auto-rebuilds stale overlays when inputs change (like Docker). `down` keeps disks; `down --wipe` deletes them.
+Guest login: user **`sw`**, password **`sw`**. Cloud-init (package install) runs only when a per-VM qcow2 is **created or rebuilt**. Each disk has a `.build` fingerprint (base image, `guest-bridge.sh`, `guest-latency.sh`, cloud-init recipe, NIC layout); `up` auto-rebuilds stale overlays when inputs change (like Docker). `down` keeps disks; `down --wipe` deletes them.
+
+Guest packages include `bridge-utils`, `iproute2` (`tc`), `kmod`, `openssh`, `htop`, `nload`, `iftop`.
+
+### Attach workload VMs
+
+After bridges and vm-sw are up, attach Nephio workload VMs to site bridges:
+
+```bash
+sudo ./attach_vm.sh status
+sudo ./attach_vm.sh attach          # all sites (central, regional, edge, ue)
+sudo ./attach_vm.sh attach ue       # UE only
+```
+
+See [`attach_vm.sh`](attach_vm.sh).
+
+## Testing traffic through vm-sw
+
+All `10.1.137.x` bridge IPs are **on the host**. The kernel often shortcuts traffic over **`lo`** instead of crossing vm-sw:
+
+```bash
+ip route get 10.1.137.11 from 10.1.137.10
+# → dev lo   (bypasses vm-sw)
+```
+
+Symptoms: ~0.7 ms ping / ~20 Gbps iperf, **`lo` counters move**, **`vnet*` taps stay flat**, `nload br0` on the switch guest shows nothing.
+
+### Force the L2 path (host policy routes)
+
+```bash
+sudo ip route add 10.1.137.11/32 dev br-int-central src 10.1.137.10
+sudo ip route add 10.1.137.10/32 dev br-int-regional src 10.1.137.11
+
+ping -I br-int-central 10.1.137.11
+```
+
+While traffic runs, host taps should move (`virsh domiflist vm-sw-central` → `vnet*` on each bridge). Cleanup:
+
+```bash
+sudo ip route del 10.1.137.11/32 dev br-int-central
+sudo ip route del 10.1.137.10/32 dev br-int-regional
+```
+
+### iperf3 — bind interface (not just IP)
+
+`iperf3 -B 10.1.137.10` still uses `lo` for local destinations. Use **`--bind-dev`** (iperf3 3.10+; build from source on Ubuntu 22.04):
+
+```bash
+# server
+sudo iperf3 -s -B 10.1.137.11 --bind-dev br-int-regional
+
+# client
+sudo iperf3 -c 10.1.137.11 -B 10.1.137.10 --bind-dev br-int-central -t 10
+```
+
+Best long-term test: run iperf from **workload VMs** on each site bridge (guest IPs, not host bridge IPs).
+
+### Throughput on the switch guest
+
+```bash
+ssh sw@192.168.122.x    # password: sw
+nload br0               # all forwarded L2 traffic
+nload inf-lower         # one port
+doas iftop -i br0
+ip -s link show br0
+```
+
+## Interconnect latency (netem)
+
+Simulated WAN delay on vm-sw interconnect ports using Linux **`tc netem`** (`guest-latency.sh`). Default: **10 ms** per crossing (ingress and egress on the same port).
+
+### `br-ext-cr` (central ↔ regional)
+
+```
+host br-int-central
+  → vm-sw-central  inf-internal → br0 → inf-lower  [netem 10ms]
+  → br-ext-cr
+  → vm-sw-regional inf-upper (no netem) → br0 → inf-internal
+  → host br-int-regional
+```
+
+| vm-sw | Port with netem | Host bridge |
+|-------|-----------------|-------------|
+| `vm-sw-central` | `inf-lower` | `br-ext-cr` |
+
+Regional **`inf-upper`** on `br-ext-cr` has **no** netem.
+
+### `br-ext-re` (regional ↔ edge)
+
+```
+host br-int-regional
+  → vm-sw-regional inf-internal → br0 → inf-lower  [netem 10ms]
+  → br-ext-re
+  → vm-sw-edge     inf-upper (no netem) → br0 → inf-internal
+  → host br-int-edge
+```
+
+| vm-sw | Port with netem | Host bridge |
+|-------|-----------------|-------------|
+| `vm-sw-regional` | `inf-lower` | `br-ext-re` |
+
+Edge **`inf-upper`** on `br-ext-re` has **no** netem. UE / `br-ext-eu`: no netem by default.
+
+### RTT expectation (ping)
+
+Only **`inf-lower`** ports are delayed. Config says **10 ms each way** on that port; on bridge member ports the kernel only applies **egress** netem to forwarded frames, so the guest uses **20 ms egress** on `inf-lower` to match **10 ms out + 10 ms back**.
+
+| Path | Delayed hop | Typical RTT |
+|------|-------------|-------------|
+| central ↔ regional | central `inf-lower` only | **~20 ms** |
+| regional ↔ edge | regional `inf-lower` only | **~20 ms** |
+| central ↔ edge | central + regional `inf-lower` | **~40 ms** |
+
+(`inf-upper` is never touched.)
+
+| Symptom | Meaning |
+|---------|---------|
+| ~0.7 ms | Host **`lo`** shortcut — traffic not crossing vm-sw |
+| **~10 ms** | Only **one** 10 ms hop (egress without symmetric shaping) |
+| **~20 ms** | **10 ms each way** on one `inf-lower` (expected central ↔ regional) |
+
+### Configuration
+
+In [`vm-sw/bringup.sh`](vm-sw/bringup.sh):
+
+```bash
+declare -A VM_LATENCY=(
+  ["$SW_CENTRAL"]="inf-lower:10ms"
+  ["$SW_REGIONAL"]="inf-lower:10ms"
+)
+```
+
+Format: `iface:delay` (space-separated for multiple ports on the same VM). Example: `inf-lower:10ms`. Only **`inf-lower`** is used in this testbed.
+
+Implementation details:
+
+- **`guest-bridge.sh`** only bridges ports on `br0` (no netem).
+- **`vm-sw-z-latency.start`** runs **last** at boot (after bridge + mgmt), applies egress then ingress netem.
+- Cloud-init **runcmd** order: console → bridge → mgmt → **z-latency** (no early `rc-service local start`).
+
+**Why latency may appear late on first boot:** `virsh start` returns before cloud-init **runcmd** finishes. Wait ~30–60 s after `bringup_switches.sh up`, or SSH in and run `/etc/local.d/vm-sw-z-latency.start` manually.
+
+After changes: `sudo ./bringup_switches.sh down --wipe && sudo ./bringup_switches.sh up`
+
+**Host ping still needs policy routes** (bridge IPs are local on the host):
+
+```bash
+sudo ip route add 10.1.137.11/32 dev br-int-central src 10.1.137.10
+sudo ip route add 10.1.137.10/32 dev br-int-regional src 10.1.137.11
+ping -c 5 -I br-int-central 10.1.137.11
+```
+
+**`Destination Host Unreachable`** with policy routes means vm-sw **`br0` is broken** (ports not enslaved). Check inside the guest — ports must show `master br0`:
+
+```bash
+ssh sw@192.168.122.9
+ip -br link | grep -E 'inf-|br0'
+```
+
+Re-run bridge setup (interfaces already renamed):
+
+```bash
+doas sh -c 'export SW_PORTS="inf-internal inf-lower"; export SW_LATENCY="inf-lower:10ms"; /usr/local/sbin/guest-bridge.sh'
+```
+
+### Verify latency
+
+**1. Force L2 path on host** (required for host-originated ping/iperf):
+
+```bash
+sudo ip route add 10.1.137.11/32 dev br-int-central src 10.1.137.10
+sudo ip route add 10.1.137.10/32 dev br-int-regional src 10.1.137.11
+ping -c 5 -I br-int-central 10.1.137.11
+```
+
+**2. Check netem inside switch guests** (SSH via `inf-mgmt`):
+
+```bash
+# vm-sw-central
+doas /sbin/tc qdisc show dev inf-lower
+doas /sbin/tc qdisc show dev ifb0
+
+# vm-sw-regional
+doas /sbin/tc qdisc show dev inf-lower
+doas /sbin/tc qdisc show dev ifb0
+```
+
+Healthy output includes `netem … delay 10ms` on the port root qdisc and on `ifb0`.
+
+**3. Manual apply on running VMs** (without rebuild):
+
+```bash
+sshpass -p sw ssh sw@<central-mgmt-ip>  'doas sh -c "export SW_RENAMES=\"eth0:inf-internal eth1:inf-lower\"; export SW_LATENCY=inf-lower:10ms; /usr/local/sbin/guest-bridge.sh"'
+sshpass -p sw ssh sw@<regional-mgmt-ip> 'doas sh -c "export SW_LATENCY=inf-lower:10ms; /etc/local.d/vm-sw-z-latency.start"'
+```
+
+(`guest-bridge.sh` re-bridge briefly; use during maintenance.)
+
+**4. Remove netem:**
+
+```bash
+doas /sbin/tc qdisc del dev inf-lower root
+doas /sbin/tc qdisc del dev inf-lower ingress
+doas /sbin/tc qdisc del dev ifb0 root
+```
+
+### Host `vnet*` taps
+
+Libvirt creates a **`vnetN`** tap per VM NIC (number is ephemeral). Map taps to VMs/bridges:
+
+```bash
+virsh domiflist vm-sw-central
+bridge link show dev br-ext-cr
+```
 
 ## Host: disable ping between bridges
 
