@@ -1,0 +1,27 @@
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    network_mode: host
+    env_file: .env
+    environment:
+      TZ: ${TZ}
+      FTLCONF_webserver_api_password: ${PIHOLE_WEB_PASSWORD}
+      FTLCONF_dns_interface: ${ENP1S0_PARENT}
+      FTLCONF_dns_listeningMode: BIND
+      FTLCONF_dns_domain_name: ${DOMAIN}
+      FTLCONF_dns_upstreams: ${PIHOLE_UPSTREAM_DNS}
+      FTLCONF_misc_etc_dnsmasq_d: "true"
+      FTLCONF_dhcp_active: "true"
+      FTLCONF_dhcp_start: ${DHCP_RANGE_START}
+      FTLCONF_dhcp_end: ${DHCP_RANGE_END}
+      FTLCONF_dhcp_router: ${GATEWAY}
+      FTLCONF_dhcp_leaseTime: ${DHCP_LEASE_TIME}
+      FTLCONF_dhcp_logging: "true"
+    volumes:
+      - ./etc-pihole:/etc/pihole
+      - ./etc-dnsmasq.d:/etc/dnsmasq.d
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped

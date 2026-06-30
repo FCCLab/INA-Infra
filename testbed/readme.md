@@ -1,54 +1,17 @@
-# Testbed network topology
 
-Each site is laid out top to bottom: **VMs → internal bridge → site switch (vm-sw)**.
+# Testbed topology
 
-**Subnet:** all bridges use `10.1.137.0/24`. Step 1 assigns a bridge IP on each `br-*`:
+Workload VMs have two addresses: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` (`10.1.137.0/24`, L2 via `br-int-*`). Configure site IPs with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
-| Bridge | IP |
-|--------|-----|
-| `br-int-central` | `10.1.137.10/24` |
-| `br-int-regional` | `10.1.137.11/24` |
-| `br-int-edge` | `10.1.137.12/24` |
-| `br-int-ue` | `10.1.137.13/24` |
-| `br-ext-cr` | `10.1.137.20/24` |
-| `br-ext-re` | `10.1.137.21/24` |
-| `br-ext-eu` | `10.1.137.22/24` |
+**Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, clusters); workload nodes use `+10` blocks — central `.210`–`.211`, regional `.220`–`.221`, edge `.230`–`.231`, UE `.240`–`.241`.
 
-`10.1.137.23` is reserved.
-
-**Staged bringup:**
-
-| Step | Command | What happens |
-|------|---------|--------------|
-| 1 | `bringup_switches.sh up --bridges` | Create host `br-int-*` / `br-ext-*` + IPs |
-| 2 | `bringup_switches.sh up --vms` | Start libvirt `vm-sw-*` VMs on those bridges |
-
-**Step 2:** each `vm-sw-*` VM is a pure L2 switch (Alpine guest). Libvirt attaches virtio NICs as `eth0`/`eth1`/…; cloud-init renames them to `inf-internal` / `inf-upper` / `inf-lower` and bridges them on `br0`.
-
-| Endpoint | Interface | Connects to |
-|----------|-----------|-------------|
-| Workload VM (e.g. Central-0) | guest `eth0` | site bridge via libvirt |
-| Site switch VM (`vm-sw-*`) | `inf-internal` / `inf-upper` / `inf-lower` | host `br-int-*` / `br-ext-*` |
-| Host bridge `br-*` | tap/vnet port | created when vm-sw starts |
-
-| Guest port | Role | Host bridge |
-|------------|------|-------------|
-| `inf-internal` | internal (top) | `br-int-<site>` |
-| `inf-upper` | upper tier | `br-ext-cr` / `br-ext-re` / `br-ext-eu` |
-| `inf-lower` | lower tier | `br-ext-cr` / `br-ext-re` / `br-ext-eu` |
-| `inf-mgmt` | management (routed) | libvirt `default` NAT (`virbr0`) |
-
-Central: `inf-internal` + `inf-lower` (`br-ext-cr`). Regional: `inf-internal` + `inf-upper` (`br-ext-cr`) + `inf-lower` (`br-ext-re`). UE: `inf-internal` + `inf-upper` (`br-ext-eu`).
-
-**Interconnect latency:** 10 ms netem on **`inf-lower` only** (never `inf-upper`) — central `inf-lower` (`br-ext-cr`), regional `inf-lower` (`br-ext-re`). See [Interconnect latency](#interconnect-latency-netem).
-
-Each vm-sw also has **`inf-mgmt`** on libvirt’s **`default`** network (Virt-Manager: “Virtual network 'default' : NAT”, host `virbr0`, typically `192.168.122.0/24`). `inf-mgmt` is **not** bridged to site `br0` — use it for SSH/ping/internet from the host.
+**Site NIC:** attach a second virtio NIC per workload VM to `br-int-<site>`; the guest sees it as `enp7s0`. Site addresses live in [`utils/netplan/<host>/60-nephio.yaml`](../utils/netplan/central-0/60-nephio.yaml); deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh). Mgmt stays in `50-cloud-init.yaml` (`enp1s0`). Do **not** put site IPs on `flannel.1` or other CNI interfaces.
 
 ```mermaid
 flowchart LR
   subgraph central["Central site"]
     direction TB
-    C0["Central-0<br/>eth0"] & C1["Central-1<br/>eth0"]
+    C0["Central-0<br/>mgmt .132.210<br/>site .137.110"] & C1["Central-1<br/>mgmt .132.211<br/>site .137.111"]
     BC["br-int-central<br/>10.1.137.10/24"]
     subgraph SWC["vm-sw-central"]
       direction TB
@@ -65,7 +28,7 @@ flowchart LR
 
   subgraph regional["Regional site"]
     direction TB
-    R0["Regional-0<br/>eth0"] & R1["Regional-1<br/>eth0"]
+    R0["Regional-0<br/>mgmt .132.220<br/>site .137.120"] & R1["Regional-1<br/>mgmt .132.221<br/>site .137.121"]
     BR["br-int-regional<br/>10.1.137.11/24"]
     subgraph SWR["vm-sw-regional"]
       direction TB
@@ -82,7 +45,7 @@ flowchart LR
 
   subgraph edge["Edge site"]
     direction TB
-    E0["Edge-0<br/>eth0"] & E1["Edge-1<br/>eth0"]
+    E0["Edge-0<br/>mgmt .132.230<br/>site .137.130"] & E1["Edge-1<br/>mgmt .132.231<br/>site .137.131"]
     BE["br-int-edge<br/>10.1.137.12/24"]
     subgraph SWE["vm-sw-edge"]
       direction TB
@@ -99,7 +62,7 @@ flowchart LR
 
   subgraph ue["UE site"]
     direction TB
-    U0["UE-0<br/>eth0"] & U1["UE-1<br/>eth0"]
+    U0["UE-0<br/>mgmt .132.240<br/>site .137.140"] & U1["UE-1<br/>mgmt .132.241<br/>site .137.141"]
     BU["br-int-ue<br/>10.1.137.13/24"]
     subgraph SWU["vm-sw-ue"]
       direction TB
@@ -116,6 +79,51 @@ flowchart LR
   R_LO --- BRE --- E_UP
   E_LO --- BEU --- U_UP
 ```
+
+
+# Details
+
+Each site is laid out top to bottom: **VMs → internal bridge → site switch (vm-sw)**.
+
+**Subnet:** all bridges use `10.1.137.0/24`. Step 1 assigns a bridge IP on each `br-*`:
+
+| Bridge | IP |
+|--------|-----|
+| `br-int-central` | `10.1.137.10/24` |
+| `br-int-regional` | `10.1.137.11/24` |
+| `br-int-edge` | `10.1.137.12/24` |
+| `br-int-ue` | `10.1.137.13/24` |
+| `br-ext-cr` | `10.1.137.20/24` |
+| `br-ext-re` | `10.1.137.21/24` |
+| `br-ext-eu` | `10.1.137.22/24` |
+
+**Staged bringup:**
+
+| Step | Command | What happens |
+|------|---------|--------------|
+| 1 | `bringup_switches.sh up --bridges` | Create host `br-int-*` / `br-ext-*` + IPs |
+| 2 | `bringup_switches.sh up --vms` | Start libvirt `vm-sw-*` VMs on those bridges |
+
+**Step 2:** each `vm-sw-*` VM is a pure L2 switch (Alpine guest). Libvirt attaches virtio NICs as `eth0`/`eth1`/…; cloud-init renames them to `inf-internal` / `inf-upper` / `inf-lower` and bridges them on `br0`.
+
+| Endpoint | Interface | Connects to |
+|----------|-----------|-------------|
+| Workload VM (e.g. Central-0) | `enp1s0` (mgmt) / `enp7s0` (site) | mgmt routed; site NIC → `br-int-*` via libvirt |
+| Site switch VM (`vm-sw-*`) | `inf-internal` / `inf-upper` / `inf-lower` | host `br-int-*` / `br-ext-*` |
+| Host bridge `br-*` | tap/vnet port | created when vm-sw starts |
+
+| Guest port | Role | Host bridge |
+|------------|------|-------------|
+| `inf-internal` | internal (top) | `br-int-<site>` |
+| `inf-upper` | upper tier | `br-ext-cr` / `br-ext-re` / `br-ext-eu` |
+| `inf-lower` | lower tier | `br-ext-cr` / `br-ext-re` / `br-ext-eu` |
+| `inf-mgmt` | management (routed) | libvirt `default` NAT (`virbr0`) |
+
+Central: `inf-internal` + `inf-lower` (`br-ext-cr`). Regional: `inf-internal` + `inf-upper` (`br-ext-cr`) + `inf-lower` (`br-ext-re`). UE: `inf-internal` + `inf-upper` (`br-ext-eu`).
+
+**Interconnect latency:** 10 ms netem on **`inf-lower` only** (never `inf-upper`) — central `inf-lower` (`br-ext-cr`), regional `inf-lower` (`br-ext-re`). See [Interconnect latency](#interconnect-latency-netem).
+
+Each vm-sw also has **`inf-mgmt`** on libvirt’s **`default`** network (Virt-Manager: “Virtual network 'default' : NAT”, host `virbr0`, typically `192.168.122.0/24`). `inf-mgmt` is **not** bridged to site `br0` — use it for SSH/ping/internet from the host.
 
 ## Bring up bridges and vm-sw
 
@@ -187,12 +195,18 @@ virsh domiflist vm-sw-central
 | `br-ext-re` | `10.1.137.21/24` | regional + edge | `inf-lower` / `inf-upper` |
 | `br-ext-eu` | `10.1.137.22/24` | edge + UE | `inf-lower` / `inf-upper` |
 
-| Workload VM | Guest NIC | Attach to |
-|-------------|-----------|-----------|
-| Central-0 / Central-1 | `eth0` | `br-int-central` |
-| Regional-0 / Regional-1 | `eth0` | `br-int-regional` |
-| Edge-0 / Edge-1 | `eth0` | `br-int-edge` |
-| UE-0 / UE-1 | `eth0` | `br-int-ue` |
+| Workload VM | Mgmt IP (`enp1s0`) | Site IP (`enp7s0`) | Attach to |
+|-------------|--------------------|---------------------|-----------|
+| Central-0 | `10.1.132.210` | `10.1.137.110` | `br-int-central` |
+| Central-1 | `10.1.132.211` | `10.1.137.111` | `br-int-central` |
+| Regional-0 | `10.1.132.220` | `10.1.137.120` | `br-int-regional` |
+| Regional-1 | `10.1.132.221` | `10.1.137.121` | `br-int-regional` |
+| Edge-0 | `10.1.132.230` | `10.1.137.130` | `br-int-edge` |
+| Edge-1 | `10.1.132.231` | `10.1.137.131` | `br-int-edge` |
+| UE-0 | `10.1.132.240` | `10.1.137.140` | `br-int-ue` |
+| UE-1 | `10.1.132.241` | `10.1.137.141` | `br-int-ue` |
+
+SSH aliases and mgmt addresses: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
 
 vm-sw scripts and guest bridge setup: [`vm-sw/`](vm-sw/).
 

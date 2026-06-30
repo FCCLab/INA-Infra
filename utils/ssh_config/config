@@ -1,0 +1,59 @@
+Host mgmt-0
+    HostName 10.1.132.200
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host mgmt-1
+    HostName 10.1.132.201
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host central-0
+    HostName 10.1.132.210
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host central-1
+    HostName 10.1.132.211
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host regional-0
+    HostName 10.1.132.220
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host regional-1
+    HostName 10.1.132.221
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host edge-0
+    HostName 10.1.132.230
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host edge-1
+    HostName 10.1.132.231
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host ue-0
+    HostName 10.1.132.240
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host ue-1
+    HostName 10.1.132.241
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa

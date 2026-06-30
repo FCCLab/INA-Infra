@@ -1,0 +1,2 @@
+etc-pihole/*
+!etc-pihole/.gitkeep
