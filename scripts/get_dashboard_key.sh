@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=cluster_lib.sh
 source "$SCRIPT_DIR/cluster_lib.sh"
 
-MGMT_DASHBOARD_VIP="${MGMT_DASHBOARD_VIP:-10.1.132.40}"
+
 NAMESPACE="${DASHBOARD_NAMESPACE:-kubernetes-dashboard}"
 SERVICE_ACCOUNT="${DASHBOARD_SA:-admin-user}"
 TOKEN_DURATION="${TOKEN_DURATION:-24h}"
@@ -30,7 +30,7 @@ Environment:
   TOKEN_DURATION
   DASHBOARD_NAMESPACE
   DASHBOARD_SA
-  MGMT_DASHBOARD_VIP        mgmt dashboard VIP (default: 10.1.132.40)
+  MGMT_DASHBOARD_VIP        mgmt dashboard VIP (default: ${MGMT_DASHBOARD_VIP})
 
 Examples:
   $(basename "$0")
@@ -48,14 +48,6 @@ kubeconfig_path() {
   fi
 }
 
-dashboard_vip() {
-  local cluster="$1"
-  if [[ "$cluster" == "mgmt" ]]; then
-    printf '%s' "$MGMT_DASHBOARD_VIP"
-  else
-    printf '%s' "${CLUSTER_DASHBOARD_VIP[$cluster]}"
-  fi
-}
 
 dashboard_context() {
   local cluster="$1"

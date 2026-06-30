@@ -20,6 +20,7 @@ Usage: $(basename "$0") [cluster ...]
 
 Install MetalLB and Kubernetes Dashboard on workload cluster control planes.
 With no arguments, installs on central, regional, edge, and ue.
+Pass mgmt to install on the mgmt cluster (10.1.132/24 VIPs).
 
 Dashboard VIPs (https):
   central   ${CLUSTER_DASHBOARD_VIP[central]}
@@ -35,7 +36,7 @@ Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
   DASHBOARD_CHART_VERSION Helm chart version (default: 7.14.0)
   METALLB_CHART_VERSION   Helm chart version (default: 0.14.9)
-  METALLB_POOL            MetalLB address pool (default: 10.1.132.10-99)
+  METALLB_POOL            Override address pool (default: mgmt ${MGMT_METALLB_POOL}, workload ${CLUSTER_METALLB_POOL})
 EOF
 }
 
@@ -84,9 +85,10 @@ EOF
 
 install_dashboard_on_cluster() {
   local cluster="$1"
-  local host vip
-  host="${CLUSTER_CP_HOST[$cluster]}"
-  vip="${CLUSTER_DASHBOARD_VIP[$cluster]}"
+  local host vip pool
+  host="$(cluster_cp_host "$cluster")"
+  vip="$(dashboard_vip "$cluster")"
+  pool="$(metallb_pool_for_cluster "$cluster")"
 
   echo
   echo "========================================"
@@ -128,7 +130,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - ${METALLB_POOL}
+    - ${pool}
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
@@ -225,10 +227,15 @@ if [[ $# -eq 0 ]]; then
   clusters=("${ALL_CLUSTERS[@]}")
 else
   for c in "$@"; do
-    if [[ -z "${CLUSTER_CP_HOST[$c]:-}" ]]; then
-      echo "error: unknown cluster '${c}'" >&2
-      exit 1
-    fi
+    case "$c" in
+      mgmt) ;;
+      *)
+        if [[ -z "${CLUSTER_CP_HOST[$c]:-}" ]]; then
+          echo "error: unknown cluster '${c}'" >&2
+          exit 1
+        fi
+        ;;
+    esac
     clusters+=("$c")
   done
 fi

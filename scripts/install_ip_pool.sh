@@ -14,18 +14,21 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [cluster ...]
 
-Install MetalLB and IPAddressPool ${METALLB_POOL} on cluster control planes.
+Install MetalLB and IPAddressPool on cluster control planes.
+Mgmt pool: ${MGMT_METALLB_POOL}. Workload pool: ${CLUSTER_METALLB_POOL}.
 With no arguments, installs on mgmt, central, regional, edge, and ue.
 
 Examples:
   $(basename "$0")
   $(basename "$0") central regional
-  METALLB_POOL=10.1.132.10-10.1.132.99 $(basename "$0") mgmt
+  METALLB_POOL=10.1.137.40-10.1.137.99 $(basename "$0") central
 
 Environment:
   SSH_CONFIG            SSH config (default: utils/ssh_config/config)
   METALLB_CHART_VERSION Helm chart version (default: 0.14.9)
-  METALLB_POOL          Address pool (default: 10.1.132.10-10.1.132.99)
+  MGMT_METALLB_POOL     Mgmt cluster pool (default: 10.1.132.10-10.1.132.99)
+  CLUSTER_METALLB_POOL  Workload cluster pool (default: 10.1.137.40-10.1.137.99)
+  METALLB_POOL          Override pool for all clusters (optional)
 EOF
 }
 
@@ -74,14 +77,15 @@ EOF
 
 install_ip_pool_on_cluster() {
   local cluster="$1"
-  local host
+  local host pool
   host="$(cluster_cp_host "$cluster")"
+  pool="$(metallb_pool_for_cluster "$cluster")"
 
   echo
   echo "========================================"
   echo " MetalLB IP pool: ${cluster}"
   echo " Control plane: ${host}"
-  echo " Pool: ${METALLB_POOL}"
+  echo " Pool: ${pool}"
   echo "========================================"
 
   run_remote_script "$host" <<EOF
@@ -109,7 +113,7 @@ else
     --version ${METALLB_CHART_VERSION} --wait --timeout 10m
 fi
 
-echo "==> IPAddressPool local-pool (${METALLB_POOL})"
+echo "==> IPAddressPool local-pool (${pool})"
 kubectl apply -f - <<METALLB
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
@@ -118,7 +122,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    - ${METALLB_POOL}
+    - ${pool}
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement

@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CENTRAL_SSH="${CENTRAL_SSH:-fcp@10.1.132.210}"
 CENTRAL_USER="${CENTRAL_USER:-${CENTRAL_SSH%%@*}}"
-CENTRAL_API_IP="${CENTRAL_API_IP:-10.1.132.210}"
+CENTRAL_API_IP="${CENTRAL_API_IP:-10.1.137.110}"
 POD_NETWORK_CIDR="${POD_NETWORK_CIDR:-10.244.0.0/16}"
 FLANNEL_MANIFEST="${FLANNEL_MANIFEST:-https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml}"
 NODE_NAME="${NODE_NAME:-central-0}"
@@ -52,7 +52,7 @@ Options:
 Environment:
   CENTRAL_SSH             SSH target (default: fcp@10.1.132.210)
   CENTRAL_USER            SSH user / sudoers name (default: user from CENTRAL_SSH)
-  CENTRAL_API_IP          apiserver-advertise-address (default: 10.1.132.210)
+  CENTRAL_API_IP          apiserver-advertise-address (default: 10.1.137.110)
   SUDO_PASSWORD           Optional: skip prompt (kept in memory only)
   NODE_NAME               Kubernetes node / host name (default: central-0)
   CLUSTER_NAME            kubeconfig cluster/user name (default: central)

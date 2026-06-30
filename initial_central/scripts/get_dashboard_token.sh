@@ -4,7 +4,7 @@ set -euo pipefail
 
 NAMESPACE="${DASHBOARD_NAMESPACE:-kubernetes-dashboard}"
 SERVICE_ACCOUNT="${DASHBOARD_SA:-admin-user}"
-DASHBOARD_URL="${DASHBOARD_URL:-https://10.1.132.41}"
+DASHBOARD_URL="${DASHBOARD_URL:-https://10.1.137.41}"
 TOKEN_DURATION="${TOKEN_DURATION:-24h}"
 KCTX="${KCTX:-central@central}"
 
@@ -50,7 +50,7 @@ Environment:
 
 Example:
   $(basename "$0")
-  DASHBOARD_URL=https://10.1.132.41 $(basename "$0")
+  DASHBOARD_URL=https://10.1.137.41 $(basename "$0")
 EOF
 }
 

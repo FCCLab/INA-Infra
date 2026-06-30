@@ -1,19 +1,19 @@
 
 # Testbed topology
 
-Workload VMs have two addresses: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` (`10.1.137.0/24`, L2 via `br-int-*`). Configure site IPs with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
+Workload VMs have two addresses: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` (`10.1.137.0/24`, Kubernetes API, node traffic, MetalLB VIPs, L2 via `br-int-*`). Configure both with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
-**Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0`. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
+**Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
-**Kubernetes clusters** (mgmt API on control-plane `enp1s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard with [`scripts/install_dashboard.sh`](../scripts/install_dashboard.sh), dashboard login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
+**Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard with [`scripts/install_dashboard.sh`](../scripts/install_dashboard.sh), dashboard login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
 
-| Cluster | Control plane | Worker | API (`:6443`) | Dashboard VIP | Context | Kubeconfig |
-|---------|---------------|--------|---------------|---------------|---------|------------|
-| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | `https://10.1.132.200:6443` | `https://10.1.132.40` | `mgmt@mgmt` | `~/.kube/config` |
-| central | `central-0` `10.1.132.210` | `central-1` `10.1.132.211` | `https://10.1.132.210:6443` | `https://10.1.132.41` | `central@central` | `~/.kube/config-central` |
-| regional | `regional-0` `10.1.132.220` | `regional-1` `10.1.132.221` | `https://10.1.132.220:6443` | `https://10.1.132.42` | `regional@regional` | `~/.kube/config-regional` |
-| edge | `edge-0` `10.1.132.230` | `edge-1` `10.1.132.231` | `https://10.1.132.230:6443` | `https://10.1.132.43` | `edge@edge` | `~/.kube/config-edge` |
-| ue | `ue-0` `10.1.132.240` | `ue-1` `10.1.132.241` | `https://10.1.132.240:6443` | `https://10.1.132.44` | `ue@ue` | `~/.kube/config-ue` |
+| Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, site) | Dashboard VIP | Context | Kubeconfig |
+|---------|---------------|--------|------------|---------------------|---------------|---------|------------|
+| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.40` | `mgmt@mgmt` | `~/.kube/config` |
+| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.137.41` | `central@central` | `~/.kube/config-central` |
+| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.137.42` | `regional@regional` | `~/.kube/config-regional` |
+| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.137.43` | `edge@edge` | `~/.kube/config-edge` |
+| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.137.44` | `ue@ue` | `~/.kube/config-ue` |
 
 **k9s** (local operator machine and all testbed nodes):
 
@@ -228,7 +228,7 @@ virsh domiflist vm-sw-central
 | UE-0 | `10.1.132.240` | `10.1.137.140` | `br-int-ue` |
 | UE-1 | `10.1.132.241` | `10.1.137.141` | `br-int-ue` |
 
-Per-node mgmt IPs are the SSH/API addresses in the Kubernetes clusters table above. SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
+Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0`. Full address plan: [`ip.md`](../ip.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
 
 vm-sw scripts and guest bridge setup: [`vm-sw/`](vm-sw/).
 

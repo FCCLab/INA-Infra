@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 CENTRAL_SSH="${CENTRAL_SSH:-fcp@10.1.132.211}"
 CENTRAL_USER="${CENTRAL_USER:-${CENTRAL_SSH%%@*}}"
-NODE_IP="${NODE_IP:-10.1.132.211}"
+NODE_IP="${NODE_IP:-10.1.137.111}"
 NODE_NAME="${NODE_NAME:-central-1}"
 CONTROL_PLANE_SSH="${CONTROL_PLANE_SSH:-fcp@10.1.132.210}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-central@central}"
@@ -47,7 +47,7 @@ Options:
 Environment:
   CENTRAL_SSH         SSH target for worker (default: fcp@10.1.132.211)
   CENTRAL_USER        SSH user / sudoers name
-  NODE_IP             Worker IP / /etc/hosts entry (default: 10.1.132.211)
+  NODE_IP             Worker site IP / /etc/hosts entry (default: 10.1.137.111)
   NODE_NAME           Kubernetes node name (default: central-1)
   CONTROL_PLANE_SSH   SSH to control plane for join token (default: fcp@10.1.132.210)
   KUBE_CONTEXT        kubectl context on control plane (default: central@central)

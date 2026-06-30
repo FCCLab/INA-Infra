@@ -16,9 +16,11 @@ FLANNEL_MANIFEST="${FLANNEL_MANIFEST:-https://github.com/flannel-io/flannel/rele
 DNS_SERVER="${DNS_SERVER:-10.1.132.200}"
 MGMT_GATEWAY="${MGMT_GATEWAY:-10.1.132.1}"
 NETPLAN_DIR="${NETPLAN_DIR:-$REPO_ROOT/utils/netplan}"
+NETPLAN_SITE="${NETPLAN_SITE:-60-nephio.yaml}"
 SKIP_LOCAL_KUBECONFIG="${SKIP_LOCAL_KUBECONFIG:-0}"
 SSH_USER="${SSH_USER:-fcp}"
 INSTALL_DASHBOARD="${INSTALL_DASHBOARD:-1}"
+JOIN_WORKER_ONLY=0
 
 SUDO_PASSWORD="${SUDO_PASSWORD:-}"
 ACTIVE_HOST=""
@@ -31,26 +33,36 @@ trap cleanup EXIT
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [cluster ...]
+Usage: $(basename "$0") [--join] [cluster ...]
 
-Bring up Kubernetes on central, regional, edge, and/or ue workload sites.
-Each cluster: kubeadm init on *-0, join *-1, Flannel CNI, kubeconfig, optional Dashboard.
+Bring up Kubernetes on mgmt and/or workload clusters (central, regional, edge, ue).
+Mgmt uses 10.1.132/24 only (${MGMT_CP_HOST} ${MGMT_API_IP}). Workload sites use site
+netplan (10.1.137/24), kubeadm on site IPs, Flannel on ${SITE_IFACE}. SSH on all nodes
+stays on 10.1.132/24 (enp1s0).
 
-With no arguments, brings up all four clusters (central, regional, edge, ue).
+With no arguments, brings up all four workload clusters (central, regional, edge, ue).
+
+Options:
+  --join    Join worker node(s) only (control plane must already be running)
 
 Examples:
   $(basename "$0")
+  $(basename "$0") mgmt
+  $(basename "$0") mgmt central regional
   $(basename "$0") regional
-  $(basename "$0") edge ue
+  $(basename "$0") --join edge
+  $(basename "$0") --join mgmt
 
-Clusters:
-  central    ${CLUSTER_CP_HOST[central]} (${CLUSTER_API_IP[central]}) + ${CLUSTER_WORKER_HOST[central]}  dashboard ${CLUSTER_DASHBOARD_VIP[central]}
-  regional   ${CLUSTER_CP_HOST[regional]} (${CLUSTER_API_IP[regional]}) + ${CLUSTER_WORKER_HOST[regional]}  dashboard ${CLUSTER_DASHBOARD_VIP[regional]}
-  edge       ${CLUSTER_CP_HOST[edge]} (${CLUSTER_API_IP[edge]}) + ${CLUSTER_WORKER_HOST[edge]}  dashboard ${CLUSTER_DASHBOARD_VIP[edge]}
-  ue         ${CLUSTER_CP_HOST[ue]} (${CLUSTER_API_IP[ue]}) + ${CLUSTER_WORKER_HOST[ue]}  dashboard ${CLUSTER_DASHBOARD_VIP[ue]}
+Clusters (SSH / cluster API / dashboard):
+  mgmt       ${MGMT_CP_HOST} ${MGMT_API_IP}  dashboard ${MGMT_DASHBOARD_VIP}
+  central    ${CLUSTER_CP_HOST[central]} ${CLUSTER_MGMT_IP[central]} / ${CLUSTER_API_IP[central]}  dashboard ${CLUSTER_DASHBOARD_VIP[central]}
+  regional   ${CLUSTER_CP_HOST[regional]} ${CLUSTER_MGMT_IP[regional]} / ${CLUSTER_API_IP[regional]}  dashboard ${CLUSTER_DASHBOARD_VIP[regional]}
+  edge       ${CLUSTER_CP_HOST[edge]} ${CLUSTER_MGMT_IP[edge]} / ${CLUSTER_API_IP[edge]}  dashboard ${CLUSTER_DASHBOARD_VIP[edge]}
+  ue         ${CLUSTER_CP_HOST[ue]} ${CLUSTER_MGMT_IP[ue]} / ${CLUSTER_API_IP[ue]}  dashboard ${CLUSTER_DASHBOARD_VIP[ue]}
 
 Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
+  SITE_IFACE              Cluster/data-plane NIC (default: enp7s0)
   K8S_VERSION             Kubernetes minor version (default: 1.31)
   POD_NETWORK_CIDR        Flannel CIDR (default: 10.244.0.0/16)
   DNS_SERVER              Resolver for apt on remote hosts (default: 10.1.132.200)
@@ -155,6 +167,87 @@ remote_kubectl() {
   ssh_cmd -o RequestTTY=no "$host" "kubectl $(printf '%q ' "$@")"
 }
 
+kubectl_on_remote() {
+  local host="$1"
+  shift
+  ssh_cmd -o RequestTTY=no "$host" "kubectl $(printf '%q ' "$@")"
+}
+
+is_cluster_cp_host() {
+  local name="$1"
+  [[ "$name" == "$MGMT_CP_HOST" ]] && return 0
+  local cluster
+  for cluster in "${ALL_CLUSTERS[@]}"; do
+    [[ "${CLUSTER_CP_HOST[$cluster]}" == "$name" ]] && return 0
+  done
+  return 1
+}
+
+is_cluster_worker_host() {
+  local name="$1"
+  [[ "$name" == "$MGMT_WORKER_HOST" ]] && return 0
+  local cluster
+  for cluster in "${ALL_CLUSTERS[@]}"; do
+    [[ "${CLUSTER_WORKER_HOST[$cluster]}" == "$name" ]] && return 0
+  done
+  return 1
+}
+
+k8s_node_for_ip() {
+  local cp_host="$1" ip="$2"
+  kubectl_on_remote "$cp_host" get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.addresses[*]}{.address}{" "}{end}{"\n"}{end}' \
+    | awk -v ip="$ip" '{
+        name = $1
+        for (i = 2; i <= NF; i++) if ($i == ip) { print name; exit }
+      }'
+}
+
+resolve_k8s_node_name() {
+  local cp_host="$1" logical_name="$2"
+  local node_ip k8s_name ip
+
+  if kubectl_on_remote "$cp_host" get node "$logical_name" &>/dev/null; then
+    printf '%s' "$logical_name"
+    return 0
+  fi
+
+  for ip in "$(cluster_k8s_node_ip "$logical_name" 2>/dev/null)" \
+            "$(cluster_mgmt_ip "$logical_name" 2>/dev/null)"; do
+    [[ -z "$ip" || "$ip" == "$logical_name" ]] && continue
+    k8s_name="$(k8s_node_for_ip "$cp_host" "$ip")"
+    if [[ -n "$k8s_name" ]]; then
+      if [[ "$k8s_name" != "$logical_name" ]]; then
+        echo "note: [${cp_host}] node ${logical_name} registered as ${k8s_name} (address ${ip})" >&2
+      fi
+      printf '%s' "$k8s_name"
+      return 0
+    fi
+  done
+
+  if is_cluster_cp_host "$logical_name"; then
+    k8s_name="$(kubectl_on_remote "$cp_host" get nodes \
+      -l 'node-role.kubernetes.io/control-plane' \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+    if [[ -n "$k8s_name" ]]; then
+      echo "note: [${cp_host}] using control-plane node ${k8s_name} for ${logical_name} (no name/IP match; reset cluster if stale)" >&2
+      printf '%s' "$k8s_name"
+      return 0
+    fi
+  elif is_cluster_worker_host "$logical_name"; then
+    k8s_name="$(kubectl_on_remote "$cp_host" get nodes \
+      -l '!node-role.kubernetes.io/control-plane' \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+    if [[ -n "$k8s_name" ]]; then
+      echo "note: [${cp_host}] using worker node ${k8s_name} for ${logical_name} (no name/IP match; reset cluster if stale)" >&2
+      printf '%s' "$k8s_name"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$logical_name"
+  return 1
+}
+
 configure_dns_script() {
   cat <<EOF
 sudo mkdir -p /etc/systemd/resolved.conf.d
@@ -200,8 +293,8 @@ configure_mgmt_network() {
   local remote_file="/tmp/55-nephio-mgmt.yaml.$$"
 
   if [[ ! -f "$mgmt_file" ]]; then
-    echo "error: missing ${mgmt_file}" >&2
-    return 1
+    echo "==> [${host}] no ${mgmt_file}; skipping mgmt netplan"
+    return 0
   fi
 
   scp_cmd "$mgmt_file" "${host}:${remote_file}"
@@ -213,13 +306,46 @@ rm -f '${remote_file}'
 sudo netplan apply
 echo "==> verify default route"
 ip -4 route show default
-getent ahostsv4 archive.ubuntu.com
+getent ahostsv4 archive.ubuntu.com || echo "warning: DNS lookup failed (continuing)"
 EOF
 }
 
-host_prep() {
+configure_site_network() {
+  local host="$1"
+  local site_file="${NETPLAN_DIR}/${host}/${NETPLAN_SITE}"
+  local remote_file="/tmp/${NETPLAN_SITE}.$$"
+
+  if [[ ! -f "$site_file" ]]; then
+    echo "error: missing ${site_file}" >&2
+    return 1
+  fi
+
+  scp_cmd "$site_file" "${host}:${remote_file}"
+  run_remote_script "$host" <<EOF
+set -euo pipefail
+echo "==> apply site netplan (${SITE_IFACE}, 10.1.137.0/24)"
+sudo install -m 600 '${remote_file}' /etc/netplan/${NETPLAN_SITE}
+rm -f '${remote_file}'
+sudo netplan apply
+ip -4 -br addr show ${SITE_IFACE} || true
+EOF
+}
+
+host_prep_workload() {
   local host="$1" node_name="$2" node_ip="$3"
   configure_mgmt_network "$host"
+  configure_site_network "$host"
+  host_prep_common "$host" "$node_name" "$node_ip"
+}
+
+host_prep_mgmt() {
+  local host="$1" node_name="$2" node_ip="$3"
+  configure_mgmt_network "$host"
+  host_prep_common "$host" "$node_name" "$node_ip"
+}
+
+host_prep_common() {
+  local host="$1" node_name="$2" node_ip="$3"
   run_remote_script "$host" <<EOF
 set -euo pipefail
 echo "==> set hostname ${node_name}"
@@ -326,12 +452,28 @@ kubeadm_init_cp() {
 set -euo pipefail
 if [[ -f /etc/kubernetes/admin.conf ]]; then
   echo 'Cluster already initialized; skipping kubeadm init'
+  echo 'Existing nodes (reset with ./scripts/reset_clusters.sh -y mgmt if stale):'
+  sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide 2>/dev/null || true
   exit 0
 fi
-echo "==> kubeadm init (apiserver ${api_ip}, pods ${POD_NETWORK_CIDR})"
-sudo kubeadm init \\
-  --pod-network-cidr='${POD_NETWORK_CIDR}' \\
-  --apiserver-advertise-address='${api_ip}'
+echo "==> kubeadm init (apiserver ${api_ip}, node-ip ${api_ip}, pods ${POD_NETWORK_CIDR})"
+cat > /tmp/kubeadm-init.yaml <<INIT
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "${api_ip}"
+nodeRegistration:
+  kubeletExtraArgs:
+  - name: node-ip
+    value: "${api_ip}"
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+networking:
+  podSubnet: "${POD_NETWORK_CIDR}"
+INIT
+sudo kubeadm init --config /tmp/kubeadm-init.yaml
+rm -f /tmp/kubeadm-init.yaml
 EOF
 }
 
@@ -362,12 +504,27 @@ install_flannel() {
   remote_kubectl "$host" apply -f "$FLANNEL_MANIFEST"
 }
 
+install_flannel_workload() {
+  install_flannel "$1"
+  configure_flannel_site_iface "$1"
+}
+
+configure_flannel_site_iface() {
+  local host="$1"
+  echo "==> [${host}] configure Flannel to use ${SITE_IFACE}"
+  remote_kubectl "$host" patch daemonset kube-flannel-ds -n kube-flannel --type=json \
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--iface='${SITE_IFACE}'"}]' \
+    2>/dev/null || true
+  remote_kubectl "$host" rollout status daemonset/kube-flannel-ds -n kube-flannel --timeout=120s \
+    2>/dev/null || true
+}
+
 wait_flannel_ready() {
   local host="$1"
   local node_count running_count total_count
 
   echo "==> [${host}] wait for Flannel on all nodes"
-  for _ in $(seq 1 60); do
+  for attempt in $(seq 1 60); do
     node_count="$(ssh_cmd -o RequestTTY=no "$host" \
       "kubectl get nodes --no-headers 2>/dev/null | wc -l")"
     total_count="$(ssh_cmd -o RequestTTY=no "$host" \
@@ -377,6 +534,9 @@ wait_flannel_ready() {
     if [[ "$node_count" -gt 0 && "$running_count" -ge "$node_count" && "$total_count" -ge "$node_count" ]]; then
       remote_kubectl "$host" get pods -n kube-flannel -o wide
       return 0
+    fi
+    if (( attempt % 6 == 0 )); then
+      echo "    Flannel: ${running_count}/${node_count} Running (${attempt}/60)..." >&2
     fi
     sleep 5
   done
@@ -394,75 +554,114 @@ restart_flannel() {
 
 wait_node_ready() {
   local host="$1" node_name="$2"
-  for _ in $(seq 1 60); do
-    if remote_kubectl "$host" get node "$node_name" \
+  local k8s_node
+  k8s_node="$(resolve_k8s_node_name "$host" "$node_name")"
+
+  echo "==> [${host}] wait for node ${node_name} (${k8s_node}) Ready"
+  for attempt in $(seq 1 60); do
+    if remote_kubectl "$host" get node "$k8s_node" \
       -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q True; then
       return 0
     fi
+    if (( attempt % 6 == 0 )); then
+      echo "    still waiting for ${k8s_node} (${attempt}/60)..." >&2
+    fi
     sleep 5
   done
-  echo "warning: ${node_name} not Ready within timeout" >&2
+  echo "warning: ${node_name} (${k8s_node}) not Ready within timeout" >&2
   return 1
 }
 
-fetch_join_command() {
+fetch_join_params() {
   local cp_host="$1"
-  local join_cmd
+  local join_cmd api token hash
   echo ">>> [${cp_host}] kubeadm token create --print-join-command" >&2
   join_cmd="$(ssh_cmd "$cp_host" "sudo -n kubeadm token create --print-join-command")"
   echo ">>> join command: ${join_cmd}" >&2
-  [[ -n "$join_cmd" ]] || { echo "error: empty join command from ${cp_host}" >&2; exit 1; }
-  printf '%s' "$join_cmd"
+  [[ -n "$join_cmd" ]] || { echo "error: empty join command from ${cp_host}" >&2; return 1; }
+
+  api="$(sed -n 's/^kubeadm join \([^[:space:]]*\).*/\1/p' <<< "$join_cmd")"
+  token="$(sed -n 's/.*--token \([^[:space:]]*\).*/\1/p' <<< "$join_cmd")"
+  hash="$(sed -n 's/.*--discovery-token-ca-cert-hash \([^[:space:]]*\).*/\1/p' <<< "$join_cmd")"
+
+  if [[ -z "$api" || -z "$token" || -z "$hash" ]]; then
+    echo "error: could not parse join command from ${cp_host}" >&2
+    return 1
+  fi
+
+  JOIN_API="$api"
+  JOIN_TOKEN="$token"
+  JOIN_CA_HASH="$hash"
 }
 
 kubeadm_join_worker() {
   local worker_host="$1" cp_host="$2" node_name="$3" node_ip="$4"
+  local JOIN_API JOIN_TOKEN JOIN_CA_HASH
   if ssh_cmd "$worker_host" "test -f /etc/kubernetes/kubelet.conf" 2>/dev/null; then
     echo ">>> [${worker_host}] already joined; skipping"
     return 0
   fi
-  local join_cmd
-  join_cmd="$(fetch_join_command "$cp_host")"
-  ACTIVE_HOST="$worker_host"
-  HAS_NOPASSWD=1
-  echo ">>> [${worker_host}] kubeadm join"
-  remote_sudo "$join_cmd"
+  fetch_join_params "$cp_host" || return 1
+  echo ">>> [${worker_host}] kubeadm join (node-ip ${node_ip})"
+  run_remote_script "$worker_host" <<EOF
+set -euo pipefail
+cat > /tmp/kubeadm-join.yaml <<JOIN
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: ${JOIN_API}
+    token: "${JOIN_TOKEN}"
+    caCertHashes:
+    - "${JOIN_CA_HASH}"
+nodeRegistration:
+  kubeletExtraArgs:
+  - name: node-ip
+    value: "${node_ip}"
+JOIN
+sudo kubeadm join --config /tmp/kubeadm-join.yaml
+rm -f /tmp/kubeadm-join.yaml
+EOF
 }
 
 copy_local_kubeconfig() {
   local host="$1" cluster="$2"
-  local kcfg local_path
-  kcfg="$(kubeconfig_file "$cluster")"
-  local_path="${HOME}/.kube/${kcfg}"
+  local local_path
+  if [[ "$cluster" == "mgmt" ]]; then
+    local_path="${HOME}/.kube/config"
+  else
+    local_path="${HOME}/.kube/$(kubeconfig_file "$cluster")"
+  fi
   mkdir -p "${HOME}/.kube"
   scp_cmd -q "${host}:.kube/config" "$local_path"
   chmod 600 "$local_path"
   "$RENAME_SH" "$cluster" "$cluster" "$local_path"
 }
 
-bringup_cluster() {
-  local cluster="$1"
+bringup_mgmt_cluster() {
+  local cluster="mgmt"
   local cp_host worker_host api_ip worker_ip ctx
-  cp_host="${CLUSTER_CP_HOST[$cluster]}"
-  worker_host="${CLUSTER_WORKER_HOST[$cluster]}"
-  api_ip="${CLUSTER_API_IP[$cluster]}"
-  worker_ip="${CLUSTER_WORKER_IP[$cluster]}"
+  cp_host="$MGMT_CP_HOST"
+  worker_host="$MGMT_WORKER_HOST"
+  api_ip="$MGMT_API_IP"
+  worker_ip="$MGMT_WORKER_IP"
   ctx="$(kube_context "$cluster")"
 
   echo
   echo "========================================"
-  echo " Cluster: ${cluster}"
-  echo " Control plane: ${cp_host} (${api_ip})"
-  echo " Worker:        ${worker_host} (${worker_ip})"
+  echo " Cluster: mgmt (10.1.132/24 only)"
+  echo " Control plane: ${cp_host}  ${api_ip}"
+  echo " Worker:        ${worker_host}  ${worker_ip}"
+  echo " Dashboard:     ${MGMT_DASHBOARD_VIP}"
   echo "========================================"
 
-  echo "==> [${cluster}] Control plane prep"
+  echo "==> [mgmt] Control plane prep"
   prompt_sudo_password "$cp_host"
   ensure_passwordless_sudo "$cp_host"
-  host_prep "$cp_host" "$cp_host" "$api_ip"
+  host_prep_mgmt "$cp_host" "$cp_host" "$api_ip"
   install_kubernetes "$cp_host" || return 1
 
-  echo "==> [${cluster}] kubeadm init"
+  echo "==> [mgmt] kubeadm init"
   kubeadm_init_cp "$cp_host" "$api_ip" || return 1
   setup_remote_kubeconfig "$cp_host" "$cluster" || return 1
   install_flannel "$cp_host" || return 1
@@ -470,10 +669,143 @@ bringup_cluster() {
   wait_node_ready "$cp_host" "$cp_host" || true
   remote_kubectl "$cp_host" get nodes -o wide
 
+  echo "==> [mgmt] Worker join"
+  prompt_sudo_password "$worker_host"
+  ensure_passwordless_sudo "$worker_host"
+  host_prep_mgmt "$worker_host" "$worker_host" "$worker_ip"
+  install_kubernetes "$worker_host" || return 1
+  kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
+  wait_node_ready "$cp_host" "$worker_host" || true
+
+  echo "==> [mgmt] CNI prerequisites and Flannel on all nodes"
+  ensure_cni_prereqs "$cp_host" || return 1
+  ensure_cni_prereqs "$worker_host" || return 1
+  restart_flannel "$cp_host"
+
+  remote_kubectl "$cp_host" get nodes -o wide
+
+  if [[ "$SKIP_LOCAL_KUBECONFIG" != "1" ]]; then
+    echo "==> [mgmt] Copy kubeconfig locally"
+    copy_local_kubeconfig "$cp_host" "$cluster"
+    echo "    Local context: ${ctx}  (~/.kube/config)"
+  fi
+
+  if [[ "$INSTALL_DASHBOARD" == "1" ]]; then
+    echo "==> [mgmt] MetalLB + Kubernetes Dashboard"
+    "$SCRIPT_DIR/install_dashboard.sh" mgmt || return 1
+  fi
+
+  echo "==> [mgmt] Done"
+}
+
+join_worker_mgmt() {
+  local cp_host worker_host worker_ip
+  cp_host="$MGMT_CP_HOST"
+  worker_host="$MGMT_WORKER_HOST"
+  worker_ip="$MGMT_WORKER_IP"
+
+  echo
+  echo "========================================"
+  echo " Join worker: mgmt"
+  echo " Control plane: ${cp_host}  (must be running)"
+  echo " Worker:        ${worker_host}  ${worker_ip}"
+  echo "========================================"
+
+  if ! ssh_cmd "$cp_host" "test -f /etc/kubernetes/admin.conf" 2>/dev/null; then
+    echo "error: mgmt control plane not initialized on ${cp_host}" >&2
+    return 1
+  fi
+
+  echo "==> [mgmt] Worker join"
+  prompt_sudo_password "$worker_host"
+  ensure_passwordless_sudo "$worker_host"
+  host_prep_mgmt "$worker_host" "$worker_host" "$worker_ip"
+  install_kubernetes "$worker_host" || return 1
+  kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
+  wait_node_ready "$cp_host" "$worker_host" || true
+
+  echo "==> [mgmt] CNI prerequisites and Flannel on worker"
+  ensure_cni_prereqs "$cp_host" || return 1
+  ensure_cni_prereqs "$worker_host" || return 1
+  restart_flannel "$cp_host"
+
+  remote_kubectl "$cp_host" get nodes -o wide
+  echo "==> [mgmt] Worker join done"
+}
+
+join_worker_cluster() {
+  local cluster="$1"
+  local cp_host worker_host worker_ip mgmt_worker_ip
+  cp_host="${CLUSTER_CP_HOST[$cluster]}"
+  worker_host="${CLUSTER_WORKER_HOST[$cluster]}"
+  worker_ip="${CLUSTER_WORKER_IP[$cluster]}"
+  mgmt_worker_ip="${CLUSTER_MGMT_WORKER_IP[$cluster]}"
+
+  echo
+  echo "========================================"
+  echo " Join worker: ${cluster}"
+  echo " Control plane: ${cp_host}  (must be running)"
+  echo " Worker:        ${worker_host}  SSH ${mgmt_worker_ip}  node ${worker_ip}"
+  echo "========================================"
+
+  if ! ssh_cmd "$cp_host" "test -f /etc/kubernetes/admin.conf" 2>/dev/null; then
+    echo "error: control plane not initialized on ${cp_host}" >&2
+    return 1
+  fi
+
   echo "==> [${cluster}] Worker join"
   prompt_sudo_password "$worker_host"
   ensure_passwordless_sudo "$worker_host"
-  host_prep "$worker_host" "$worker_host" "$worker_ip"
+  host_prep_workload "$worker_host" "$worker_host" "$worker_ip"
+  install_kubernetes "$worker_host" || return 1
+  kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
+  wait_node_ready "$cp_host" "$worker_host" || true
+
+  echo "==> [${cluster}] CNI prerequisites and Flannel on worker"
+  ensure_cni_prereqs "$cp_host" || return 1
+  ensure_cni_prereqs "$worker_host" || return 1
+  restart_flannel "$cp_host"
+
+  remote_kubectl "$cp_host" get nodes -o wide
+  echo "==> [${cluster}] Worker join done"
+}
+
+bringup_cluster() {
+  local cluster="$1"
+  local cp_host worker_host api_ip worker_ip mgmt_cp_ip mgmt_worker_ip ctx
+  cp_host="${CLUSTER_CP_HOST[$cluster]}"
+  worker_host="${CLUSTER_WORKER_HOST[$cluster]}"
+  api_ip="${CLUSTER_API_IP[$cluster]}"
+  worker_ip="${CLUSTER_WORKER_IP[$cluster]}"
+  mgmt_cp_ip="${CLUSTER_MGMT_IP[$cluster]}"
+  mgmt_worker_ip="${CLUSTER_MGMT_WORKER_IP[$cluster]}"
+  ctx="$(kube_context "$cluster")"
+
+  echo
+  echo "========================================"
+  echo " Cluster: ${cluster}"
+  echo " Control plane: ${cp_host}  SSH ${mgmt_cp_ip}  API ${api_ip}"
+  echo " Worker:        ${worker_host}  SSH ${mgmt_worker_ip}  node ${worker_ip}"
+  echo "========================================"
+
+  echo "==> [${cluster}] Control plane prep"
+  prompt_sudo_password "$cp_host"
+  ensure_passwordless_sudo "$cp_host"
+  host_prep_workload "$cp_host" "$cp_host" "$api_ip"
+  install_kubernetes "$cp_host" || return 1
+
+  echo "==> [${cluster}] kubeadm init"
+  kubeadm_init_cp "$cp_host" "$api_ip" || return 1
+  setup_remote_kubeconfig "$cp_host" "$cluster" || return 1
+  install_flannel_workload "$cp_host" || return 1
+  wait_flannel_ready "$cp_host" || true
+  wait_node_ready "$cp_host" "$cp_host" || true
+  remote_kubectl "$cp_host" get nodes -o wide
+
+  echo "==> [${cluster}] Worker join"
+  prompt_sudo_password "$worker_host"
+  ensure_passwordless_sudo "$worker_host"
+  host_prep_workload "$worker_host" "$worker_host" "$worker_ip"
   install_kubernetes "$worker_host" || return 1
   kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
   wait_node_ready "$cp_host" "$worker_host" || true
@@ -499,8 +831,65 @@ bringup_cluster() {
   echo "==> [${cluster}] Done"
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
+kubeconfig_path_for_cluster() {
+  local cluster="$1"
+  if [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "${HOME}/.kube/config"
+  else
+    printf '%s' "${HOME}/.kube/$(kubeconfig_file "$cluster")"
+  fi
+}
+
+bringup_one_cluster() {
+  local cluster="$1"
+  if [[ "$cluster" == "mgmt" ]]; then
+    if [[ "$JOIN_WORKER_ONLY" == "1" ]]; then
+      join_worker_mgmt
+    else
+      bringup_mgmt_cluster
+    fi
+  elif [[ "$JOIN_WORKER_ONLY" == "1" ]]; then
+    join_worker_cluster "$cluster"
+  else
+    bringup_cluster "$cluster"
+  fi
+}
+
+parse_args() {
+  local arg
+  cluster_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --join)
+        JOIN_WORKER_ONLY=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        cluster_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+parse_args "$@"
+
+if [[ "${BRINGUP_MGMT_CLUSTER:-}" == "1" ]]; then
+  if [[ "$JOIN_WORKER_ONLY" == "1" ]]; then
+    if ! join_worker_mgmt; then
+      exit 1
+    fi
+  else
+    if ! bringup_mgmt_cluster; then
+      exit 1
+    fi
+    echo
+    echo "Kubeconfig context: mgmt@mgmt  ->  ~/.kube/config"
+  fi
   exit 0
 fi
 
@@ -515,42 +904,56 @@ if [[ ! -x "$RENAME_SH" ]]; then
 fi
 
 clusters=()
-if [[ $# -eq 0 ]]; then
+if [[ ${#cluster_args[@]} -eq 0 ]]; then
   clusters=("${ALL_CLUSTERS[@]}")
 else
-  for c in "$@"; do
-    if [[ -z "${CLUSTER_CP_HOST[$c]:-}" ]]; then
-      echo "error: unknown cluster '${c}' (expected central, regional, edge, or ue)" >&2
-      exit 1
-    fi
+  for c in "${cluster_args[@]}"; do
+    case "$c" in
+      mgmt) ;;
+      *)
+        if [[ -z "${CLUSTER_CP_HOST[$c]:-}" ]]; then
+          echo "error: unknown cluster '${c}' (expected mgmt, central, regional, edge, or ue)" >&2
+          exit 1
+        fi
+        ;;
+    esac
     clusters+=("$c")
   done
 fi
 
 failed=0
 for cluster in "${clusters[@]}"; do
-  if ! bringup_cluster "$cluster"; then
+  if ! bringup_one_cluster "$cluster"; then
     failed=1
   fi
 done
 
+if [[ "$JOIN_WORKER_ONLY" == "1" ]]; then
+  exit "$failed"
+fi
+
 echo
 echo "Kubeconfig contexts:"
 for cluster in "${clusters[@]}"; do
-  echo "  $(kube_context "$cluster")  ->  ~/.kube/$(kubeconfig_file "$cluster")"
+  echo "  $(kube_context "$cluster")  ->  $(kubeconfig_path_for_cluster "$cluster")"
 done
 
 if [[ ${#clusters[@]} -gt 0 ]]; then
   kcfg_paths=( )
-  [[ -f "${HOME}/.kube/config" ]] && kcfg_paths+=("${HOME}/.kube/config")
-  [[ -f "${HOME}/.kube/config-central" ]] && kcfg_paths+=("${HOME}/.kube/config-central")
   for cluster in "${clusters[@]}"; do
-    kcfg_paths+=("${HOME}/.kube/$(kubeconfig_file "$cluster")")
+    kcfg="$(kubeconfig_path_for_cluster "$cluster")"
+    [[ -f "$kcfg" ]] || continue
+    case " ${kcfg_paths[*]:-} " in
+      *" $kcfg "*) ;;
+      *) kcfg_paths+=("$kcfg") ;;
+    esac
   done
-  echo
-  echo "Example:"
-  echo "  export KUBECONFIG=$(IFS=:; echo "${kcfg_paths[*]}")"
-  echo "  kubectl config use-context $(kube_context "${clusters[0]}")"
+  if [[ ${#kcfg_paths[@]} -gt 0 ]]; then
+    echo
+    echo "Example:"
+    echo "  export KUBECONFIG=$(IFS=:; echo "${kcfg_paths[*]}")"
+    echo "  kubectl config use-context $(kube_context "${clusters[0]}")"
+  fi
 fi
 
 exit "$failed"

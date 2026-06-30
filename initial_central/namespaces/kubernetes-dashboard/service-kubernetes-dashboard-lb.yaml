@@ -3,7 +3,7 @@ kind: Service
 metadata:
   annotations:
     metallb.universe.tf/ip-allocated-from-pool: local-pool
-    metallb.universe.tf/loadBalancerIPs: 10.1.132.41
+    metallb.universe.tf/loadBalancerIPs: 10.1.137.41
   name: kubernetes-dashboard-lb
   namespace: kubernetes-dashboard
 spec:

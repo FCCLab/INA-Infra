@@ -3,7 +3,7 @@ kind: Service
 metadata:
   annotations:
     metallb.universe.tf/ip-allocated-from-pool: local-pool
-    metallb.universe.tf/loadBalancerIPs: 10.1.132.60
+    metallb.universe.tf/loadBalancerIPs: 10.1.137.60
   name: openspeedtest-service
   namespace: default
 spec:

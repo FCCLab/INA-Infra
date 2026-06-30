@@ -3,7 +3,7 @@ kind: Service
 metadata:
   annotations:
     metallb.universe.tf/ip-allocated-from-pool: local-pool
-    metallb.universe.tf/loadBalancerIPs: 10.1.132.61
+    metallb.universe.tf/loadBalancerIPs: 10.1.137.61
   labels:
     app: open5gs-5gc
   name: open5gs-5gc

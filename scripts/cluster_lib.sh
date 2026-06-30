@@ -1,6 +1,9 @@
 # Shared workload-cluster definitions (sourced by bringup/install scripts).
 ALL_CLUSTERS=(central regional edge ue)
 
+SITE_IFACE="${SITE_IFACE:-enp7s0}"
+MGMT_IFACE="${MGMT_IFACE:-enp1s0}"
+
 declare -A CLUSTER_CP_HOST=(
   [central]=central-0
   [regional]=regional-0
@@ -13,38 +16,58 @@ declare -A CLUSTER_WORKER_HOST=(
   [edge]=edge-1
   [ue]=ue-1
 )
-declare -A CLUSTER_API_IP=(
+# SSH / operator access (enp1s0, 10.1.132.0/24)
+declare -A CLUSTER_MGMT_IP=(
   [central]=10.1.132.210
   [regional]=10.1.132.220
   [edge]=10.1.132.230
   [ue]=10.1.132.240
 )
-declare -A CLUSTER_WORKER_IP=(
+declare -A CLUSTER_MGMT_WORKER_IP=(
   [central]=10.1.132.211
   [regional]=10.1.132.221
   [edge]=10.1.132.231
   [ue]=10.1.132.241
 )
+# Kubernetes API and node identity (enp7s0, 10.1.137.0/24)
+declare -A CLUSTER_API_IP=(
+  [central]=10.1.137.110
+  [regional]=10.1.137.120
+  [edge]=10.1.137.130
+  [ue]=10.1.137.140
+)
+declare -A CLUSTER_WORKER_IP=(
+  [central]=10.1.137.111
+  [regional]=10.1.137.121
+  [edge]=10.1.137.131
+  [ue]=10.1.137.141
+)
 declare -A CLUSTER_DASHBOARD_VIP=(
-  [central]=10.1.132.41
-  [regional]=10.1.132.42
-  [edge]=10.1.132.43
-  [ue]=10.1.132.44
+  [central]=10.1.137.41
+  [regional]=10.1.137.42
+  [edge]=10.1.137.43
+  [ue]=10.1.137.44
 )
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
-  [central]=10.1.132.60
-  [regional]=10.1.132.70
-  [edge]=10.1.132.80
-  [ue]=10.1.132.90
+  [central]=10.1.137.60
+  [regional]=10.1.137.70
+  [edge]=10.1.137.80
+  [ue]=10.1.137.90
 )
 
-METALLB_POOL="${METALLB_POOL:-10.1.132.10-10.1.132.99}"
+MGMT_METALLB_POOL="${MGMT_METALLB_POOL:-10.1.132.10-10.1.132.99}"
+CLUSTER_METALLB_POOL="${CLUSTER_METALLB_POOL:-10.1.137.40-10.1.137.99}"
 
 MGMT_CP_HOST="${MGMT_CP_HOST:-mgmt-0}"
+MGMT_WORKER_HOST="${MGMT_WORKER_HOST:-mgmt-1}"
+MGMT_API_IP="${MGMT_API_IP:-10.1.132.200}"
+MGMT_WORKER_IP="${MGMT_WORKER_IP:-10.1.132.201}"
+MGMT_DASHBOARD_VIP="${MGMT_DASHBOARD_VIP:-10.1.132.40}"
 MGMT_OPENSPEEDTEST_VIP="${MGMT_OPENSPEEDTEST_VIP:-10.1.132.50}"
 
 ALL_OPENSPEEDTEST_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 ALL_METALLB_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
+ALL_BRINGUP_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 
 cluster_cp_host() {
   local cluster="$1"
@@ -55,12 +78,81 @@ cluster_cp_host() {
   fi
 }
 
+cluster_mgmt_ip() {
+  local host="$1"
+  local cluster
+  if [[ "$host" == "$MGMT_CP_HOST" || "$host" == mgmt-0 ]]; then
+    printf '%s' "$MGMT_API_IP"
+    return
+  fi
+  if [[ "$host" == "$MGMT_WORKER_HOST" || "$host" == mgmt-1 ]]; then
+    printf '%s' "$MGMT_WORKER_IP"
+    return
+  fi
+  for cluster in "${ALL_CLUSTERS[@]}"; do
+    if [[ "${CLUSTER_CP_HOST[$cluster]}" == "$host" ]]; then
+      printf '%s' "${CLUSTER_MGMT_IP[$cluster]}"
+      return
+    fi
+    if [[ "${CLUSTER_WORKER_HOST[$cluster]}" == "$host" ]]; then
+      printf '%s' "${CLUSTER_MGMT_WORKER_IP[$cluster]}"
+      return
+    fi
+  done
+  printf '%s' "$host"
+}
+
+# Kubernetes node InternalIP (kubelet --node-ip); site plane for workload clusters.
+cluster_k8s_node_ip() {
+  local host="$1"
+  local cluster
+  if [[ "$host" == "$MGMT_CP_HOST" || "$host" == mgmt-0 ]]; then
+    printf '%s' "$MGMT_API_IP"
+    return 0
+  fi
+  if [[ "$host" == "$MGMT_WORKER_HOST" || "$host" == mgmt-1 ]]; then
+    printf '%s' "$MGMT_WORKER_IP"
+    return 0
+  fi
+  for cluster in "${ALL_CLUSTERS[@]}"; do
+    if [[ "${CLUSTER_CP_HOST[$cluster]}" == "$host" ]]; then
+      printf '%s' "${CLUSTER_API_IP[$cluster]}"
+      return 0
+    fi
+    if [[ "${CLUSTER_WORKER_HOST[$cluster]}" == "$host" ]]; then
+      printf '%s' "${CLUSTER_WORKER_IP[$cluster]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+metallb_pool_for_cluster() {
+  local cluster="$1"
+  if [[ -n "${METALLB_POOL:-}" ]]; then
+    printf '%s' "$METALLB_POOL"
+  elif [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "$MGMT_METALLB_POOL"
+  else
+    printf '%s' "$CLUSTER_METALLB_POOL"
+  fi
+}
+
 openspeedtest_vip() {
   local cluster="$1"
   if [[ "$cluster" == "mgmt" ]]; then
     printf '%s' "$MGMT_OPENSPEEDTEST_VIP"
   else
     printf '%s' "${CLUSTER_OPENSPEEDTEST_VIP[$cluster]}"
+  fi
+}
+
+dashboard_vip() {
+  local cluster="$1"
+  if [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "$MGMT_DASHBOARD_VIP"
+  else
+    printf '%s' "${CLUSTER_DASHBOARD_VIP[$cluster]}"
   fi
 }
 

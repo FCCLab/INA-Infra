@@ -13,7 +13,7 @@ Catalog packages use **`@v6`** tags (not floating `main`).
 | Cluster | kubectl context | Node | API server | Role |
 |---------|-----------------|------|------------|------|
 | **mgmt** | `mgmt@mgmt` | `node-0` @ `10.1.132.200` | `https://10.1.132.200:6443` | Nephio, Porch, Gitea |
-| **central** | `central@central` | `central-0` @ `10.1.132.210` | `https://10.1.132.210:6443` | Workload / OAI NFs |
+| **central** | `central@central` | `central-0` SSH @ `10.1.132.210`, API @ `10.1.137.110` | `https://10.1.137.110:6443` | Workload / OAI NFs |
 
 | Service | URL |
 |---------|-----|
@@ -480,7 +480,7 @@ This repo is a **reduced bare-metal lab**: **mgmt** + one workload cluster **`ce
 | Official exercise | This lab |
 |-------------------|----------|
 | mgmt (Nephio, Porch, Gitea) | **mgmt** @ `10.1.132.200` |
-| core workload cluster | **`central`** @ `10.1.132.210` (`nephio.org/site-type: core`) |
+| core workload cluster | **`central`** @ `10.1.137.110` (`nephio.org/site-type: core`) |
 | regional workload cluster | *not deployed* |
 | edge workload cluster | *not deployed* |
 | `nephio/mgmt` + `mgmt-staging` (CAPI bootstrap commits) | `mgmt` / `mgmt-staging` registered; **repos empty** until you GitOps mgmt (see above) |
