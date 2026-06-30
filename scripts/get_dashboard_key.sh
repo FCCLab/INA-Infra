@@ -3,9 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=cluster_lib.sh
 source "$SCRIPT_DIR/cluster_lib.sh"
 
+SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
+SSH_OPTS=(-F "$SSH_CONFIG" -o ConnectTimeout=10 -o RequestTTY=no)
+KUBECTL_TIMEOUT="${KUBECTL_TIMEOUT:-15s}"
 
 NAMESPACE="${DASHBOARD_NAMESPACE:-kubernetes-dashboard}"
 SERVICE_ACCOUNT="${DASHBOARD_SA:-admin-user}"
@@ -20,6 +24,9 @@ Usage: $(basename "$0") [options] [cluster ...]
 Print bearer tokens for the Kubernetes Dashboard on each cluster.
 With no cluster arguments, prints tokens for mgmt, central, regional, edge, and ue.
 
+Workload clusters use SSH to the control plane (API is on 10.1.137.x, not
+reachable from the operator network on 10.1.132.x).
+
 Options:
   -d, --duration DURATION   Token lifetime (default: ${TOKEN_DURATION})
   -n, --namespace NAME      Dashboard namespace (default: ${NAMESPACE})
@@ -30,12 +37,16 @@ Environment:
   TOKEN_DURATION
   DASHBOARD_NAMESPACE
   DASHBOARD_SA
-  MGMT_DASHBOARD_VIP        mgmt dashboard VIP (default: ${MGMT_DASHBOARD_VIP})
+  KUBECTL_TIMEOUT           Local kubectl timeout (default: 15s; mgmt only)
+  SSH_CONFIG
+  DASHBOARD_FORWARD_PORT    Port on mgmt IP for workload dashboards (default: 8443)
 
 Examples:
   $(basename "$0")
   $(basename "$0") central regional
   $(basename "$0") -d 8h mgmt
+
+Workload dashboards on 132: run ${SCRIPT_DIR}/kubectl_forward.sh first.
 EOF
 }
 
@@ -48,7 +59,6 @@ kubeconfig_path() {
   fi
 }
 
-
 dashboard_context() {
   local cluster="$1"
   if [[ "$cluster" == "mgmt" ]]; then
@@ -58,58 +68,53 @@ dashboard_context() {
   fi
 }
 
-setup_kubeconfig() {
-  local paths=()
-  local cluster kcfg
-
-  for cluster in "${ALL_DASHBOARD_CLUSTERS[@]}"; do
-    kcfg="$(kubeconfig_path "$cluster")"
-    if [[ -f "$kcfg" ]]; then
-      paths+=("$kcfg")
-    fi
-  done
-
-  if [[ ${#paths[@]} -eq 0 ]]; then
-    echo "error: no kubeconfig files found under ~/.kube" >&2
-    exit 1
-  fi
-
-  export KUBECONFIG
-  KUBECONFIG="$(IFS=:; echo "${paths[*]}")"
-}
-
-kubectl_ctx() {
+kubectl_cluster() {
   local cluster="$1"
   shift
-  kubectl --context="$(dashboard_context "$cluster")" "$@"
+  if [[ "$cluster" == "mgmt" ]]; then
+    kubectl --context="$(dashboard_context "$cluster")" --request-timeout="$KUBECTL_TIMEOUT" "$@"
+  else
+    local host
+    host="$(cluster_cp_host "$cluster")"
+    ssh "${SSH_OPTS[@]}" "$host" "kubectl $(printf '%q ' "$@")"
+  fi
 }
 
 print_dashboard_key() {
   local cluster="$1"
-  local ctx kcfg vip
+  local ctx kcfg operator_url site_vip cp_host
 
   ctx="$(dashboard_context "$cluster")"
   kcfg="$(kubeconfig_path "$cluster")"
-  vip="$(dashboard_vip "$cluster")"
+  operator_url="$(dashboard_operator_url "$cluster")"
+  site_vip="$(dashboard_vip "$cluster")"
+  cp_host="$(cluster_cp_host "$cluster")"
 
   echo "========================================"
   echo " Cluster: ${cluster}"
-  echo " URL:     https://${vip}"
+  echo " URL:     ${operator_url}"
+  if [[ "$cluster" != "mgmt" ]]; then
+    echo " Site:    https://${site_vip}  (137 network; start ${SCRIPT_DIR}/kubectl_forward.sh if needed)"
+  fi
   echo " Context: ${ctx}"
-  echo " Config:  ${kcfg}"
+  if [[ "$cluster" == "mgmt" ]]; then
+    echo " Config:  ${kcfg}"
+  else
+    echo " Config:  ${cp_host}:~/.kube/config (via SSH)"
+  fi
   echo "========================================"
 
-  if [[ ! -f "$kcfg" ]]; then
+  if [[ "$cluster" == "mgmt" && ! -f "$kcfg" ]]; then
     echo "error: missing kubeconfig: ${kcfg}" >&2
     return 1
   fi
 
-  if ! kubectl_ctx "$cluster" get namespace "$NAMESPACE" >/dev/null 2>&1; then
+  if ! kubectl_cluster "$cluster" get namespace "$NAMESPACE" >/dev/null 2>&1; then
     echo "error: namespace ${NAMESPACE} not found (install dashboard first)" >&2
     return 1
   fi
 
-  if ! kubectl_ctx "$cluster" -n "$NAMESPACE" get serviceaccount "$SERVICE_ACCOUNT" >/dev/null 2>&1; then
+  if ! kubectl_cluster "$cluster" -n "$NAMESPACE" get serviceaccount "$SERVICE_ACCOUNT" >/dev/null 2>&1; then
     echo "error: service account ${SERVICE_ACCOUNT} not found in ${NAMESPACE}" >&2
     return 1
   fi
@@ -117,7 +122,7 @@ print_dashboard_key() {
   echo "Service account: ${SERVICE_ACCOUNT}"
   echo "Token (paste into the dashboard login page):"
   echo
-  kubectl_ctx "$cluster" -n "$NAMESPACE" create token "$SERVICE_ACCOUNT" --duration="$TOKEN_DURATION"
+  kubectl_cluster "$cluster" -n "$NAMESPACE" create token "$SERVICE_ACCOUNT" --duration="$TOKEN_DURATION"
   echo
 }
 
@@ -173,7 +178,10 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-setup_kubeconfig
+if [[ ! -f "$SSH_CONFIG" ]]; then
+  echo "error: SSH config not found: $SSH_CONFIG" >&2
+  exit 1
+fi
 
 failed=0
 for cluster in "${clusters[@]}"; do

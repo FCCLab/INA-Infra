@@ -21,4 +21,6 @@ Check sync: `./scripts/check-configsync.sh -c central@central -n central-repo`
 
 Dashboard token: `./initial_central/scripts/get_dashboard_token.sh` (uses `KCTX=central@central`)
 
+Operator access from **10.1.132.0/24**: [https://10.1.132.210:8443](https://10.1.132.210:8443) via [`scripts/kubectl_forward.sh`](../scripts/kubectl_forward.sh).
+
 See [ip.md](../ip.md) for the full address plan.

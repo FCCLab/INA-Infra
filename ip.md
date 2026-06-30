@@ -42,6 +42,24 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.137.80 | edge | OpenSpeedTest | 80 | [http://10.1.137.80](http://10.1.137.80) | `openspeedtest-edge.nephio.lab` |
 | 10.1.137.90 | ue | OpenSpeedTest | 80 | [http://10.1.137.90](http://10.1.137.90) | `openspeedtest-ue.nephio.lab` |
 
+Workload dashboard VIPs above are on the **site** network (`10.1.137.0/24`). From the operator network (`10.1.132.0/24`), use [scripts/kubectl_forward.sh](scripts/kubectl_forward.sh) instead:
+
+| Cluster | Dashboard URL (132, port-forward) |
+|---------|-----------------------------------|
+| mgmt | [https://10.1.132.200:8443](https://10.1.132.200:8443) |
+| central | [https://10.1.132.210:8443](https://10.1.132.210:8443) |
+| regional | [https://10.1.132.220:8443](https://10.1.132.220:8443) |
+| edge | [https://10.1.132.230:8443](https://10.1.132.230:8443) |
+| ue | [https://10.1.132.240:8443](https://10.1.132.240:8443) |
+
+```bash
+./scripts/kubectl_forward.sh              # all clusters (background)
+./scripts/kubectl_forward.sh central      # one cluster (foreground)
+./scripts/get_dashboard_key.sh            # login tokens
+```
+
+Mgmt also has MetalLB VIP [https://10.1.132.40](https://10.1.132.40) (no forward required).
+
 Dashboard login token: [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.sh).
 
 ## Node IPs
@@ -61,7 +79,7 @@ Dashboard login token: [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.
 
 SSH aliases: [utils/ssh_config/config](utils/ssh_config/config) (mgmt `.132` addresses). Default route: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
-Reach workload APIs and VIPs from your laptop via routing to `10.1.137.0/24`, or SSH port-forward through a node.
+Reach workload APIs and site VIPs (`10.1.137.0/24`) from the operator network via routing, or use dashboard port-forward on `10.1.132.x` ([scripts/kubectl_forward.sh](scripts/kubectl_forward.sh)).
 
 ## Install scripts
 
@@ -71,6 +89,7 @@ Reach workload APIs and VIPs from your laptop via routing to `10.1.137.0/24`, or
 | Cluster bootstrap (mgmt, 132 only) | [scripts/bringup_mgmt_cluster.sh](scripts/bringup_mgmt_cluster.sh) (alias for `bringup_cluster.sh mgmt`) |
 | MetalLB IP pool | [scripts/install_ip_pool.sh](scripts/install_ip_pool.sh) |
 | Kubernetes Dashboard | [scripts/install_dashboard.sh](scripts/install_dashboard.sh) |
+| Dashboard on mgmt (.132) | [scripts/kubectl_forward.sh](scripts/kubectl_forward.sh) |
 | OpenSpeedTest | [scripts/install_open_speed_test.sh](scripts/install_open_speed_test.sh) |
 | Dashboard bearer token | [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.sh) |
 | Site / mgmt netplan | [scripts/setup_ip.sh](scripts/setup_ip.sh) |
