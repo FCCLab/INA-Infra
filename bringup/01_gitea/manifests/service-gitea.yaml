@@ -7,16 +7,11 @@ metadata:
     app: gitea
     app.kubernetes.io/name: gitea
     app.kubernetes.io/instance: gitea
-  annotations:
-    metallb.universe.tf/loadBalancerIPs: 10.1.132.51
 spec:
-  type: LoadBalancer
-  allocateLoadBalancerNodePorts: false
+  type: ClusterIP
+  externalIPs:
+    - 10.1.132.200
   ports:
-  - name: ssh
-    port: 22
-    targetPort: 22
-    protocol: TCP
   - name: http
     port: 80
     targetPort: 3000

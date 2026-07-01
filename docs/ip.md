@@ -9,12 +9,12 @@ Two subnets split **operator/mgmt** from **cluster/data** traffic:
 
 Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](scripts/setup_ip.sh). Topology: [testbed/readme.md](testbed/readme.md).
 
-**MetalLB pools**
+**MetalLB pools** (deploy via GitOps; uninstall imperative install with [scripts/uninstall_metallb.sh](scripts/uninstall_metallb.sh))
 
-| Cluster type | Pool | Script |
-|--------------|------|--------|
-| mgmt | `10.1.132.10`–`10.1.132.99` | [scripts/install_ip_pool.sh](scripts/install_ip_pool.sh) |
-| workload (central, regional, edge, ue) | `10.1.137.40`–`10.1.137.99` | [scripts/install_ip_pool.sh](scripts/install_ip_pool.sh) |
+| Cluster type | Pool |
+|--------------|------|
+| mgmt | `10.1.132.10`–`10.1.132.99` |
+| workload (central, regional, edge, ue) | `10.1.137.40`–`10.1.137.99` |
 
 DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole static DNS: [services/etc-dnsmasq.d/99-nephio-static.conf](services/etc-dnsmasq.d/99-nephio-static.conf).
 
@@ -25,7 +25,7 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.132.30 | mgmt | Docker Registry | 5000 | [http://10.1.132.30:5000](http://10.1.132.30:5000) | `registry.nephio.lab` |
 | 10.1.132.40 | mgmt | Kubernetes Dashboard | 443 | [https://10.1.132.40](https://10.1.132.40) | `dashboard-mgmt.nephio.lab` |
 | 10.1.132.50 | mgmt | OpenSpeedTest | 80 | [http://10.1.132.50](http://10.1.132.50) | `openspeedtest-mgmt.nephio.lab` |
-| 10.1.132.51 | mgmt | Gitea | 22, 80, 3000 | [http://10.1.132.51:3000](http://10.1.132.51:3000) · [http://10.1.132.51](http://10.1.132.51) | `gitea.nephio.lab` |
+| 10.1.132.200 | mgmt | Gitea | 80, 3000 | [http://10.1.132.200:3000](http://10.1.132.200:3000) · [http://10.1.132.200](http://10.1.132.200) | `gitea.nephio.lab` |
 | 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.nephio.lab` |
 
 ## Workload MetalLB VIPs (`10.1.137.0/24`)
@@ -87,10 +87,12 @@ Reach workload APIs and site VIPs (`10.1.137.0/24`) from the operator network vi
 |-----------|--------|
 | Cluster bootstrap (workload) | [scripts/bringup_cluster.sh](scripts/bringup_cluster.sh) (`--join` for worker only) |
 | Cluster bootstrap (mgmt, 132 only) | [scripts/bringup_mgmt_cluster.sh](scripts/bringup_mgmt_cluster.sh) (alias for `bringup_cluster.sh mgmt`) |
-| MetalLB IP pool | [scripts/install_ip_pool.sh](scripts/install_ip_pool.sh) |
-| Kubernetes Dashboard | [scripts/install_dashboard.sh](scripts/install_dashboard.sh) |
+| MetalLB (remove imperative install) | [scripts/uninstall_metallb.sh](scripts/uninstall_metallb.sh) |
+| Flannel CNI (remove imperative install) | [scripts/uninstall_flannel.sh](scripts/uninstall_flannel.sh) |
+| Kubernetes Dashboard (remove imperative install) | [scripts/uninstall_dashboard.sh](scripts/uninstall_dashboard.sh) |
+| Kubernetes Dashboard (manual install) | [scripts/install_dashboard.sh](scripts/install_dashboard.sh) |
 | Dashboard on mgmt (.132) | [scripts/kubectl_forward.sh](scripts/kubectl_forward.sh) |
-| Gitea repos (workload Config Sync) | [configsync/add-gitea-repos.sh](configsync/add-gitea-repos.sh) |
+| Gitea repos (Config Sync) | [bringup/02_configsync/configsync.sh](bringup/02_configsync/configsync.sh) |
 | Nephio WorkloadCluster registration | [configsync/setup_api_of_clusters.sh](configsync/setup_api_of_clusters.sh) |
 | OpenSpeedTest | [scripts/install_open_speed_test.sh](scripts/install_open_speed_test.sh) |
 | Dashboard bearer token | [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.sh) |

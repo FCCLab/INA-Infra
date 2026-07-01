@@ -1,0 +1,14 @@
+apiVersion: configsync.gke.io/v1beta1
+kind: RootSync
+metadata:
+  name: edge-repo
+  namespace: config-management-system
+spec:
+  sourceFormat: unstructured
+  git:
+    repo: http://10.1.132.200:3000/nephio/edge-repo.git
+    branch: main
+    auth: token
+    secretRef:
+      name: edge-repo-access-token-configsync
+    period: 15s

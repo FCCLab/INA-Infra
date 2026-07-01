@@ -21,7 +21,7 @@ expand_path() {
 }
 
 usage() {
-  local ui_host="${GITEA_HOST:-10.1.132.51}"
+  local ui_host="${GITEA_HOST:-${MGMT_API_IP:-10.1.132.200}}"
   local ui_port="${GITEA_PORT:-3000}"
   local kcfg="${MGMT_KUBECONFIG:-${KUBECONFIG:-$HOME/.kube/config}}"
   local kctx="${MGMT_CTX:-mgmt@mgmt}"
@@ -38,11 +38,11 @@ Manifests:  ${mdir}
   kubeconfig: ${kcfg}
   context:    ${kctx}
 
-Edit gitea.conf and YAML under gitea/manifests/, or pass CLI flags.
+Edit gitea.conf (GITEA_HOST = mgmt node IP, default ${MGMT_API_IP}) and manifests/, or pass CLI flags.
 
 Prerequisites:
   - mgmt cluster Ready; kubectl context in kubeconfig above
-  - MetalLB + local-pool (./scripts/install_ip_pool.sh mgmt)
+  - CNI running (pod network)
   - kubectl
 
 Options:
@@ -62,8 +62,8 @@ Examples:
   $(basename "$0") -u
 
 After install (repos were lost if Gitea was pruned):
-  ./bringup/02_configsync/add-gitea-repos.sh --include-mgmt
-  ./bringup/02_configsync/setup_cluster_repos.sh
+  ./bringup/02_configsync/configsync.sh repos
+  ./bringup/02_configsync/configsync.sh tokens
   ./bringup/03_push_to_git_repos/push_git_repos.sh
 
 UI: http://${ui_host}:${ui_port}  (${GITEA_USER:-nephio} / ${GITEA_PASSWORD:-secret})
@@ -85,12 +85,46 @@ load_config() {
   MGMT_CTX="${CLI_CONTEXT:-${MGMT_CTX:-${KUBECONFIG_CONTEXT:-$(kube_context mgmt)}}}"
 
   GITEA_NAMESPACE="${GITEA_NAMESPACE:-gitea}"
-  GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
+  GITEA_HOST="${GITEA_HOST:-$MGMT_API_IP}"
   GITEA_PORT="${GITEA_PORT:-3000}"
-  GITEA_LB_IP="${GITEA_LB_IP:-$GITEA_HOST}"
   GITEA_USER="${GITEA_USER:-nephio}"
   GITEA_PASSWORD="${GITEA_PASSWORD:-secret}"
   POD_READY_TIMEOUT="${POD_READY_TIMEOUT:-600s}"
+}
+
+sync_gitea_manifests() {
+  local host="$1"
+  local port="$2"
+  local svc="${GITEA_MANIFESTS_DIR_ABS}/service-gitea.yaml"
+  local secret="${GITEA_MANIFESTS_DIR_ABS}/secret-gitea-inline-config.yaml"
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "    dry-run: sync service externalIPs and Gitea ROOT_URL to ${host}:${port}"
+    return 0
+  fi
+
+  python3 - "$svc" "$secret" "$host" "$port" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+svc_path, secret_path, host, port = sys.argv[1:5]
+root_url = f"http://{host}:{port}"
+
+svc = Path(svc_path).read_text()
+svc = re.sub(
+    r"(?m)^  externalIPs:\n(?:    - .*\n)+",
+    f"  externalIPs:\n    - {host}\n",
+    svc,
+)
+Path(svc_path).write_text(svc)
+
+secret = Path(secret_path).read_text()
+secret = re.sub(r"(?m)^    DOMAIN=.*$", f"    DOMAIN={host}", secret)
+secret = re.sub(r"(?m)^    ROOT_URL=.*$", f"    ROOT_URL={root_url}", secret)
+secret = re.sub(r"(?m)^    SSH_DOMAIN=.*$", f"    SSH_DOMAIN={host}", secret)
+Path(secret_path).write_text(secret)
+PY
 }
 
 validate_kube_access() {
@@ -172,6 +206,8 @@ apply_storage() {
 
 install_gitea() {
   echo "==> install Gitea from ${GITEA_MANIFESTS_DIR_ABS}"
+  echo "    publish at http://${GITEA_HOST}:${GITEA_PORT} (mgmt node IP, no MetalLB)"
+  sync_gitea_manifests "$GITEA_HOST" "$GITEA_PORT"
   apply_manifests "$GITEA_MANIFESTS_DIR_ABS" "${GITEA_MANIFESTS[@]}"
 
   if [[ "$DRY_RUN" == "1" ]]; then
@@ -188,7 +224,7 @@ install_gitea() {
   echo "Gitea UI: http://${GITEA_HOST}:${GITEA_PORT}"
   echo "Login:    ${GITEA_USER} / ${GITEA_PASSWORD}"
   echo
-  echo "Recreate empty repos: ./bringup/02_configsync/add-gitea-repos.sh --include-mgmt"
+  echo "Recreate empty repos: ./bringup/02_configsync/configsync.sh repos"
 }
 
 uninstall_gitea() {
@@ -279,10 +315,6 @@ fi
 if [[ "$DRY_RUN" != "1" ]] && ! kubectl_mgmt get storageclass local-path >/dev/null 2>&1; then
   echo "error: StorageClass local-path missing — rerun with --with-storage" >&2
   exit 1
-fi
-
-if [[ "$DRY_RUN" != "1" ]] && ! kubectl_mgmt get ipaddresspool -n metallb-system local-pool >/dev/null 2>&1; then
-  echo "warning: MetalLB pool local-pool not found — run ./scripts/install_ip_pool.sh mgmt" >&2
 fi
 
 install_gitea

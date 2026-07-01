@@ -9,7 +9,7 @@ source "$REPO_ROOT/scripts/cluster_lib.sh"
 
 REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 
-GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
+GITEA_HOST="${GITEA_HOST:-10.1.132.200}"
 GITEA_PORT="${GITEA_PORT:-3000}"
 GITEA_USER="${GITEA_USER:-nephio}"
 GITEA_PASS="${GITEA_PASS:-secret}"
@@ -35,7 +35,7 @@ Each cluster maps to a Gitea repo (see repos/):
   ue        → repos/ue-repo           → nephio/ue-repo
 
 Prerequisites:
-  - Gitea repos exist (./bringup/02_configsync/add-gitea-repos.sh --include-mgmt)
+  - Gitea repos exist (./bringup/02_configsync/configsync.sh repos)
   - Config Sync + RootSync on each target cluster
   - git on this host
 

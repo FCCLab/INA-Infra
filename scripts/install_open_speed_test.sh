@@ -14,7 +14,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options] [cluster ...]
 
-Install or uninstall OpenSpeedTest on cluster control planes with MetalLB LoadBalancer VIPs.
+Install or uninstall OpenSpeedTest on cluster control planes with LoadBalancer VIPs.
 With no cluster arguments, targets mgmt, central, regional, edge, and ue.
 
 OpenSpeedTest URLs (http):
@@ -24,7 +24,7 @@ OpenSpeedTest URLs (http):
   edge      $(openspeedtest_vip edge)
   ue        $(openspeedtest_vip ue)
 
-Requires MetalLB and local-pool (run install_ip_pool.sh first).
+LoadBalancer VIPs require MetalLB (deploy via GitOps).
 
 Options:
   --uninstall, -u   Remove OpenSpeedTest deployment and service
@@ -81,11 +81,6 @@ export KUBECONFIG="\$HOME/.kube/config"
 
 if [[ ! -f "\$KUBECONFIG" ]]; then
   echo "error: missing \$KUBECONFIG (bring up ${cluster} first)" >&2
-  exit 1
-fi
-
-if ! kubectl get ipaddresspool -n metallb-system local-pool >/dev/null 2>&1; then
-  echo "error: MetalLB pool local-pool not found (run install_ip_pool.sh ${cluster} first)" >&2
   exit 1
 fi
 

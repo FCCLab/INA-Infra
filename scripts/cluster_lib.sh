@@ -211,7 +211,7 @@ cluster_gitea_repo_name() {
 
 gitea_repo_url() {
   local repo_name="$1"
-  local host="${GITEA_HOST:-10.1.132.51}"
+  local host="${GITEA_HOST:-$MGMT_API_IP}"
   local port="${GITEA_PORT:-3000}"
   local org="${GITEA_ORG:-nephio}"
   printf 'http://%s:%s/%s/%s.git' "$host" "$port" "$org" "$repo_name"

@@ -19,7 +19,8 @@ NETPLAN_DIR="${NETPLAN_DIR:-$REPO_ROOT/utils/netplan}"
 NETPLAN_SITE="${NETPLAN_SITE:-60-nephio.yaml}"
 SKIP_LOCAL_KUBECONFIG="${SKIP_LOCAL_KUBECONFIG:-0}"
 SSH_USER="${SSH_USER:-fcp}"
-INSTALL_DASHBOARD="${INSTALL_DASHBOARD:-1}"
+INSTALL_DASHBOARD="${INSTALL_DASHBOARD:-0}"
+INSTALL_FLANNEL="${INSTALL_FLANNEL:-0}"
 JOIN_WORKER_ONLY=0
 
 SUDO_PASSWORD="${SUDO_PASSWORD:-}"
@@ -67,7 +68,8 @@ Environment:
   POD_NETWORK_CIDR        Flannel CIDR (default: 10.244.0.0/16)
   DNS_SERVER              Resolver for apt on remote hosts (default: 10.1.132.200)
   SKIP_LOCAL_KUBECONFIG   Set to 1 to skip copying kubeconfigs to local ~/.kube
-  INSTALL_DASHBOARD       Set to 0 to skip MetalLB + Dashboard (default: 1)
+  INSTALL_FLANNEL         Set to 1 to install Flannel CNI (default: 0, use GitOps)
+  INSTALL_DASHBOARD       Set to 1 to install Kubernetes Dashboard (default: 0, use GitOps)
   SUDO_PASSWORD           Optional sudo password (prompted per host if needed)
 EOF
 }
@@ -664,8 +666,10 @@ bringup_mgmt_cluster() {
   echo "==> [mgmt] kubeadm init"
   kubeadm_init_cp "$cp_host" "$api_ip" || return 1
   setup_remote_kubeconfig "$cp_host" "$cluster" || return 1
-  install_flannel "$cp_host" || return 1
-  wait_flannel_ready "$cp_host" || true
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    install_flannel "$cp_host" || return 1
+    wait_flannel_ready "$cp_host" || true
+  fi
   wait_node_ready "$cp_host" "$cp_host" || true
   remote_kubectl "$cp_host" get nodes -o wide
 
@@ -677,10 +681,12 @@ bringup_mgmt_cluster() {
   kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
   wait_node_ready "$cp_host" "$worker_host" || true
 
-  echo "==> [mgmt] CNI prerequisites and Flannel on all nodes"
-  ensure_cni_prereqs "$cp_host" || return 1
-  ensure_cni_prereqs "$worker_host" || return 1
-  restart_flannel "$cp_host"
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    echo "==> [mgmt] CNI prerequisites and Flannel on all nodes"
+    ensure_cni_prereqs "$cp_host" || return 1
+    ensure_cni_prereqs "$worker_host" || return 1
+    restart_flannel "$cp_host"
+  fi
 
   remote_kubectl "$cp_host" get nodes -o wide
 
@@ -691,7 +697,7 @@ bringup_mgmt_cluster() {
   fi
 
   if [[ "$INSTALL_DASHBOARD" == "1" ]]; then
-    echo "==> [mgmt] MetalLB + Kubernetes Dashboard"
+    echo "==> [mgmt] Kubernetes Dashboard"
     "$SCRIPT_DIR/install_dashboard.sh" mgmt || return 1
   fi
 
@@ -724,10 +730,12 @@ join_worker_mgmt() {
   kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
   wait_node_ready "$cp_host" "$worker_host" || true
 
-  echo "==> [mgmt] CNI prerequisites and Flannel on worker"
-  ensure_cni_prereqs "$cp_host" || return 1
-  ensure_cni_prereqs "$worker_host" || return 1
-  restart_flannel "$cp_host"
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    echo "==> [mgmt] CNI prerequisites and Flannel on worker"
+    ensure_cni_prereqs "$cp_host" || return 1
+    ensure_cni_prereqs "$worker_host" || return 1
+    restart_flannel "$cp_host"
+  fi
 
   remote_kubectl "$cp_host" get nodes -o wide
   echo "==> [mgmt] Worker join done"
@@ -761,10 +769,12 @@ join_worker_cluster() {
   kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
   wait_node_ready "$cp_host" "$worker_host" || true
 
-  echo "==> [${cluster}] CNI prerequisites and Flannel on worker"
-  ensure_cni_prereqs "$cp_host" || return 1
-  ensure_cni_prereqs "$worker_host" || return 1
-  restart_flannel "$cp_host"
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    echo "==> [${cluster}] CNI prerequisites and Flannel on worker"
+    ensure_cni_prereqs "$cp_host" || return 1
+    ensure_cni_prereqs "$worker_host" || return 1
+    restart_flannel "$cp_host"
+  fi
 
   remote_kubectl "$cp_host" get nodes -o wide
   echo "==> [${cluster}] Worker join done"
@@ -797,8 +807,10 @@ bringup_cluster() {
   echo "==> [${cluster}] kubeadm init"
   kubeadm_init_cp "$cp_host" "$api_ip" || return 1
   setup_remote_kubeconfig "$cp_host" "$cluster" || return 1
-  install_flannel_workload "$cp_host" || return 1
-  wait_flannel_ready "$cp_host" || true
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    install_flannel_workload "$cp_host" || return 1
+    wait_flannel_ready "$cp_host" || true
+  fi
   wait_node_ready "$cp_host" "$cp_host" || true
   remote_kubectl "$cp_host" get nodes -o wide
 
@@ -810,10 +822,12 @@ bringup_cluster() {
   kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$worker_ip" || return 1
   wait_node_ready "$cp_host" "$worker_host" || true
 
-  echo "==> [${cluster}] CNI prerequisites and Flannel on all nodes"
-  ensure_cni_prereqs "$cp_host" || return 1
-  ensure_cni_prereqs "$worker_host" || return 1
-  restart_flannel "$cp_host"
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    echo "==> [${cluster}] CNI prerequisites and Flannel on all nodes"
+    ensure_cni_prereqs "$cp_host" || return 1
+    ensure_cni_prereqs "$worker_host" || return 1
+    restart_flannel "$cp_host"
+  fi
 
   remote_kubectl "$cp_host" get nodes -o wide
 
@@ -824,7 +838,7 @@ bringup_cluster() {
   fi
 
   if [[ "$INSTALL_DASHBOARD" == "1" ]]; then
-    echo "==> [${cluster}] MetalLB + Kubernetes Dashboard"
+    echo "==> [${cluster}] Kubernetes Dashboard"
     "$SCRIPT_DIR/install_dashboard.sh" "$cluster" || return 1
   fi
 

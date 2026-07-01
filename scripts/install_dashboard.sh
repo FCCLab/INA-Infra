@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install MetalLB + Kubernetes Dashboard on workload clusters (control plane via SSH).
+# Install Kubernetes Dashboard on mgmt and workload clusters (control plane via SSH).
+# Prefer GitOps (repos/) — default bringup skips dashboard; use uninstall_dashboard.sh to remove.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,15 +13,17 @@ SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
 DASHBOARD_CHART_VERSION="${DASHBOARD_CHART_VERSION:-7.14.0}"
 DASHBOARD_CHART_REPO="${DASHBOARD_CHART_REPO:-https://kubernetes-retired.github.io/dashboard/}"
 DASHBOARD_CHART_URL="${DASHBOARD_CHART_URL:-https://github.com/kubernetes-retired/dashboard/releases/download/kubernetes-dashboard-${DASHBOARD_CHART_VERSION}/kubernetes-dashboard-${DASHBOARD_CHART_VERSION}.tgz}"
-METALLB_CHART_VERSION="${METALLB_CHART_VERSION:-0.14.9}"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [cluster ...]
 
-Install MetalLB and Kubernetes Dashboard on workload cluster control planes.
+Install Kubernetes Dashboard on cluster control planes.
 With no arguments, installs on central, regional, edge, and ue.
-Pass mgmt to install on the mgmt cluster (10.1.132/24 VIPs).
+Pass mgmt to install on the mgmt cluster.
+
+Dashboard uses a LoadBalancer Service (VIP annotations in cluster_lib).
+MetalLB must be deployed via GitOps before the VIP is reachable.
 
 Dashboard VIPs (https):
   central   ${CLUSTER_DASHBOARD_VIP[central]}
@@ -35,8 +38,6 @@ Login: service account admin-user (cluster-admin). Get a token:
 Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
   DASHBOARD_CHART_VERSION Helm chart version (default: 7.14.0)
-  METALLB_CHART_VERSION   Helm chart version (default: 0.14.9)
-  METALLB_POOL            Override address pool (default: mgmt ${MGMT_METALLB_POOL}, workload ${CLUSTER_METALLB_POOL})
 EOF
 }
 
@@ -85,10 +86,9 @@ EOF
 
 install_dashboard_on_cluster() {
   local cluster="$1"
-  local host vip pool
+  local host vip
   host="$(cluster_cp_host "$cluster")"
   vip="$(dashboard_vip "$cluster")"
-  pool="$(metallb_pool_for_cluster "$cluster")"
 
   echo
   echo "========================================"
@@ -108,36 +108,6 @@ if [[ ! -f "\$KUBECONFIG" ]]; then
 fi
 
 $(install_helm_remote_script)
-
-echo "==> MetalLB"
-helm repo add metallb https://metallb.github.io/metallb 2>/dev/null || true
-helm repo update metallb
-if ! kubectl get namespace metallb-system >/dev/null 2>&1; then
-  helm upgrade --install metallb metallb/metallb \\
-    --namespace metallb-system --create-namespace \\
-    --version ${METALLB_CHART_VERSION} --wait --timeout 10m
-else
-  helm upgrade --install metallb metallb/metallb \\
-    --namespace metallb-system \\
-    --version ${METALLB_CHART_VERSION} --wait --timeout 10m
-fi
-
-kubectl apply -f - <<METALLB
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: local-pool
-  namespace: metallb-system
-spec:
-  addresses:
-    - ${pool}
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: local-advertisement
-  namespace: metallb-system
-METALLB
 
 echo "==> Kubernetes Dashboard (chart ${DASHBOARD_CHART_VERSION})"
 chart_tgz="/tmp/kubernetes-dashboard-${DASHBOARD_CHART_VERSION}.tgz"
