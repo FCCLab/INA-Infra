@@ -26,7 +26,7 @@ Copy utils/netplan/<host>/${NETPLAN_MGMT} and ${NETPLAN_SITE} to each host
 and run netplan apply. With no arguments, deploys to all workload nodes.
 
 ${NETPLAN_MGMT}  enp1s0 mgmt IP, default via ${MGMT_GATEWAY}, DNS Pi-hole
-${NETPLAN_SITE}  enp7s0 site IP on 10.1.137.0/24
+${NETPLAN_SITE}  enp7s0 site IPs on 10.1.137.0/24 (K8s) + 10.1.138.0/24 (MetalLB)
 
 Examples:
   $(basename "$0")

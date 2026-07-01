@@ -1,5 +1,7 @@
 # Bring up Nephio
 
+Current testbed IPs, MetalLB pools (`10.1.138.100`–`.199`), and VIPs: [docs/ip.md](docs/ip.md). Topology: [bringup/00_testbed/readme.md](bringup/00_testbed/readme.md).
+
 ## Cluster networking
 
 | Layer | CIDR / address | Notes |
@@ -100,11 +102,11 @@ Git credentials in `000-mgmt-repos.yaml` match `bringup/gitea/secret-git-user.ya
 
 | Gitea repo | Browse | Purpose |
 |------------|--------|---------|
-| **mgmt** | [http://10.1.132.51:3000/nephio/mgmt](http://10.1.132.51:3000/nephio/mgmt) | Management cluster deployment packages |
-| **mgmt-staging** | [http://10.1.132.51:3000/nephio/mgmt-staging](http://10.1.132.51:3000/nephio/mgmt-staging) | Mgmt bootstrap / staging |
-| **central-repo** | [http://10.1.132.51:3000/nephio/central-repo](http://10.1.132.51:3000/nephio/central-repo) | Central workload cluster packages |
+| **mgmt** | [http://10.1.132.200:3000/nephio/mgmt](http://10.1.132.200:3000/nephio/mgmt) | Management cluster deployment packages |
+| **mgmt-staging** | [http://10.1.132.200:3000/nephio/mgmt-staging](http://10.1.132.200:3000/nephio/mgmt-staging) | Mgmt bootstrap / staging |
+| **central-repo** | [http://10.1.132.200:3000/nephio/central-repo](http://10.1.132.200:3000/nephio/central-repo) | Central workload cluster packages |
 
-Gitea UI: `http://10.1.132.51:3000` (port **80** on the same VIP also works).
+Gitea UI: [http://10.1.132.200:3000](http://10.1.132.200:3000) (node IP on mgmt control plane; port **80** on the same host also works).
 
 ## Central workload cluster
 

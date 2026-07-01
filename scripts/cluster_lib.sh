@@ -43,16 +43,16 @@ declare -A CLUSTER_WORKER_IP=(
   [ue]=10.1.137.141
 )
 declare -A CLUSTER_DASHBOARD_VIP=(
-  [central]=10.1.137.41
-  [regional]=10.1.137.42
-  [edge]=10.1.137.43
-  [ue]=10.1.137.44
+  [central]=10.1.138.100
+  [regional]=10.1.138.125
+  [edge]=10.1.138.150
+  [ue]=10.1.138.175
 )
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
-  [central]=10.1.137.60
-  [regional]=10.1.137.70
-  [edge]=10.1.137.80
-  [ue]=10.1.137.90
+  [central]=10.1.138.101
+  [regional]=10.1.138.126
+  [edge]=10.1.138.151
+  [ue]=10.1.138.176
 )
 # Nephio PackageVariantSet / WorkloadCluster label (nephio.org/site-type)
 declare -A CLUSTER_SITE_TYPE=(
@@ -63,14 +63,22 @@ declare -A CLUSTER_SITE_TYPE=(
 )
 
 MGMT_METALLB_POOL="${MGMT_METALLB_POOL:-10.1.132.10-10.1.132.99}"
-CLUSTER_METALLB_POOL="${CLUSTER_METALLB_POOL:-10.1.137.40-10.1.137.99}"
+CLUSTER_METALLB_POOL="${CLUSTER_METALLB_POOL:-10.1.138.100-10.1.138.199}"
+# MetalLB VIPs on enp7s0 (10.1.138.0/24), partitioned per cluster on shared site L2.
+CLUSTER_METALLB_SITE_POOL="${CLUSTER_METALLB_SITE_POOL:-10.1.138.100-10.1.138.199}"
+declare -A CLUSTER_METALLB_SITE_POOL_SLICE=(
+  [central]=10.1.138.100-10.1.138.124
+  [regional]=10.1.138.125-10.1.138.149
+  [edge]=10.1.138.150-10.1.138.174
+  [ue]=10.1.138.175-10.1.138.199
+)
 
 MGMT_CP_HOST="${MGMT_CP_HOST:-mgmt-0}"
 MGMT_WORKER_HOST="${MGMT_WORKER_HOST:-mgmt-1}"
 MGMT_API_IP="${MGMT_API_IP:-10.1.132.200}"
 MGMT_WORKER_IP="${MGMT_WORKER_IP:-10.1.132.201}"
-MGMT_DASHBOARD_VIP="${MGMT_DASHBOARD_VIP:-10.1.132.40}"
-MGMT_OPENSPEEDTEST_VIP="${MGMT_OPENSPEEDTEST_VIP:-10.1.132.50}"
+MGMT_DASHBOARD_VIP="${MGMT_DASHBOARD_VIP:-10.1.132.10}"
+MGMT_OPENSPEEDTEST_VIP="${MGMT_OPENSPEEDTEST_VIP:-10.1.132.11}"
 
 ALL_OPENSPEEDTEST_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 ALL_METALLB_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
@@ -142,6 +150,37 @@ metallb_pool_for_cluster() {
     printf '%s' "$MGMT_METALLB_POOL"
   else
     printf '%s' "$CLUSTER_METALLB_POOL"
+  fi
+}
+
+# MetalLB VIP pool on site NIC (enp7s0, 10.1.138.0/24); one slice per workload cluster.
+metallb_site_pool_for_cluster() {
+  local cluster="$1"
+  if [[ -n "${METALLB_SITE_POOL:-}" ]]; then
+    printf '%s' "$METALLB_SITE_POOL"
+    return
+  fi
+  if [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "$MGMT_METALLB_POOL"
+  else
+    printf '%s' "${CLUSTER_METALLB_SITE_POOL_SLICE[$cluster]}"
+  fi
+}
+
+metallb_site_pool_name() {
+  if [[ "${1:-}" == "mgmt" ]]; then
+    printf 'mgmt-pool'
+  else
+    printf 'site-pool'
+  fi
+}
+
+metallb_l2_interface_for_cluster() {
+  local cluster="$1"
+  if [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "${MGMT_IFACE:-enp1s0}"
+  else
+    printf '%s' "${SITE_IFACE:-enp7s0}"
   fi
 }
 

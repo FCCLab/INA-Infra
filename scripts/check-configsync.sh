@@ -224,9 +224,7 @@ print_sync_resource() {
       [[ "${count:-0}" == "0" ]] && continue
       echo "  ${phase} errors:"
       kubectl_ctx get "$resource" -n "$NS" -o jsonpath="{range .status.${phase}.errorSummary.errorCountByCode[*]}{.errorCode}: {.count}{'\n'}{end}" 2>/dev/null || true
-      if [[ "$VERBOSE" == "1" ]]; then
-        kubectl_ctx get "$resource" -n "$NS" -o jsonpath="{range .status.${phase}.errors[*]}{.code}: {.errorMessage}{'\n'}{end}" 2>/dev/null || true
-      fi
+      kubectl_ctx get "$resource" -n "$NS" -o jsonpath="{range .status.${phase}.errors[*]}{.code}: {.errorMessage}{'\n'}{end}" 2>/dev/null || true
     done
   fi
   echo

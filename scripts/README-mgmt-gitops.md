@@ -12,7 +12,7 @@ chmod +x initial_mgmt/scripts/export-mgmt-live.sh initial_mgmt/scripts/push-mgmt
 
 kubectl config use-context mgmt@mgmt
 
-curl -fsS -u nephio:secret http://10.1.132.51:3000/api/v1/repos/nephio/mgmt
+curl -fsS -u nephio:secret http://10.1.132.200:3000/api/v1/repos/nephio/mgmt
 ```
 
 Config Sync must already run on mgmt (`config-management-system` namespace). RootSync is applied by the push script.
@@ -24,7 +24,7 @@ Config Sync must already run on mgmt (`config-management-system` namespace). Roo
 ./initial_mgmt/scripts/push-mgmt-to-gitea.sh       # pushes initial_mgmt/ → Gitea
 ```
 
-Browse: http://10.1.132.51:3000/nephio/mgmt
+Browse: http://10.1.132.200:3000/nephio/mgmt
 
 ## Day-2 workflow
 
@@ -73,9 +73,9 @@ initial_mgmt/
 | Gitea, Porch, Nephio, WebUI, MetalLB, dashboard, … | `kube-system` |
 | Deployments, StatefulSets, Services, ConfigMaps, Secrets | `config-management-system` |
 | `local-path` StorageClass | Pods, ReplicaSets, Porch PackageRevisions |
-| **`default` namespace** | **OpenSpeedTest only** (`openspeedtest` + LB `10.1.132.50`) — not porch secrets |
+| **`default` namespace** | **OpenSpeedTest only** (`openspeedtest` + LB `10.1.132.11`) — not porch secrets |
 
-OpenSpeedTest URL after sync: **http://10.1.132.50**
+OpenSpeedTest URL after sync: **http://10.1.132.11**
 
 ```bash
 SKIP_SECRETS=1 ./initial_mgmt/scripts/export-mgmt-live.sh   # omit Secrets

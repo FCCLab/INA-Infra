@@ -9,7 +9,7 @@ export KUBECONFIG=$HOME/.kube/config:$HOME/.kube/config-central
 kubectl config get-contexts   # need central@central
 
 # Gitea repo exists
-curl -fsS -u nephio:secret http://10.1.132.51:3000/api/v1/repos/nephio/central-repo
+curl -fsS -u nephio:secret http://10.1.132.200:3000/api/v1/repos/nephio/central-repo
 
 # Config Sync running on central (central/configsync kpt apply)
 kubectl --context=central@central get pods -n config-management-system
@@ -27,7 +27,7 @@ chmod +x initial_central/scripts/export-central-live.sh initial_central/scripts/
 ./initial_central/scripts/push-central-to-gitea.sh        # pushes → Gitea, bootstraps RootSync if needed
 ```
 
-Browse: http://10.1.132.51:3000/nephio/central-repo
+Browse: http://10.1.132.200:3000/nephio/central-repo
 
 ## Day-2 workflow
 
@@ -72,6 +72,6 @@ EXPORT_NAMESPACES="local-path-storage oai5g oai-cp" ./initial_central/scripts/ex
 
 - Token secret is created on **mgmt**; copied to **central** `config-management-system` by `initial_central/scripts/push-central-to-gitea.sh` or `scripts/setup-central-rootsync-token.sh`.
 - RootSync name: **`central-repo`**
-- Git repo: **`http://10.1.132.51:3000/nephio/central-repo.git`**
+- Git repo: **`http://10.1.132.200:3000/nephio/central-repo.git`**
 
 If RootSync exists with a stale Gitea URL, `initial_central/scripts/push-central-to-gitea.sh` patches it to the current `GITEA_HOST`/`GITEA_PORT`.

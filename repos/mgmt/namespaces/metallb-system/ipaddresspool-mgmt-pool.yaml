@@ -1,0 +1,9 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: mgmt-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 10.1.132.10-10.1.132.99
+  autoAssign: true

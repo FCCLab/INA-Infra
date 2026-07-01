@@ -6,3 +6,4 @@ network:
       dhcp4: false
       addresses:
         - 10.1.137.130/24
+        - 10.1.138.130/24

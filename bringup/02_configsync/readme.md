@@ -70,5 +70,16 @@ Verify:
 ```bash
 ./bringup/01_gitea/gitea.sh
 ./bringup/02_configsync/configsync.sh
+# Render GitOps manifests into repos/ (order matters for MetalLB — run OAI/Multus before MetalLB):
+./scripts/render_flannel_gitops.sh
+./scripts/render_local_path_gitops.sh
+./scripts/render_multus_gitops.sh          # workload clusters; before OAI NADs
+./scripts/render_oai_operators_gitops.sh central   # example: central only
+./scripts/render_oai_core_gitops.sh central
+./scripts/render_metallb_gitops.sh         # after Multus + Nephio CRDs present in cluster/
+./scripts/render_dashboard_gitops.sh
 ./bringup/03_push_to_git_repos/push_git_repos.sh
+./scripts/check-configsync.sh
 ```
+
+IP pools, VIPs, and node addresses: [docs/ip.md](../../docs/ip.md).

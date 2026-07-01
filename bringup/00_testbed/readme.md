@@ -1,21 +1,21 @@
 
 # Testbed topology
 
-Workload VMs have two addresses: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` (`10.1.137.0/24`, Kubernetes API, node traffic, MetalLB VIPs, L2 via `br-int-*`). Configure both with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
+Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` with two subnets on the same L2 (`br-int-*`): **`10.1.137.0/24`** (Kubernetes API, node traffic, Flannel) and **`10.1.138.0/24`** (MetalLB LoadBalancer VIPs). Configure with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
 **Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
 **Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard with [`scripts/install_dashboard.sh`](../scripts/install_dashboard.sh), operator dashboard access with [`scripts/kubectl_forward.sh`](../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
 
-| Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, site) | Dashboard (132) | Dashboard (137, site) | Context | Kubeconfig |
-|---------|---------------|--------|------------|---------------------|-----------------|----------------------|---------|------------|
-| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:8443` · `https://10.1.132.40` | — | `mgmt@mgmt` | `~/.kube/config` |
-| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:8443` | `https://10.1.137.41` | `central@central` | `~/.kube/config-central` |
-| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:8443` | `https://10.1.137.42` | `regional@regional` | `~/.kube/config-regional` |
-| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:8443` | `https://10.1.137.43` | `edge@edge` | `~/.kube/config-edge` |
-| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:8443` | `https://10.1.137.44` | `ue@ue` | `~/.kube/config-ue` |
+| Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, `.137`) | Dashboard (132 fwd) | Dashboard (`.138` VIP) | OpenSpeedTest (`.138`) | Context | Kubeconfig |
+|---------|---------------|--------|------------|------------------------|---------------------|------------------------|-------------------------|---------|------------|
+| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:8443` · `https://10.1.132.10` | `https://10.1.132.10` | `http://10.1.132.11` | `mgmt@mgmt` | `~/.kube/config` |
+| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:8443` | `https://10.1.138.100` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
+| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:8443` | `https://10.1.138.125` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
+| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:8443` | `https://10.1.138.150` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
+| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:8443` | `https://10.1.138.175` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
 
-**Dashboard (132):** run `./scripts/kubectl_forward.sh` (all clusters) or `./scripts/kubectl_forward.sh central` (one cluster). Port **8443** on each control-plane mgmt IP. Tokens: `./scripts/get_dashboard_key.sh`.
+**Dashboard (132):** run `./scripts/kubectl_forward.sh` when `.138` VIPs are not routed from the operator network. Port **8443** on each control-plane mgmt IP. Workload **MetalLB VIPs** use **`10.1.138.0/24`** (dashboard = 1st IP in each cluster pool slice, OpenSpeedTest = 2nd). Tokens: `./scripts/get_dashboard_key.sh`.
 
 **k9s** (local operator machine and all testbed nodes):
 
@@ -27,9 +27,9 @@ export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:
 k9s --context central@central
 ```
 
-SSH host aliases match the node names (`central-0`, `regional-0`, …) in [`utils/ssh_config/config`](../utils/ssh_config/config). Full VIP list: [`ip.md`](../ip.md).
+SSH host aliases match the node names (`central-0`, `regional-0`, …) in [`utils/ssh_config/config`](../utils/ssh_config/config). Full VIP and pool list: [`docs/ip.md`](../docs/ip.md).
 
-**Site NIC:** attach a second virtio NIC per workload VM to `br-int-<site>`; the guest sees it as `enp7s0`. Netplan: [`55-nephio-mgmt.yaml`](../utils/netplan/central-0/55-nephio-mgmt.yaml) (mgmt `enp1s0`, default via `10.1.132.1`) and [`60-nephio.yaml`](../utils/netplan/central-0/60-nephio.yaml) (site). Deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
+**Site NIC:** attach a second virtio NIC per workload VM to `br-int-<site>`; the guest sees it as `enp7s0`. Netplan: [`55-nephio-mgmt.yaml`](../utils/netplan/central-0/55-nephio-mgmt.yaml) (mgmt `enp1s0`, default via `10.1.132.1`) and [`60-nephio.yaml`](../utils/netplan/central-0/60-nephio.yaml) (site: `.137` + `.138` on `enp7s0`). Deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
 ```mermaid
 flowchart LR
@@ -219,18 +219,18 @@ virsh domiflist vm-sw-central
 | `br-ext-re` | `10.1.137.21/24` | regional + edge | `inf-lower` / `inf-upper` |
 | `br-ext-eu` | `10.1.137.22/24` | edge + UE | `inf-lower` / `inf-upper` |
 
-| Workload VM | Mgmt IP (`enp1s0`) | Site IP (`enp7s0`) | Attach to |
-|-------------|--------------------|---------------------|-----------|
-| Central-0 | `10.1.132.210` | `10.1.137.110` | `br-int-central` |
-| Central-1 | `10.1.132.211` | `10.1.137.111` | `br-int-central` |
-| Regional-0 | `10.1.132.220` | `10.1.137.120` | `br-int-regional` |
-| Regional-1 | `10.1.132.221` | `10.1.137.121` | `br-int-regional` |
-| Edge-0 | `10.1.132.230` | `10.1.137.130` | `br-int-edge` |
-| Edge-1 | `10.1.132.231` | `10.1.137.131` | `br-int-edge` |
-| UE-0 | `10.1.132.240` | `10.1.137.140` | `br-int-ue` |
-| UE-1 | `10.1.132.241` | `10.1.137.141` | `br-int-ue` |
+| Workload VM | Mgmt IP (`enp1s0`) | Site K8s (`.137`) | Site MetalLB (`.138`) | Attach to |
+|-------------|--------------------|-------------------|------------------------|-----------|
+| Central-0 | `10.1.132.210` | `10.1.137.110` | `10.1.138.110` | `br-int-central` |
+| Central-1 | `10.1.132.211` | `10.1.137.111` | `10.1.138.111` | `br-int-central` |
+| Regional-0 | `10.1.132.220` | `10.1.137.120` | `10.1.138.120` | `br-int-regional` |
+| Regional-1 | `10.1.132.221` | `10.1.137.121` | `10.1.138.121` | `br-int-regional` |
+| Edge-0 | `10.1.132.230` | `10.1.137.130` | `10.1.138.130` | `br-int-edge` |
+| Edge-1 | `10.1.132.231` | `10.1.137.131` | `10.1.138.131` | `br-int-edge` |
+| UE-0 | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | `br-int-ue` |
+| UE-1 | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | `br-int-ue` |
 
-Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0`. Full address plan: [`ip.md`](../ip.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
+Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0` (`.137` for K8s, `.138` for node identity on the MetalLB subnet). Full address plan: [`docs/ip.md`](../docs/ip.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
 
 vm-sw scripts and guest bridge setup: [`vm-sw/`](vm-sw/).
 

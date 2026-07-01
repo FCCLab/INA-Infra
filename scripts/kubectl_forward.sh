@@ -23,7 +23,7 @@ Usage: $(basename "$0") [options] [cluster|all ...]
 
 Run kubectl port-forward for the Kubernetes Dashboard, listening on the cluster
 control plane's mgmt address (10.1.132.x) so browsers on the operator network
-can reach workload dashboards without routing to 10.1.137.0/24.
+can reach workload dashboards without routing to 10.1.138.0/24 (MetalLB VIPs).
 
 With no arguments, forwards all clusters in the background (default: all).
 
@@ -114,7 +114,7 @@ print_forward_info() {
   fi
 
   echo "==> [${cluster}] ${host}: https://${bind}:${port}"
-  echo "    Site VIP (137): https://$(dashboard_vip "$cluster")"
+  echo "    Site VIP (138): https://$(dashboard_vip "$cluster")"
 }
 
 remote_forward_cmd() {
