@@ -1,0 +1,3 @@
+# Do not add gitea/ manifests here.
+# Gitea is platform infra on mgmt — install with ../gitea/gitea.sh
+# Config Sync pruning repos/mgmt will delete anything not listed under namespaces/.

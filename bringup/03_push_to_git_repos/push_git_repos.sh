@@ -3,9 +3,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=../scripts/cluster_lib.sh
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=../../scripts/cluster_lib.sh
 source "$REPO_ROOT/scripts/cluster_lib.sh"
+
+REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 
 GITEA_HOST="${GITEA_HOST:-10.1.132.51}"
 GITEA_PORT="${GITEA_PORT:-3000}"
@@ -33,7 +35,7 @@ Each cluster maps to a Gitea repo (see repos/):
   ue        → repos/ue-repo           → nephio/ue-repo
 
 Prerequisites:
-  - Gitea repos exist (./configsync/add-gitea-repos.sh --include-mgmt)
+  - Gitea repos exist (./bringup/02_configsync/add-gitea-repos.sh --include-mgmt)
   - Config Sync + RootSync on each target cluster
   - git on this host
 
@@ -44,8 +46,9 @@ Options:
 
 Environment:
   GITEA_HOST GITEA_PORT GITEA_USER GITEA_PASS GITEA_ORG
-  GIT_BRANCH          Branch to push (default: main)
-  COMMIT_MSG          Commit message
+  REPOS_DIR             Source tree (default: repos/ at repo root)
+  GIT_BRANCH            Branch to push (default: main)
+  COMMIT_MSG            Commit message
 
 Examples:
   $(basename "$0")
@@ -72,7 +75,7 @@ repo_source_dir() {
   local cluster="$1"
   local repo_name
   repo_name="$(cluster_gitea_repo_name "$cluster")"
-  printf '%s/%s' "$SCRIPT_DIR" "$repo_name"
+  printf '%s/%s' "$REPOS_DIR" "$repo_name"
 }
 
 git_url_for_repo() {
