@@ -92,9 +92,9 @@ print_dashboard_key() {
 
   echo "========================================"
   echo " Cluster: ${cluster}"
-  echo " URL:     ${operator_url}"
+  echo " URL:     ${operator_url}  (NodePort)"
   if [[ "$cluster" != "mgmt" ]]; then
-    echo " Site:    https://${site_vip}  (137 network; start ${SCRIPT_DIR}/kubectl_forward.sh if needed)"
+    echo " Site:    https://${site_vip}  (MetalLB VIP; optional if NodePort used)"
   fi
   echo " Context: ${ctx}"
   if [[ "$cluster" == "mgmt" ]]; then

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    helm.sh/chart: kubernetes-dashboard-7.14.0
+    app.kubernetes.io/instance: kubernetes-dashboard
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubernetes-dashboard
+  name: kong-dbless-config
+  namespace: kubernetes-dashboard
+data:
+  kong.yml: "_format_version: \"3.0\"\nservices:\n  - name: auth\n    host: kubernetes-dashboard-auth\n\
+    \    port: 8000\n    protocol: http\n    routes:\n      - name: authLogin\n  \
+    \      paths:\n          - /api/v1/login\n        strip_path: false\n      - name:\
+    \ authCsrf\n        paths:\n          - /api/v1/csrftoken/login\n        strip_path:\
+    \ false\n      - name: authMe\n        paths:\n          - /api/v1/me\n      \
+    \  strip_path: false\n  - name: api\n    host: kubernetes-dashboard-api\n    port:\
+    \ 8000\n    protocol: http\n    routes:\n      - name: api\n        paths:\n \
+    \         - /api\n        strip_path: false\n      - name: metrics\n        paths:\n\
+    \          - /metrics\n        strip_path: false\n  - name: web\n    host: kubernetes-dashboard-web\n\
+    \    port: 8000\n    protocol: http\n    routes:\n      - name: root\n       \
+    \ paths:\n          - /\n        strip_path: false\n"

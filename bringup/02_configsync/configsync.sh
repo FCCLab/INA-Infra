@@ -439,17 +439,29 @@ wait_for_token_on_mgmt() {
 
 copy_token_to_cluster() {
   local cluster="$1"
-  local repo_name secret_name yaml_pipe
+  local repo_name secret_name yaml_pipe target_ns
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   secret_name="${repo_name}-access-token-configsync"
+  target_ns="config-management-system"
 
   echo "==> [${cluster}] copy git token mgmt → ${secret_name}"
   wait_for_token_on_mgmt "$repo_name" || return 1
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "    dry-run: copy secret ${secret_name} to config-management-system"
+    echo "    dry-run: copy secret ${secret_name} to ${target_ns}"
     return 0
   fi
+
+  # Nephio Token CR may own a basic-auth secret; delete so type can be replaced.
+  cluster_kubectl "$cluster" delete token.infra.nephio.org "$secret_name" -n "$target_ns" \
+    --ignore-not-found --wait=false 2>/dev/null || true
+  cluster_kubectl "$cluster" delete secret "$secret_name" -n "$target_ns" \
+    --ignore-not-found --wait=false 2>/dev/null || true
+  if cluster_kubectl "$cluster" get token.infra.nephio.org "$secret_name" -n "$target_ns" >/dev/null 2>&1; then
+    cluster_kubectl "$cluster" patch token.infra.nephio.org "$secret_name" -n "$target_ns" \
+      -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+  fi
+  sleep 2
 
   yaml_pipe="$(kubectl_mgmt get secret "$secret_name" -n "$TOKEN_NAMESPACE" -o yaml \
     | python3 -c "
@@ -459,7 +471,7 @@ m = d.get('metadata', {})
 for k in ('uid','resourceVersion','creationTimestamp','managedFields','ownerReferences','annotations'):
     m.pop(k, None)
 m['name'] = '${secret_name}'
-m['namespace'] = 'config-management-system'
+m['namespace'] = '${target_ns}'
 d['metadata'] = m
 yaml.safe_dump(d, sys.stdout, default_flow_style=False)
 ")"

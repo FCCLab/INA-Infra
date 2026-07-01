@@ -19,13 +19,14 @@ usage() {
 Usage: $(basename "$0") [cluster ...]
 
 Install Kubernetes Dashboard on cluster control planes.
-With no arguments, installs on central, regional, edge, and ue.
-Pass mgmt to install on the mgmt cluster.
+With no arguments, installs on mgmt, central, regional, edge, and ue.
+Pass a subset to limit targets.
 
 Dashboard uses a LoadBalancer Service (VIP annotations in cluster_lib).
 MetalLB must be deployed via GitOps before the VIP is reachable.
 
 Dashboard VIPs (https):
+  mgmt      ${MGMT_DASHBOARD_VIP}
   central   ${CLUSTER_DASHBOARD_VIP[central]}
   regional  ${CLUSTER_DASHBOARD_VIP[regional]}
   edge      ${CLUSTER_DASHBOARD_VIP[edge]}
@@ -194,7 +195,7 @@ fi
 
 clusters=()
 if [[ $# -eq 0 ]]; then
-  clusters=("${ALL_CLUSTERS[@]}")
+  clusters=(mgmt "${ALL_CLUSTERS[@]}")
 else
   for c in "$@"; do
     case "$c" in

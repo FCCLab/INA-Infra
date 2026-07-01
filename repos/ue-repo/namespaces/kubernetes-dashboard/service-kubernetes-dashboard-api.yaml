@@ -1,0 +1,23 @@
+kind: Service
+apiVersion: v1
+metadata:
+  labels:
+    helm.sh/chart: kubernetes-dashboard-7.14.0
+    app.kubernetes.io/instance: kubernetes-dashboard
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-api
+    app.kubernetes.io/version: 1.14.0
+    app.kubernetes.io/component: api
+  name: kubernetes-dashboard-api
+  namespace: kubernetes-dashboard
+spec:
+  type: ClusterIP
+  ports:
+  - name: api
+    port: 8000
+    protocol: TCP
+  selector:
+    app.kubernetes.io/instance: kubernetes-dashboard
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-api

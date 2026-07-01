@@ -1,0 +1,87 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  labels:
+    helm.sh/chart: kubernetes-dashboard-7.14.0
+    app.kubernetes.io/instance: kubernetes-dashboard
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kubernetes-dashboard
+    app.kubernetes.io/name: kubernetes-dashboard-api
+    app.kubernetes.io/version: 1.14.0
+    app.kubernetes.io/component: api
+  name: kubernetes-dashboard-api
+  namespace: kubernetes-dashboard
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: kubernetes-dashboard
+      app.kubernetes.io/part-of: kubernetes-dashboard
+      app.kubernetes.io/name: kubernetes-dashboard-api
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubernetes-dashboard-7.14.0
+        app.kubernetes.io/instance: kubernetes-dashboard
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/part-of: kubernetes-dashboard
+        app.kubernetes.io/name: kubernetes-dashboard-api
+        app.kubernetes.io/version: 1.14.0
+        app.kubernetes.io/component: api
+      annotations:
+        checksum/config: c0491508ba8e29a559c5f7409a4d19ac0e1f4a3228110c66fc2806d2e2f600b8
+    spec:
+      containers:
+      - name: kubernetes-dashboard-api
+        image: docker.io/kubernetesui/dashboard-api:1.14.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --namespace=kubernetes-dashboard
+        - --metrics-scraper-service-name=kubernetes-dashboard-metrics-scraper
+        env:
+        - name: CSRF_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kubernetes-dashboard-csrf
+              key: private.key
+        - name: GOMAXPROCS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+              divisor: '1'
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+              divisor: '1'
+        ports:
+        - containerPort: 8000
+          name: api
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-volume
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 2001
+          runAsUser: 1001
+        resources:
+          limits:
+            cpu: 250m
+            memory: 400Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - emptyDir: {}
+        name: tmp-volume
+      serviceAccountName: kubernetes-dashboard-api

@@ -163,11 +163,6 @@ dashboard_vip() {
   fi
 }
 
-# Operator-network dashboard URL (10.1.132.x). Workload clusters use kubectl port-forward.
-dashboard_forward_port() {
-  printf '%s' "${DASHBOARD_FORWARD_PORT:-8443}"
-}
-
 dashboard_mgmt_ip() {
   local cluster="$1"
   if [[ "$cluster" == "mgmt" ]]; then
@@ -177,15 +172,19 @@ dashboard_mgmt_ip() {
   fi
 }
 
+dashboard_nodeport() {
+  printf '%s' "${DASHBOARD_NODEPORT:-30443}"
+}
+
+# kubectl port-forward fallback (optional; GitOps dashboard uses NodePort).
+dashboard_forward_port() {
+  printf '%s' "${DASHBOARD_FORWARD_PORT:-8443}"
+}
+
+# Operator-network dashboard URL via NodePort on control-plane mgmt IP.
 dashboard_operator_url() {
   local cluster="$1"
-  local port
-  port="$(dashboard_forward_port)"
-  if [[ "$cluster" == "mgmt" ]]; then
-    printf 'https://%s' "$MGMT_DASHBOARD_VIP"
-  else
-    printf 'https://%s:%s' "$(dashboard_mgmt_ip "$cluster")" "$port"
-  fi
+  printf 'https://%s:%s' "$(dashboard_mgmt_ip "$cluster")" "$(dashboard_nodeport)"
 }
 
 kubeconfig_file() {

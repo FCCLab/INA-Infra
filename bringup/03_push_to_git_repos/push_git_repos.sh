@@ -37,6 +37,8 @@ Each cluster maps to a Gitea repo (see repos/):
 Prerequisites:
   - Gitea repos exist (./bringup/02_configsync/configsync.sh repos)
   - Config Sync + RootSync on each target cluster
+  - CNI: Flannel in repos/ (namespaces/kube-flannel/, cluster/)
+  - MetalLB deployed (openspeedtest LoadBalancer VIPs only)
   - git on this host
 
 Options:
@@ -142,6 +144,7 @@ push_cluster_repo() {
 
   if [[ "$rc" -eq 0 ]]; then
     echo "    pushed http://${GITEA_HOST}:${GITEA_PORT}/${GITEA_ORG}/${repo_name}"
+    echo "    Dashboard:   https://$(dashboard_mgmt_ip "$cluster"):$(dashboard_nodeport)"
     echo "    OpenSpeedTest: http://$(openspeedtest_vip "$cluster")"
   fi
   return "$rc"
