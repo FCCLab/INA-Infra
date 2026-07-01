@@ -12,7 +12,10 @@ REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 OAI_OPERATORS_REF="${OAI_OPERATORS_REF:-main}"
 OAI_OPERATORS_BASE="${OAI_OPERATORS_BASE:-https://raw.githubusercontent.com/openairinterface/oai-operators/${OAI_OPERATORS_REF}}"
 OAI_CN_OPERATORS_NS="${OAI_CN_OPERATORS_NS:-oai-cn-operators}"
+OAI_CN_NS="${OAI_CN_NS:-oai-cn}"
+UPSTREAM_CN_NS="${UPSTREAM_CN_NS:-oaicp}"
 UPSTREAM_OPERATORS_NS="${UPSTREAM_OPERATORS_NS:-oaiops}"
+OAI_NAD_PARENT="${OAI_NAD_PARENT:-$SITE_IFACE}"
 NEPHIO_CRD_BASE="${NEPHIO_CRD_BASE:-https://raw.githubusercontent.com/nephio-project/api/main/config/crd/bases}"
 
 OAI_OPERATOR_MANIFESTS=(
@@ -60,13 +63,14 @@ split_operator_manifests() {
   local dest_cluster="$2"
   local dest_ns="$3"
 
-  python3 - "$src_dir" "$dest_cluster" "$dest_ns" "$OAI_CN_OPERATORS_NS" "$UPSTREAM_OPERATORS_NS" <<'PY'
+  python3 - "$src_dir" "$dest_cluster" "$dest_ns" "$OAI_CN_OPERATORS_NS" "$UPSTREAM_OPERATORS_NS" \
+    "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" <<'PY'
 import sys
 from pathlib import Path
 
 import yaml
 
-src_dir, dest_cluster, dest_ns, target_ns, upstream_ns = sys.argv[1:6]
+src_dir, dest_cluster, dest_ns, target_ns, upstream_ns, cn_ns, upstream_cn_ns, nad_parent = sys.argv[1:9]
 cluster_kinds = {"ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition"}
 cluster_docs = []
 ns_docs = []
@@ -91,6 +95,20 @@ def rewrite_namespace(obj):
                 subject["namespace"] = target_ns
 
 
+def patch_op_conf(doc):
+    if doc.get("kind") != "ConfigMap" or "-op-conf" not in doc["metadata"].get("name", ""):
+        return
+    data = doc.get("data")
+    if not isinstance(data, dict):
+        return
+    for key, val in list(data.items()):
+        if not isinstance(val, str):
+            continue
+        val = val.replace(f".{upstream_cn_ns}.svc.cluster.local", f".{cn_ns}.svc.cluster.local")
+        val = val.replace("parent: 'eth0'", f"parent: '{nad_parent}'")
+        data[key] = val
+
+
 def load_docs(path):
     text = Path(path).read_text()
     for doc in yaml.safe_load_all(text):
@@ -102,6 +120,7 @@ src = Path(src_dir)
 for path in sorted(src.glob("*.yaml")):
     for doc in load_docs(path):
         rewrite_namespace(doc)
+        patch_op_conf(doc)
         clean_metadata(doc.get("metadata"))
         if doc["kind"] == "Deployment":
             template = doc.get("spec", {}).get("template", {})

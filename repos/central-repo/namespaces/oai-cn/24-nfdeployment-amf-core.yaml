@@ -1,0 +1,23 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFDeployment
+metadata:
+  name: amf-core
+  namespace: oai-cn
+spec:
+  provider: amf.openairinterface.org
+  capacity:
+    maxSubscribers: 64
+  interfaces:
+  - name: n2
+    ipv4:
+      address: 172.2.2.254/24
+      gateway: 172.2.2.1
+    vlanID: 4
+  networkInstances:
+  - name: vpc-ran
+    interfaces:
+    - n2
+  parametersRefs:
+  - name: amf-core-config
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFConfig
