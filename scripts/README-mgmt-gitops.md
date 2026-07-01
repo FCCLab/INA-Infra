@@ -70,7 +70,7 @@ initial_mgmt/
 
 | Included | Excluded |
 |----------|----------|
-| Gitea, Porch, Nephio, WebUI, MetalLB, dashboard, … | `kube-system` |
+| Gitea, Porch, Nephio, WebUI, MetalLB, dashboard (NodePort), … | `kube-system` |
 | Deployments, StatefulSets, Services, ConfigMaps, Secrets | `config-management-system` |
 | `local-path` StorageClass | Pods, ReplicaSets, Porch PackageRevisions |
 | **`default` namespace** | **OpenSpeedTest only** (`openspeedtest` + LB `10.1.132.11`) — not porch secrets |

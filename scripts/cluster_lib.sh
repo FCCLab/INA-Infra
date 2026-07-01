@@ -42,6 +42,7 @@ declare -A CLUSTER_WORKER_IP=(
   [edge]=10.1.137.131
   [ue]=10.1.137.141
 )
+# Legacy: first IP in each .138 slice; workload dashboard uses NodePort, not MetalLB.
 declare -A CLUSTER_DASHBOARD_VIP=(
   [central]=10.1.138.100
   [regional]=10.1.138.125
@@ -53,6 +54,19 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [regional]=10.1.138.126
   [edge]=10.1.138.151
   [ue]=10.1.138.176
+)
+# 3rd/4th VIP in each cluster slice: OAI N2/N3 (MetalLB on enp7s0).
+declare -A CLUSTER_AMF_N2_VIP=(
+  [central]=10.1.138.102
+  [regional]=10.1.138.127
+  [edge]=10.1.138.152
+  [ue]=10.1.138.177
+)
+declare -A CLUSTER_UPF_N3_VIP=(
+  [central]=10.1.138.103
+  [regional]=10.1.138.128
+  [edge]=10.1.138.153
+  [ue]=10.1.138.178
 )
 # Nephio PackageVariantSet / WorkloadCluster label (nephio.org/site-type)
 declare -A CLUSTER_SITE_TYPE=(
@@ -191,6 +205,14 @@ openspeedtest_vip() {
   else
     printf '%s' "${CLUSTER_OPENSPEEDTEST_VIP[$cluster]}"
   fi
+}
+
+amf_n2_vip() {
+  printf '%s' "${CLUSTER_AMF_N2_VIP[$1]}"
+}
+
+upf_n3_vip() {
+  printf '%s' "${CLUSTER_UPF_N3_VIP[$1]}"
 }
 
 dashboard_vip() {

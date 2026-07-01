@@ -114,7 +114,11 @@ print_forward_info() {
   fi
 
   echo "==> [${cluster}] ${host}: https://${bind}:${port}"
-  echo "    Site VIP (138): https://$(dashboard_vip "$cluster")"
+  if [[ "$cluster" == "mgmt" ]]; then
+    echo "    MetalLB VIP: https://${MGMT_DASHBOARD_VIP}"
+  else
+    echo "    NodePort (mgmt NIC): $(dashboard_operator_url "$cluster")"
+  fi
 }
 
 remote_forward_cmd() {

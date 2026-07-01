@@ -62,15 +62,20 @@ split_operator_manifests() {
   local src_dir="$1"
   local dest_cluster="$2"
   local dest_ns="$3"
+  local cluster="$4"
+  local amf_n2_vip upf_n3_vip
+
+  amf_n2_vip="$(amf_n2_vip "$cluster")"
+  upf_n3_vip="$(upf_n3_vip "$cluster")"
 
   python3 - "$src_dir" "$dest_cluster" "$dest_ns" "$OAI_CN_OPERATORS_NS" "$UPSTREAM_OPERATORS_NS" \
-    "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" <<'PY'
+    "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" "$amf_n2_vip" "$upf_n3_vip" <<'PY'
 import sys
 from pathlib import Path
 
 import yaml
 
-src_dir, dest_cluster, dest_ns, target_ns, upstream_ns, cn_ns, upstream_cn_ns, nad_parent = sys.argv[1:9]
+src_dir, dest_cluster, dest_ns, target_ns, upstream_ns, cn_ns, upstream_cn_ns, nad_parent, amf_n2_vip, upf_n3_vip = sys.argv[1:11]
 cluster_kinds = {"ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition"}
 cluster_docs = []
 ns_docs = []
@@ -93,6 +98,33 @@ def rewrite_namespace(obj):
         for subject in subjects:
             if isinstance(subject, dict) and subject.get("namespace") == upstream_ns:
                 subject["namespace"] = target_ns
+
+
+def patch_operator_svc(doc):
+    if doc.get("kind") != "Deployment":
+        return
+    name = doc.get("metadata", {}).get("name", "")
+    svc_type = None
+    lb_ip = None
+    if name == "oai-amf-controller":
+        svc_type = "LoadBalancer"
+        lb_ip = amf_n2_vip
+    elif name == "oai-upf-controller":
+        svc_type = "LoadBalancer"
+        lb_ip = upf_n3_vip
+    elif name in ("oai-nrf-controller", "oai-udr-controller"):
+        svc_type = "ClusterIP"
+    else:
+        return
+    containers = doc.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+    if not containers:
+        return
+    env = containers[0].setdefault("env", [])
+    env = [item for item in env if item.get("name") not in ("SVC_TYPE", "LOADBALANCER_IP")]
+    env.append({"name": "SVC_TYPE", "value": svc_type})
+    if lb_ip:
+        env.append({"name": "LOADBALANCER_IP", "value": lb_ip})
+    containers[0]["env"] = env
 
 
 def patch_op_conf(doc):
@@ -121,6 +153,7 @@ for path in sorted(src.glob("*.yaml")):
     for doc in load_docs(path):
         rewrite_namespace(doc)
         patch_op_conf(doc)
+        patch_operator_svc(doc)
         clean_metadata(doc.get("metadata"))
         if doc["kind"] == "Deployment":
             template = doc.get("spec", {}).get("template", {})
@@ -183,7 +216,7 @@ write_cluster_operators() {
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
   mkdir -p "$dest_dir" "$dest_cluster"
 
-  split_operator_manifests "$src_dir" "$dest_cluster" "$dest_dir"
+  split_operator_manifests "$src_dir" "$dest_cluster" "$dest_dir" "$cluster"
   write_namespace "$dest_dir"
 
   echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (OAI CN operators → ${OAI_CN_OPERATORS_NS})"
@@ -196,6 +229,13 @@ main() {
   if [[ ${#clusters[@]} -eq 0 ]]; then
     clusters=(central)
   fi
+
+  for cluster in "${clusters[@]}"; do
+    if [[ "$cluster" != "central" ]]; then
+      echo "error: OAI CN operators deploy on central (core site) only, not '${cluster}'" >&2
+      exit 1
+    fi
+  done
 
   if ! command -v python3 >/dev/null 2>&1; then
     echo "error: python3 not found" >&2
@@ -215,7 +255,7 @@ main() {
   echo "Nephio CRDs: ref.nephio.org/config, workload.nephio.org/nfdeployments|nfconfigs"
   echo
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
-  echo "NRF uses LoadBalancer (MetalLB on workload clusters)."
+  echo "NRF/UDR use ClusterIP (in-cluster SBI only). AMF N2 / UPF N3 use fixed MetalLB VIPs."
   echo "Optional docker hub pull secret in ${OAI_CN_OPERATORS_NS}: regcred"
 }
 

@@ -70,16 +70,18 @@ Verify:
 ```bash
 ./bringup/01_gitea/gitea.sh
 ./bringup/02_configsync/configsync.sh
-# Render GitOps manifests into repos/ (order matters for MetalLB — run OAI/Multus before MetalLB):
+# Render GitOps manifests into repos/ (order matters — Multus/OAI before MetalLB; dashboard last):
 ./scripts/render_flannel_gitops.sh
 ./scripts/render_local_path_gitops.sh
 ./scripts/render_multus_gitops.sh          # workload clusters; before OAI NADs
-./scripts/render_oai_operators_gitops.sh central   # example: central only
+./scripts/render_oai_operators_gitops.sh central
 ./scripts/render_oai_core_gitops.sh central
-./scripts/render_metallb_gitops.sh         # after Multus + Nephio CRDs present in cluster/
-./scripts/render_dashboard_gitops.sh
+./scripts/render_metallb_gitops.sh mgmt central regional edge ue
+./scripts/render_dashboard_gitops.sh mgmt central regional edge ue
 ./bringup/03_push_to_git_repos/push_git_repos.sh
 ./scripts/check-configsync.sh
 ```
+
+OAI operators and core NFs run on **central** only (`render_oai_*` scripts reject other clusters). NRF/UDR use `ClusterIP`; AMF/UPF use fixed MetalLB VIPs on central (see [docs/ip.md](../../docs/ip.md)).
 
 IP pools, VIPs, and node addresses: [docs/ip.md](../../docs/ip.md).

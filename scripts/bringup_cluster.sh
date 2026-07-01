@@ -19,7 +19,6 @@ NETPLAN_DIR="${NETPLAN_DIR:-$REPO_ROOT/utils/netplan}"
 NETPLAN_SITE="${NETPLAN_SITE:-60-nephio.yaml}"
 SKIP_LOCAL_KUBECONFIG="${SKIP_LOCAL_KUBECONFIG:-0}"
 SSH_USER="${SSH_USER:-fcp}"
-INSTALL_DASHBOARD="${INSTALL_DASHBOARD:-0}"
 INSTALL_FLANNEL="${INSTALL_FLANNEL:-0}"
 JOIN_WORKER_ONLY=0
 
@@ -55,11 +54,11 @@ Examples:
   $(basename "$0") --join mgmt
 
 Clusters (SSH / cluster API / dashboard):
-  mgmt       ${MGMT_CP_HOST} ${MGMT_API_IP}  dashboard ${MGMT_DASHBOARD_VIP}
-  central    ${CLUSTER_CP_HOST[central]} ${CLUSTER_MGMT_IP[central]} / ${CLUSTER_API_IP[central]}  dashboard ${CLUSTER_DASHBOARD_VIP[central]}
-  regional   ${CLUSTER_CP_HOST[regional]} ${CLUSTER_MGMT_IP[regional]} / ${CLUSTER_API_IP[regional]}  dashboard ${CLUSTER_DASHBOARD_VIP[regional]}
-  edge       ${CLUSTER_CP_HOST[edge]} ${CLUSTER_MGMT_IP[edge]} / ${CLUSTER_API_IP[edge]}  dashboard ${CLUSTER_DASHBOARD_VIP[edge]}
-  ue         ${CLUSTER_CP_HOST[ue]} ${CLUSTER_MGMT_IP[ue]} / ${CLUSTER_API_IP[ue]}  dashboard ${CLUSTER_DASHBOARD_VIP[ue]}
+  mgmt       ${MGMT_CP_HOST} ${MGMT_API_IP}  dashboard MetalLB ${MGMT_DASHBOARD_VIP}
+  central    ${CLUSTER_CP_HOST[central]} ${CLUSTER_MGMT_IP[central]} / ${CLUSTER_API_IP[central]}  dashboard NodePort :30443
+  regional   ${CLUSTER_CP_HOST[regional]} ${CLUSTER_MGMT_IP[regional]} / ${CLUSTER_API_IP[regional]}  dashboard NodePort :30443
+  edge       ${CLUSTER_CP_HOST[edge]} ${CLUSTER_MGMT_IP[edge]} / ${CLUSTER_API_IP[edge]}  dashboard NodePort :30443
+  ue         ${CLUSTER_CP_HOST[ue]} ${CLUSTER_MGMT_IP[ue]} / ${CLUSTER_API_IP[ue]}  dashboard NodePort :30443
 
 Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
@@ -69,7 +68,6 @@ Environment:
   DNS_SERVER              Resolver for apt on remote hosts (default: 10.1.132.200)
   SKIP_LOCAL_KUBECONFIG   Set to 1 to skip copying kubeconfigs to local ~/.kube
   INSTALL_FLANNEL         Set to 1 to install Flannel CNI (default: 0, use GitOps)
-  INSTALL_DASHBOARD       Set to 1 to install Kubernetes Dashboard (default: 0, use GitOps)
   SUDO_PASSWORD           Optional sudo password (prompted per host if needed)
 EOF
 }
@@ -696,11 +694,6 @@ bringup_mgmt_cluster() {
     echo "    Local context: ${ctx}  (~/.kube/config)"
   fi
 
-  if [[ "$INSTALL_DASHBOARD" == "1" ]]; then
-    echo "==> [mgmt] Kubernetes Dashboard"
-    "$SCRIPT_DIR/install_dashboard.sh" mgmt || return 1
-  fi
-
   echo "==> [mgmt] Done"
 }
 
@@ -835,11 +828,6 @@ bringup_cluster() {
     echo "==> [${cluster}] Copy kubeconfig locally"
     copy_local_kubeconfig "$cp_host" "$cluster"
     echo "    Local context: ${ctx}"
-  fi
-
-  if [[ "$INSTALL_DASHBOARD" == "1" ]]; then
-    echo "==> [${cluster}] Kubernetes Dashboard"
-    "$SCRIPT_DIR/install_dashboard.sh" "$cluster" || return 1
   fi
 
   echo "==> [${cluster}] Done"

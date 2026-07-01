@@ -8,7 +8,7 @@ Two subnets split **operator/mgmt** from **cluster/data** traffic:
 | **10.1.137.0/24** | `enp7s0` | Kubernetes API, node traffic, Flannel |
 | **10.1.138.0/24** | `enp7s0` | MetalLB LoadBalancer VIPs (same L2 as `.137`) |
 
-Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](scripts/setup_ip.sh). Topology: [testbed/readme.md](testbed/readme.md).
+Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](scripts/setup_ip.sh). Topology: [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md).
 
 **MetalLB pools** (deploy via `./scripts/render_metallb_gitops.sh`; uninstall imperative install with [scripts/uninstall_metallb.sh](scripts/uninstall_metallb.sh))
 
@@ -20,7 +20,7 @@ Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts
 | edge | `site-pool` | `10.1.138.150`–`10.1.138.174` | `enp7s0` |
 | ue | `site-pool` | `10.1.138.175`–`10.1.138.199` | `enp7s0` |
 
-Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per cluster on shared site L2). Each slice reserves **1st IP** for Kubernetes Dashboard and **2nd IP** for OpenSpeedTest.
+Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per cluster on shared site L2). Per slice: **1st** reserved, **2nd** = OpenSpeedTest. On **central** only: **3rd** = OAI AMF N2, **4th** = OAI UPF N3 (OAI operators/core run on central). **Dashboard**, **NRF**, and **UDR** are **cluster-local** (NodePort / ClusterIP).
 
 DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole static DNS: [services/etc-dnsmasq.d/99-nephio-static.conf](services/etc-dnsmasq.d/99-nephio-static.conf).
 
@@ -29,7 +29,6 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | VIP | Cluster | Service | Ports | URL | DNS |
 |-----|---------|---------|-------|-----|-----|
 | 10.1.132.30 | mgmt | Docker Registry | 5000 | [http://10.1.132.30:5000](http://10.1.132.30:5000) | `registry.nephio.lab` |
-| 10.1.132.10 | mgmt | Kubernetes Dashboard | 443 | [https://10.1.132.10](https://10.1.132.10) | `dashboard-mgmt.nephio.lab` |
 | 10.1.132.11 | mgmt | OpenSpeedTest | 80 | [http://10.1.132.11](http://10.1.132.11) | `openspeedtest-mgmt.nephio.lab` |
 | 10.1.132.200 | mgmt | Gitea | 80, 3000 | [http://10.1.132.200:3000](http://10.1.132.200:3000) · [http://10.1.132.200](http://10.1.132.200) | `gitea.nephio.lab` |
 | 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.nephio.lab` |
@@ -38,25 +37,27 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 
 | VIP | Cluster | Service | Ports | URL | DNS |
 |-----|---------|---------|-------|-----|-----|
-| 10.1.138.100 | central | Kubernetes Dashboard | 443 | [https://10.1.138.100](https://10.1.138.100) | `dashboard-central.nephio.lab` |
-| 10.1.138.125 | regional | Kubernetes Dashboard | 443 | [https://10.1.138.125](https://10.1.138.125) | `dashboard-regional.nephio.lab` |
-| 10.1.138.150 | edge | Kubernetes Dashboard | 443 | [https://10.1.138.150](https://10.1.138.150) | `dashboard-edge.nephio.lab` |
-| 10.1.138.175 | ue | Kubernetes Dashboard | 443 | [https://10.1.138.175](https://10.1.138.175) | `dashboard-ue.nephio.lab` |
 | 10.1.138.101 | central | OpenSpeedTest | 80 | [http://10.1.138.101](http://10.1.138.101) | `openspeedtest-central.nephio.lab` |
+| 10.1.138.102 | central | OAI AMF N2 | 38412/sctp | — | `amf-n2-central.nephio.lab` |
+| 10.1.138.103 | central | OAI UPF N3 | 2152/udp | — | `upf-n3-central.nephio.lab` |
 | 10.1.137.61 | central | Open5GS 5GC | 9999, 38412/sctp, 2152/udp | — | `open5gs.nephio.lab` |
 | 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-Workload dashboard VIPs above are on **`10.1.138.0/24`**. From the operator network (`10.1.132.0/24`), route to `.138` or use [scripts/kubectl_forward.sh](scripts/kubectl_forward.sh):
+OAI 5GC (operators + NFs) is deployed on **central** only; regional/edge/ue have OpenSpeedTest MetalLB VIPs but no OAI CN operators.
 
-| Cluster | Dashboard URL (132, port-forward) |
-|---------|-----------------------------------|
-| mgmt | [https://10.1.132.200:8443](https://10.1.132.200:8443) |
-| central | [https://10.1.132.210:8443](https://10.1.132.210:8443) |
-| regional | [https://10.1.132.220:8443](https://10.1.132.220:8443) |
-| edge | [https://10.1.132.230:8443](https://10.1.132.230:8443) |
-| ue | [https://10.1.132.240:8443](https://10.1.132.240:8443) |
+**Cluster-local (no MetalLB):** Kubernetes Dashboard (GitOps **NodePort 30443** on control-plane mgmt IP), OAI **NRF** / **UDR** (operator `SVC_TYPE=ClusterIP` → `oai-nrf` / `oai-udr` in `oai-cn`). Other NFs use `*.oai-cn.svc.cluster.local`.
+
+Dashboard access from the operator network (`10.1.132.0/24`):
+
+| Cluster | Dashboard URL (NodePort or port-forward) |
+|---------|------------------------------------------|
+| mgmt | [https://10.1.132.200:30443](https://10.1.132.200:30443) · forward [https://10.1.132.200:8443](https://10.1.132.200:8443) |
+| central | [https://10.1.132.210:30443](https://10.1.132.210:30443) · forward [https://10.1.132.210:8443](https://10.1.132.210:8443) |
+| regional | [https://10.1.132.220:30443](https://10.1.132.220:30443) · forward [https://10.1.132.220:8443](https://10.1.132.220:8443) |
+| edge | [https://10.1.132.230:30443](https://10.1.132.230:30443) · forward [https://10.1.132.230:8443](https://10.1.132.230:8443) |
+| ue | [https://10.1.132.240:30443](https://10.1.132.240:30443) · forward [https://10.1.132.240:8443](https://10.1.132.240:8443) |
 
 ```bash
 ./scripts/kubectl_forward.sh              # all clusters (background)
@@ -64,7 +65,7 @@ Workload dashboard VIPs above are on **`10.1.138.0/24`**. From the operator netw
 ./scripts/get_dashboard_key.sh            # login tokens
 ```
 
-Mgmt also has MetalLB VIP [https://10.1.132.10](https://10.1.132.10) (no forward required).
+Dashboard is deployed via GitOps ([scripts/render_dashboard_gitops.sh](scripts/render_dashboard_gitops.sh)); remove legacy Helm/LB installs with [scripts/uninstall_dashboard.sh](scripts/uninstall_dashboard.sh).
 
 Dashboard login token: [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.sh).
 
@@ -100,9 +101,8 @@ Reach workload APIs on `10.1.137.0/24`, MetalLB VIPs on `10.1.138.0/24`, from th
 | Multus CNI (GitOps render) | [scripts/render_multus_gitops.sh](scripts/render_multus_gitops.sh) |
 | Kubernetes Dashboard (GitOps render) | [scripts/render_dashboard_gitops.sh](scripts/render_dashboard_gitops.sh) |
 | Kubernetes Dashboard (remove imperative install) | [scripts/uninstall_dashboard.sh](scripts/uninstall_dashboard.sh) |
-| Kubernetes Dashboard (manual install) | [scripts/install_dashboard.sh](scripts/install_dashboard.sh) |
-| OAI CN operators (GitOps render) | [scripts/render_oai_operators_gitops.sh](scripts/render_oai_operators_gitops.sh) |
-| OAI core NFs (GitOps render) | [scripts/render_oai_core_gitops.sh](scripts/render_oai_core_gitops.sh) |
+| OAI CN operators (GitOps render, central only) | [scripts/render_oai_operators_gitops.sh](scripts/render_oai_operators_gitops.sh) |
+| OAI core NFs (GitOps render, central only) | [scripts/render_oai_core_gitops.sh](scripts/render_oai_core_gitops.sh) |
 | local-path StorageClass (GitOps render) | [scripts/render_local_path_gitops.sh](scripts/render_local_path_gitops.sh) |
 | Push GitOps to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](bringup/03_push_to_git_repos/push_git_repos.sh) |
 | Config Sync status | [scripts/check-configsync.sh](scripts/check-configsync.sh) |

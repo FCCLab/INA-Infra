@@ -37,10 +37,10 @@ spec:
           value: /tmp/op/udr.yaml
         - name: TESTING
           value: 'no'
-        - name: SVC_TYPE
-          value: LoadBalancer
         - name: KUBERNETES_BASE_URL
           value: https://kubernetes.default.svc
+        - name: SVC_TYPE
+          value: ClusterIP
         volumeMounts:
         - mountPath: /tmp/op
           name: opconf

@@ -5,17 +5,19 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 
 **Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
-**Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard with [`scripts/install_dashboard.sh`](../scripts/install_dashboard.sh), operator dashboard access with [`scripts/kubectl_forward.sh`](../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
+**Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard via GitOps [`scripts/render_dashboard_gitops.sh`](../scripts/render_dashboard_gitops.sh), operator access with [`scripts/kubectl_forward.sh`](../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
 
-| Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, `.137`) | Dashboard (132 fwd) | Dashboard (`.138` VIP) | OpenSpeedTest (`.138`) | Context | Kubeconfig |
-|---------|---------------|--------|------------|------------------------|---------------------|------------------------|-------------------------|---------|------------|
-| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:8443` · `https://10.1.132.10` | `https://10.1.132.10` | `http://10.1.132.11` | `mgmt@mgmt` | `~/.kube/config` |
-| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:8443` | `https://10.1.138.100` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
-| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:8443` | `https://10.1.138.125` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
-| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:8443` | `https://10.1.138.150` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
-| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:8443` | `https://10.1.138.175` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
+| Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, `.137`) | Dashboard (132) | OpenSpeedTest (`.138`) | Context | Kubeconfig |
+|---------|---------------|--------|------------|------------------------|-----------------|-------------------------|---------|------------|
+| mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:30443` · fwd `:8443` | `http://10.1.132.11` | `mgmt@mgmt` | `~/.kube/config` |
+| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:30443` · fwd `:8443` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
+| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:30443` · fwd `:8443` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
+| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
+| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:30443` · fwd `:8443` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
 
-**Dashboard (132):** run `./scripts/kubectl_forward.sh` when `.138` VIPs are not routed from the operator network. Port **8443** on each control-plane mgmt IP. Workload **MetalLB VIPs** use **`10.1.138.0/24`** (dashboard = 1st IP in each cluster pool slice, OpenSpeedTest = 2nd). Tokens: `./scripts/get_dashboard_key.sh`.
+**Dashboard:** all clusters use GitOps **NodePort 30443** on the control-plane mgmt IP (no MetalLB VIP). Run `./scripts/kubectl_forward.sh` for `:8443` if NodePort is blocked. Render with `./scripts/render_dashboard_gitops.sh`; tokens: `./scripts/get_dashboard_key.sh`.
+
+**MetalLB (`.138` workload / `.132` mgmt):** OpenSpeedTest (2nd IP per slice). OAI AMF N2 / UPF N3 (3rd/4th) on **central** only — OAI CN operators live there, not on regional/edge/ue.
 
 **k9s** (local operator machine and all testbed nodes):
 

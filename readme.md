@@ -2,6 +2,8 @@
 
 Current testbed IPs, MetalLB pools (`10.1.138.100`–`.199`), and VIPs: [docs/ip.md](docs/ip.md). Topology: [bringup/00_testbed/readme.md](bringup/00_testbed/readme.md).
 
+GitOps components (render → push → Config Sync): Flannel, Multus, MetalLB, Kubernetes Dashboard (NodePort **30443**), OAI operators + core (**central** only), OpenSpeedTest MetalLB VIPs. See [bringup/02_configsync/readme.md](bringup/02_configsync/readme.md).
+
 ## Cluster networking
 
 | Layer | CIDR / address | Notes |

@@ -300,6 +300,13 @@ main() {
     clusters=(central)
   fi
 
+  for cluster in "${clusters[@]}"; do
+    if [[ "$cluster" != "central" ]]; then
+      echo "error: OAI core NFs deploy on central (core site) only, not '${cluster}'" >&2
+      exit 1
+    fi
+  done
+
   for cmd in python3 helm curl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       echo "error: $cmd not found" >&2

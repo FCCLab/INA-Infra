@@ -82,19 +82,18 @@ kubectl_cluster() {
 
 print_dashboard_key() {
   local cluster="$1"
-  local ctx kcfg operator_url site_vip cp_host
+  local ctx kcfg operator_url cp_host
 
   ctx="$(dashboard_context "$cluster")"
   kcfg="$(kubeconfig_path "$cluster")"
   operator_url="$(dashboard_operator_url "$cluster")"
-  site_vip="$(dashboard_vip "$cluster")"
   cp_host="$(cluster_cp_host "$cluster")"
 
   echo "========================================"
   echo " Cluster: ${cluster}"
-  echo " URL:     ${operator_url}  (NodePort)"
-  if [[ "$cluster" != "mgmt" ]]; then
-    echo " Site:    https://${site_vip}  (MetalLB VIP; optional if NodePort used)"
+  echo " URL:     ${operator_url}"
+  if [[ "$cluster" == "mgmt" ]]; then
+    echo " MetalLB: https://$(dashboard_vip "$cluster")"
   fi
   echo " Context: ${ctx}"
   if [[ "$cluster" == "mgmt" ]]; then

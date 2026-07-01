@@ -33,14 +33,14 @@ spec:
           value: '1'
         - name: DEPLOYMENT_FETCH_ITERATIONS
           value: '100'
-        - name: SVC_TYPE
-          value: LoadBalancer
         - name: NF_CONF_PATH
           value: /tmp/nf/nrf.yaml
         - name: OP_CONF_PATH
           value: /tmp/op/nrf.yaml
         - name: KUBERNETES_BASE_URL
           value: https://kubernetes.default.svc
+        - name: SVC_TYPE
+          value: ClusterIP
         volumeMounts:
         - mountPath: /tmp/op
           name: opconf
