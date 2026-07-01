@@ -12,10 +12,10 @@ OPENSPEEDTEST_IMAGE="${OPENSPEEDTEST_IMAGE:-openspeedtest/latest:latest}"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [cluster ...]
+Usage: $(basename "$0") [options] [cluster ...]
 
-Install OpenSpeedTest on cluster control planes with MetalLB LoadBalancer VIPs.
-With no arguments, installs on mgmt, central, regional, edge, and ue.
+Install or uninstall OpenSpeedTest on cluster control planes with MetalLB LoadBalancer VIPs.
+With no cluster arguments, targets mgmt, central, regional, edge, and ue.
 
 OpenSpeedTest URLs (http):
   mgmt      $(openspeedtest_vip mgmt)
@@ -26,9 +26,15 @@ OpenSpeedTest URLs (http):
 
 Requires MetalLB and local-pool (run install_ip_pool.sh first).
 
+Options:
+  --uninstall, -u   Remove OpenSpeedTest deployment and service
+  -h, --help        Show this help
+
 Examples:
   $(basename "$0")
   $(basename "$0") central edge
+  $(basename "$0") --uninstall central
+  $(basename "$0") -u
 
 Environment:
   SSH_CONFIG           SSH config (default: utils/ssh_config/config)
@@ -153,9 +159,86 @@ echo "OpenSpeedTest URL: http://${vip}"
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
+uninstall_openspeedtest_on_cluster() {
+  local cluster="$1"
+  local host vip
+  host="$(cluster_cp_host "$cluster")"
+  vip="$(openspeedtest_vip "$cluster")"
+
+  echo
+  echo "========================================"
+  echo " OpenSpeedTest uninstall: ${cluster}"
+  echo " Control plane: ${host}"
+  echo " VIP: ${vip}"
+  echo "========================================"
+
+  run_remote_script "$host" <<EOF
+set -euo pipefail
+export KUBECONFIG="\$HOME/.kube/config"
+
+if [[ ! -f "\$KUBECONFIG" ]]; then
+  echo "error: missing \$KUBECONFIG (bring up ${cluster} first)" >&2
+  exit 1
+fi
+
+echo "==> Delete OpenSpeedTest service"
+kubectl delete service openspeedtest-service -n default --ignore-not-found
+
+echo "==> Delete OpenSpeedTest deployment"
+kubectl delete deployment openspeedtest -n default --ignore-not-found
+
+echo "==> Wait for pods to terminate"
+kubectl wait --for=delete pod -l app=openspeedtest -n default --timeout=120s 2>/dev/null || true
+
+kubectl get deployment openspeedtest -n default 2>/dev/null || echo "deployment/openspeedtest removed"
+kubectl get svc openspeedtest-service -n default 2>/dev/null || echo "service/openspeedtest-service removed"
+EOF
+}
+
+validate_cluster() {
+  local cluster="$1"
+  case "$cluster" in
+    mgmt) return 0 ;;
+    *)
+      if [[ -z "${CLUSTER_CP_HOST[$cluster]:-}" ]]; then
+        echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge, or ue)" >&2
+        return 1
+      fi
+      ;;
+  esac
+}
+
+UNINSTALL=0
+clusters=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --uninstall|-u)
+      UNINSTALL=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      clusters+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#clusters[@]} -eq 0 ]]; then
+  clusters=("${ALL_OPENSPEEDTEST_CLUSTERS[@]}")
+else
+  for cluster in "${clusters[@]}"; do
+    validate_cluster "$cluster" || exit 1
+  done
 fi
 
 if [[ ! -f "$SSH_CONFIG" ]]; then
@@ -163,27 +246,13 @@ if [[ ! -f "$SSH_CONFIG" ]]; then
   exit 1
 fi
 
-clusters=()
-if [[ $# -eq 0 ]]; then
-  clusters=("${ALL_OPENSPEEDTEST_CLUSTERS[@]}")
-else
-  for cluster in "$@"; do
-    case "$cluster" in
-      mgmt) ;;
-      *)
-        if [[ -z "${CLUSTER_CP_HOST[$cluster]:-}" ]]; then
-          echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge, or ue)" >&2
-          exit 1
-        fi
-        ;;
-    esac
-    clusters+=("$cluster")
-  done
-fi
-
 failed=0
 for cluster in "${clusters[@]}"; do
-  if ! install_openspeedtest_on_cluster "$cluster"; then
+  if [[ "$UNINSTALL" == "1" ]]; then
+    if ! uninstall_openspeedtest_on_cluster "$cluster"; then
+      failed=1
+    fi
+  elif ! install_openspeedtest_on_cluster "$cluster"; then
     failed=1
   fi
 done

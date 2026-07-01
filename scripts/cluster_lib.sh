@@ -54,6 +54,13 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.137.80
   [ue]=10.1.137.90
 )
+# Nephio PackageVariantSet / WorkloadCluster label (nephio.org/site-type)
+declare -A CLUSTER_SITE_TYPE=(
+  [central]=core
+  [regional]=regional
+  [edge]=edge
+  [ue]=ue
+)
 
 MGMT_METALLB_POOL="${MGMT_METALLB_POOL:-10.1.132.10-10.1.132.99}"
 CLUSTER_METALLB_POOL="${CLUSTER_METALLB_POOL:-10.1.137.40-10.1.137.99}"
@@ -187,4 +194,43 @@ kubeconfig_file() {
 
 kube_context() {
   printf '%s@%s' "$1" "$1"
+}
+
+# Gitea deployment repo name (nephio/<name>); workload clusters use {cluster}-repo.
+cluster_gitea_repo_name() {
+  local cluster="$1"
+  case "$cluster" in
+    mgmt|mgmt-staging|oai-packages)
+      printf '%s' "$cluster"
+      ;;
+    *)
+      printf '%s-repo' "$cluster"
+      ;;
+  esac
+}
+
+gitea_repo_url() {
+  local repo_name="$1"
+  local host="${GITEA_HOST:-10.1.132.51}"
+  local port="${GITEA_PORT:-3000}"
+  local org="${GITEA_ORG:-nephio}"
+  printf 'http://%s:%s/%s/%s.git' "$host" "$port" "$org" "$repo_name"
+}
+
+cluster_site_type() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_SITE_TYPE[$cluster]}"
+}
+
+cluster_kubeconfig_secret_name() {
+  printf '%s-kubeconfig' "$1"
+}
+
+local_kubeconfig_path() {
+  local cluster="$1"
+  if [[ "$cluster" == "mgmt" ]]; then
+    printf '%s' "${HOME}/.kube/config"
+  else
+    printf '%s' "${HOME}/.kube/$(kubeconfig_file "$cluster")"
+  fi
 }

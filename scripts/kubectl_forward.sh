@@ -12,6 +12,7 @@ NAMESPACE="${DASHBOARD_NAMESPACE:-kubernetes-dashboard}"
 SERVICE="${DASHBOARD_SERVICE:-kubernetes-dashboard-kong-proxy}"
 LOCAL_PORT="${DASHBOARD_FORWARD_PORT:-8443}"
 BIND_ADDRESS="${DASHBOARD_FORWARD_BIND:-}"
+DETACH=0
 
 ALL_FORWARD_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 STARTED_CLUSTERS=()
@@ -33,6 +34,7 @@ With no arguments, forwards all clusters in the background (default: all).
   ue        https://${CLUSTER_MGMT_IP[ue]}:${LOCAL_PORT}
 
 Options:
+  -d, --detach        Start all forwards and exit (default for multiple clusters)
   -p, --port PORT     Local port on each mgmt IP (default: ${LOCAL_PORT})
   -b, --bind ADDR     Bind address (default: cluster mgmt IP; only for a single cluster)
   -h, --help          Show this help
@@ -45,7 +47,8 @@ Environment:
   DASHBOARD_SERVICE       Service to forward (default: kubernetes-dashboard-kong-proxy)
 
 Examples:
-  $(basename "$0")                 # all clusters (background)
+  $(basename "$0") -d               # all clusters, background, exit
+  $(basename "$0")                  # all clusters (stay running; Ctrl+C to stop)
   $(basename "$0") central         # one cluster (foreground)
   $(basename "$0") central regional
   $(basename "$0") -p 9443 edge
@@ -193,12 +196,21 @@ forward_dashboard_all() {
     exit 1
   fi
 
+  if [[ "$DETACH" == "1" ]]; then
+    echo "All forwards running in background."
+    return 0
+  fi
+
   echo "All forwards running. Ctrl+C to stop."
   while true; do sleep 3600; done
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -d|--detach)
+      DETACH=1
+      shift
+      ;;
     -p|--port)
       LOCAL_PORT="$2"
       shift 2
@@ -251,5 +263,8 @@ fi
 if [[ ${#clusters[@]} -eq 1 ]]; then
   forward_dashboard_foreground "${clusters[0]}"
 else
+  if [[ "$DETACH" == "0" && ${#clusters[@]} -gt 1 ]]; then
+    DETACH=1
+  fi
   forward_dashboard_all "${clusters[@]}"
 fi

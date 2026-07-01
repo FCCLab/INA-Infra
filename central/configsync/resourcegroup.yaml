@@ -1,7 +1,0 @@
-apiVersion: kpt.dev/v1alpha1
-kind: ResourceGroup
-metadata:
-  name: inventory-94605748
-  namespace: default
-  labels:
-    cli-utils.sigs.k8s.io/inventory-id: bbfb245dacb25168591c2b5381f23532583947d0-1780470756930958670

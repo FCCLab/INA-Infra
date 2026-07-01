@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 # Report Config Sync operator health and RootSync/RepoSync progress.
 #
-#   ./scripts/check-configsync.sh
-#   ./scripts/check-configsync.sh -w 15
-#   KCTX=central@central ./scripts/check-configsync.sh -n central-repo
+#   ./scripts/check-configsync.sh                    # mgmt + central, regional, edge, ue
+#   ./scripts/check-configsync.sh central regional
+#   ./scripts/check-configsync.sh -c central@central -n central-repo
+# Workload clusters: uses SSH to control plane when local context is unavailable (132→137).
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=cluster_lib.sh
+source "$SCRIPT_DIR/cluster_lib.sh"
+
+SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
+SSH_OPTS=(-F "$SSH_CONFIG" -o ConnectTimeout=10 -o RequestTTY=no)
+
+ALL_CONFIGSYNC_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 
 CTX="${KCTX:-mgmt@mgmt}"
 NS="${CONFIGSYNC_NS:-config-management-system}"
@@ -12,32 +23,45 @@ ROOTSYNC_NAME="${ROOTSYNC_NAME:-mgmt}"
 WATCH_INTERVAL=""
 SHOW_ALL=0
 VERBOSE=0
+USE_SSH=0
+SSH_CLUSTER=""
+EXPLICIT_CTX=0
+EXPLICIT_NAME=0
+CHECK_ALL=0
+cluster_args=()
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [options]
+Usage: $(basename "$0") [options] [cluster ...]
 
 Show Config Sync operator status and git sync progress.
 
+Default (no args): mgmt, central, regional, edge, ue.
+
 Options:
-  -c CONTEXT     kubectl context (default: ${CTX})
-  -n NAME        RootSync name (default: ${ROOTSYNC_NAME}; use -a for all)
+  -c CONTEXT     kubectl context (single-target mode; default per cluster: {name}@{name})
+  -n NAME        RootSync name (single-target mode; default: mgmt or {cluster}-repo)
   -a             Show all RootSyncs and RepoSyncs in ${NS}
   -w [SECONDS]   Watch mode (default interval: 5)
   -v             Verbose: include full error lists when present
   -h             Help
 
 Environment:
-  KCTX              kubectl context
+  KCTX              kubectl context (single-target mode only)
   CONFIGSYNC_NS     Config Sync namespace (default: config-management-system)
-  ROOTSYNC_NAME     Default RootSync name (default: mgmt)
+  ROOTSYNC_NAME     RootSync name (single-target mode only)
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") central
+  $(basename "$0") -c central@central -n central-repo
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -c) CTX="$2"; shift 2 ;;
-    -n) ROOTSYNC_NAME="$2"; shift 2 ;;
+    -c) EXPLICIT_CTX=1; CTX="$2"; shift 2 ;;
+    -n) EXPLICIT_NAME=1; ROOTSYNC_NAME="$2"; shift 2 ;;
     -a) SHOW_ALL=1; shift ;;
     -w)
       if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
@@ -50,12 +74,58 @@ while [[ $# -gt 0 ]]; do
       ;;
     -v) VERBOSE=1; shift ;;
     -h) usage; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; usage >&2; exit 1 ;;
+    mgmt|central|regional|edge|ue)
+      cluster_args+=("$1")
+      shift
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      usage >&2
+      exit 1
+      ;;
   esac
 done
 
+if [[ "$EXPLICIT_CTX" == "0" && "$EXPLICIT_NAME" == "0" && ${#cluster_args[@]} -eq 0 ]]; then
+  CHECK_ALL=1
+fi
+
+rootsync_for_cluster() {
+  local cluster="$1"
+  case "$cluster" in
+    mgmt) printf '%s' "mgmt" ;;
+    *) cluster_gitea_repo_name "$cluster" ;;
+  esac
+}
+
+context_for_cluster() {
+  printf '%s@%s' "$1" "$1"
+}
+
+resolve_ssh_cluster() {
+  local ctx="$1"
+  local cluster="${ctx%%@*}"
+  USE_SSH=0
+  SSH_CLUSTER=""
+  case "$cluster" in
+    central|regional|edge|ue)
+      if ! kubectl config get-contexts "$ctx" >/dev/null 2>&1 \
+        || ! kubectl --context="$ctx" get ns kube-system --request-timeout=5s >/dev/null 2>&1; then
+        USE_SSH=1
+        SSH_CLUSTER="$cluster"
+      fi
+      ;;
+  esac
+}
+
 kubectl_ctx() {
-  kubectl --context="$CTX" "$@"
+  if [[ "$USE_SSH" == "1" ]]; then
+    local host
+    host="$(cluster_cp_host "$SSH_CLUSTER")"
+    ssh "${SSH_OPTS[@]}" "$host" "kubectl $(printf '%q ' "$@")"
+  else
+    kubectl --context="$CTX" "$@"
+  fi
 }
 
 jsonpath() {
@@ -65,7 +135,9 @@ jsonpath() {
 }
 
 print_header() {
-  echo "=== Config Sync @ ${CTX} ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
+  local via=""
+  [[ "$USE_SSH" == "1" ]] && via=" via SSH ${SSH_CLUSTER}-0"
+  echo "=== Config Sync @ ${CTX}${via} ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
   echo
 }
 
@@ -134,6 +206,9 @@ print_sync_resource() {
         "${source_err:-0}" == "0" && "${render_err:-0}" == "0" && "${sync_err:-0}" == "0" && \
         "${syncing:-False}" == "False" && -n "${sync_commit:-}" ]]; then
     echo "  result:  OK (in sync with git)"
+  elif [[ -n "${last_synced:-}" && "${source_err:-0}" == "0" && "${render_err:-0}" == "0" && \
+          "${sync_err:-0}" == "0" && "${syncing:-False}" == "False" ]]; then
+    echo "  result:  OK (synced ${last_synced:0:12}…)"
   elif [[ "${syncing:-}" == "True" ]]; then
     echo "  result:  SYNC IN PROGRESS"
   elif [[ "${source_err:-0}" != "0" || "${render_err:-0}" != "0" || "${sync_err:-0}" != "0" ]]; then
@@ -188,15 +263,64 @@ run_once() {
   print_syncs
 }
 
+check_cluster() {
+  local cluster="$1"
+  CTX="$(context_for_cluster "$cluster")"
+  ROOTSYNC_NAME="$(rootsync_for_cluster "$cluster")"
+  if [[ "$cluster" == "mgmt" ]]; then
+    USE_SSH=0
+    SSH_CLUSTER=""
+  else
+    resolve_ssh_cluster "$CTX"
+  fi
+  run_once
+}
+
+run_all() {
+  local cluster
+  local first=1
+  for cluster in "${ALL_CONFIGSYNC_CLUSTERS[@]}"; do
+    [[ "$first" == "1" ]] || echo
+    first=0
+    check_cluster "$cluster"
+  done
+}
+
 main() {
   if [[ -n "$WATCH_INTERVAL" ]]; then
     while true; do
       clear 2>/dev/null || true
-      run_once
+      if [[ "$CHECK_ALL" == "1" ]]; then
+        run_all
+      elif [[ ${#cluster_args[@]} -gt 0 ]]; then
+        local cluster first=1
+        for cluster in "${cluster_args[@]}"; do
+          [[ "$first" == "1" ]] || echo
+          first=0
+          check_cluster "$cluster"
+        done
+      else
+        if [[ "$CTX" != "mgmt@mgmt" ]]; then
+          resolve_ssh_cluster "$CTX"
+        fi
+        run_once
+      fi
       echo "Watching every ${WATCH_INTERVAL}s (Ctrl-C to stop) ..."
       sleep "$WATCH_INTERVAL"
     done
+  elif [[ "$CHECK_ALL" == "1" ]]; then
+    run_all
+  elif [[ ${#cluster_args[@]} -gt 0 ]]; then
+    local cluster first=1
+    for cluster in "${cluster_args[@]}"; do
+      [[ "$first" == "1" ]] || echo
+      first=0
+      check_cluster "$cluster"
+    done
   else
+    if [[ "$CTX" != "mgmt@mgmt" ]]; then
+      resolve_ssh_cluster "$CTX"
+    fi
     run_once
   fi
 }
