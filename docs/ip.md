@@ -40,14 +40,26 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.138.101 | central | OpenSpeedTest | 80 | [http://10.1.138.101](http://10.1.138.101) | `openspeedtest-central.nephio.lab` |
 | 10.1.138.102 | central | OAI AMF N2 | 38412/sctp | — | `amf-n2-central.nephio.lab` |
 | 10.1.138.103 | central | OAI UPF N3 | 2152/udp | — | `upf-n3-central.nephio.lab` |
-| 10.1.137.61 | central | Open5GS 5GC | 9999, 38412/sctp, 2152/udp | — | `open5gs.nephio.lab` |
 | 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
 OAI 5GC (operators + NFs) is deployed on **central** only; regional/edge/ue have OpenSpeedTest MetalLB VIPs but no OAI CN operators.
 
-**Cluster-local (no MetalLB):** Kubernetes Dashboard (GitOps **NodePort 30443** on control-plane mgmt IP), OAI **NRF** / **UDR** (operator `SVC_TYPE=ClusterIP` → `oai-nrf` / `oai-udr` in `oai-cn`). Other NFs use `*.oai-cn.svc.cluster.local`.
+## Cluster-local services (no MetalLB VIP)
+
+These are **not** on `10.1.138.0/24`. Dashboard uses **NodePort 30443** on the control-plane **mgmt** IP (`10.1.132.x`, SSH subnet). OAI NRF/UDR are ClusterIP inside `oai-cn`.
+
+| Access | Cluster | Service | Ports | URL | DNS |
+|--------|---------|---------|-------|-----|-----|
+| NodePort | mgmt | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.200:30443](https://10.1.132.200:30443) | `dashboard-mgmt.nephio.lab:30443` |
+| NodePort | central | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.210:30443](https://10.1.132.210:30443) | — |
+| NodePort | regional | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.220:30443](https://10.1.132.220:30443) | — |
+| NodePort | edge | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.230:30443](https://10.1.132.230:30443) | — |
+| NodePort | ue | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.240:30443](https://10.1.132.240:30443) | — |
+| ClusterIP | central | OAI NRF / UDR | 80/tcp (SBI) | `oai-nrf.oai-cn.svc` / `oai-udr.oai-cn.svc` | — |
+
+Port-forward fallback (`:8443` on the same mgmt IP): [scripts/kubectl_forward.sh](scripts/kubectl_forward.sh). Login token: [scripts/get_dashboard_key.sh](scripts/get_dashboard_key.sh). GitOps: [scripts/render_dashboard_gitops.sh](scripts/render_dashboard_gitops.sh).
 
 Dashboard access from the operator network (`10.1.132.0/24`):
 
