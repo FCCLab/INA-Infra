@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# Render OpenAirInterface 5G CN operators into repos/ for Config Sync GitOps push.
+# Upstream: https://github.com/openairinterface/oai-operators
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=cluster_lib.sh
+source "$SCRIPT_DIR/cluster_lib.sh"
+
+REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
+OAI_OPERATORS_REF="${OAI_OPERATORS_REF:-main}"
+OAI_OPERATORS_BASE="${OAI_OPERATORS_BASE:-https://raw.githubusercontent.com/openairinterface/oai-operators/${OAI_OPERATORS_REF}}"
+OAI_CN_OPERATORS_NS="${OAI_CN_OPERATORS_NS:-oai-cn-operators}"
+UPSTREAM_OPERATORS_NS="${UPSTREAM_OPERATORS_NS:-oaiops}"
+NEPHIO_CRD_BASE="${NEPHIO_CRD_BASE:-https://raw.githubusercontent.com/nephio-project/api/main/config/crd/bases}"
+
+OAI_OPERATOR_MANIFESTS=(
+  amf.yaml
+  ausf.yaml
+  nrf.yaml
+  smf.yaml
+  udm.yaml
+  udr.yaml
+  upf.yaml
+)
+
+NEPHIO_CRD_MANIFESTS=(
+  ref.nephio.org_configs.yaml
+  workload.nephio.org_nfdeployments.yaml
+  workload.nephio.org_nfconfigs.yaml
+)
+
+fetch_upstream_manifests() {
+  local out_dir nf crd
+  out_dir="$(mktemp -d)"
+  for nf in "${OAI_OPERATOR_MANIFESTS[@]}"; do
+    curl -fsSL "${OAI_OPERATORS_BASE}/oai5gcore/controllerdeploy/${nf}" \
+      -o "${out_dir}/${nf}"
+  done
+  mkdir -p "${out_dir}/crd"
+  for crd in "${NEPHIO_CRD_MANIFESTS[@]}"; do
+    curl -fsSL "${NEPHIO_CRD_BASE}/${crd}" -o "${out_dir}/crd/${crd}"
+  done
+  printf '%s' "$out_dir"
+}
+
+write_namespace() {
+  local dir="$1"
+  cat >"${dir}/namespace-${OAI_CN_OPERATORS_NS}.yaml" <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${OAI_CN_OPERATORS_NS}
+EOF
+}
+
+split_operator_manifests() {
+  local src_dir="$1"
+  local dest_cluster="$2"
+  local dest_ns="$3"
+
+  python3 - "$src_dir" "$dest_cluster" "$dest_ns" "$OAI_CN_OPERATORS_NS" "$UPSTREAM_OPERATORS_NS" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+src_dir, dest_cluster, dest_ns, target_ns, upstream_ns = sys.argv[1:6]
+cluster_kinds = {"ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition"}
+cluster_docs = []
+ns_docs = []
+
+def clean_metadata(meta):
+    if not isinstance(meta, dict):
+        return
+    if meta.get("annotations") is None:
+        meta.pop("annotations", None)
+
+
+def rewrite_namespace(obj):
+    if not isinstance(obj, dict):
+        return
+    meta = obj.get("metadata")
+    if isinstance(meta, dict) and meta.get("namespace") == upstream_ns:
+        meta["namespace"] = target_ns
+    subjects = obj.get("subjects")
+    if isinstance(subjects, list):
+        for subject in subjects:
+            if isinstance(subject, dict) and subject.get("namespace") == upstream_ns:
+                subject["namespace"] = target_ns
+
+
+def load_docs(path):
+    text = Path(path).read_text()
+    for doc in yaml.safe_load_all(text):
+        if doc and doc.get("kind"):
+            yield doc
+
+
+src = Path(src_dir)
+for path in sorted(src.glob("*.yaml")):
+    for doc in load_docs(path):
+        rewrite_namespace(doc)
+        clean_metadata(doc.get("metadata"))
+        if doc["kind"] == "Deployment":
+            template = doc.get("spec", {}).get("template", {})
+            clean_metadata(template.get("metadata"))
+        kind = doc["kind"]
+        if kind in cluster_kinds:
+            cluster_docs.append(doc)
+        else:
+            meta = doc.setdefault("metadata", {})
+            if kind != "Namespace" and "namespace" not in meta:
+                meta["namespace"] = target_ns
+            ns_docs.append(doc)
+
+for path in sorted((src / "crd").glob("*.yaml")):
+    for doc in load_docs(path):
+        clean_metadata(doc.get("metadata"))
+        cluster_docs.append(doc)
+
+
+def write_docs(docs, directory, managed_prefixes):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    for old in directory.glob("*.yaml"):
+        if any(old.name.startswith(prefix) for prefix in managed_prefixes):
+            old.unlink()
+    for doc in docs:
+        kind = doc["kind"].lower()
+        name = doc["metadata"]["name"]
+        path = directory / f"{kind}-{name}.yaml"
+        path.write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False))
+
+
+managed_cluster_prefixes = (
+    "clusterrole-oai-",
+    "clusterrolebinding-oai-",
+    "customresourcedefinition-configs.ref.nephio.org",
+    "customresourcedefinition-nfconfigs.workload.nephio.org",
+    "customresourcedefinition-nfdeployments.workload.nephio.org",
+)
+managed_ns_prefixes = (
+    "deployment-oai-",
+    "serviceaccount-oai-",
+    "configmap-oai-",
+)
+
+write_docs(cluster_docs, dest_cluster, managed_cluster_prefixes)
+write_docs(ns_docs, dest_ns, managed_ns_prefixes)
+print(f"  cluster: {len(cluster_docs)} resources")
+print(f"  namespaces/{target_ns}: {len(ns_docs)} resources")
+PY
+}
+
+write_cluster_operators() {
+  local cluster="$1"
+  local src_dir="$2"
+  local repo_name dest_dir dest_cluster
+
+  repo_name="$(cluster_gitea_repo_name "$cluster")"
+  dest_dir="${REPOS_DIR}/${repo_name}/namespaces/${OAI_CN_OPERATORS_NS}"
+  dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
+  mkdir -p "$dest_dir" "$dest_cluster"
+
+  split_operator_manifests "$src_dir" "$dest_cluster" "$dest_dir"
+  write_namespace "$dest_dir"
+
+  echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (OAI CN operators → ${OAI_CN_OPERATORS_NS})"
+}
+
+main() {
+  local clusters=("$@")
+  local src_dir=""
+
+  if [[ ${#clusters[@]} -eq 0 ]]; then
+    clusters=(central)
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: python3 not found" >&2
+    exit 1
+  fi
+
+  src_dir="$(fetch_upstream_manifests)"
+  trap 'rm -rf "${src_dir:-}"' EXIT
+
+  for cluster in "${clusters[@]}"; do
+    write_cluster_operators "$cluster" "$src_dir"
+  done
+
+  echo
+  echo "Operators: amf ausf nrf smf udm udr upf"
+  echo "Namespace: ${OAI_CN_OPERATORS_NS}"
+  echo "Nephio CRDs: ref.nephio.org/config, workload.nephio.org/nfdeployments|nfconfigs"
+  echo
+  echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
+  echo "NRF uses LoadBalancer (MetalLB on workload clusters)."
+  echo "Optional docker hub pull secret in ${OAI_CN_OPERATORS_NS}: regcred"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<EOF
+Usage: $(basename "$0") [cluster ...]
+
+Write OAI 5G core network function operators to repos/<gitea-repo>/ for Config Sync.
+Default cluster: central (core site).
+
+Upstream: openairinterface/oai-operators (${OAI_OPERATORS_REF})
+Namespace: ${OAI_CN_OPERATORS_NS} (upstream uses ${UPSTREAM_OPERATORS_NS})
+
+Includes Nephio CRDs required by the operators (workload.nephio.org NFDeployment).
+
+Environment:
+  OAI_OPERATORS_REF       Git ref (default: main)
+  OAI_CN_OPERATORS_NS     Target namespace (default: oai-cn-operators)
+  REPOS_DIR               Output tree (default: repos/)
+EOF
+  exit 0
+fi
+
+main "$@"

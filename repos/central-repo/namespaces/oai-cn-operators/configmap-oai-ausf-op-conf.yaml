@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ausf-op-conf
+  namespace: oai-cn-operators
+data:
+  ausf.yaml: "nfInterfaces:\n  sbi: 'eth0'\nports: \n  - name: 'http'\n    port: 80\n\
+    \    protocol: TCP\ncompute:\n  req:\n    cpu: '100m'\n    memory: '256Mi'\n \
+    \ limits:\n    cpu: '100m'\n    memory: '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-ausf:v2.0.1'\n\
+    fqdn:\n  udm: oai-udm\n  nrf: oai-nrf\n"

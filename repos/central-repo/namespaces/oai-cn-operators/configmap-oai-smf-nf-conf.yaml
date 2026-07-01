@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-smf-nf-conf
+  namespace: oai-cn-operators
+data:
+  smf.yaml: "# Log level for all the NFs\nlog_level:\n  general: {{ conf['logLevel']\
+    \ }}\n# If you enable registration, the other NFs will use the NRF discovery mechanism\n\
+    register_nf:\n  general: yes\nhttp_version: 2\n## general single_nssai configuration\n\
+    ## Defines YAML anchors, which are reused in the config file\nsnssais:\n  {%-\
+    \ for i in conf['PLMN']['plmnInfo']%}\n  {%- for s in i['nssai']%}\n  - &slice_{{\
+    \ i['nssai'].index(s) }}\n    sst: {{ s['sst'] }}\n    sd: {{ s['sd'] if 'sd'\
+    \ in s.keys() else 'FFFFFF' }}\n  {%- endfor %}\n  {%- endfor %}\n##############\
+    \ SBI Interfaces\n### Each NF takes its local SBI interfaces and remote interfaces\
+    \ from here, unless it gets them using NRF discovery mechanisms\nnfs:\n  amf:\n\
+    \    host: {{ conf['fqdn']['amf'] }}\n    sbi:\n      port: 80\n      api_version:\
+    \ v1\n  smf:\n    host: {{ conf['fqdn']['smf'] }}\n    sbi:\n      port: 80\n\
+    \      api_version: v1\n      interface_name: {{ conf['nfInterfaces']['sbi'] }}\n\
+    \    n4:\n      interface_name: {{ conf['nfInterfaces']['n4'] }}\n      port:\
+    \ 8805\n  udm:\n    host: {{ conf['fqdn']['udm'] }}\n    sbi:\n      port: 80\n\
+    \      api_version: v1\n  nrf:\n    host: {{ conf['fqdn']['nrf'] }}\n    sbi:\n\
+    \      port: 80\n      api_version: v1\n############## NF-specific configuration\n\
+    smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
+    \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
+    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: yes\n  #\
+    \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
+    \  {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n        enable_usage_reporting:\
+    \ no\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4: {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns']\
+    \ }}\n    primary_ipv6: \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
+    \ }}\n    secondary_ipv6: \"2001:4860:4860::8888\"\n  ims:\n    pcscf_ipv4: \"\
+    192.168.70.139\"\n    pcscf_ipv6: \"fe80::7915:f408:1787:db8b\"\n  # the DNN you\
+    \ configure here should be configured in \"dnns\"\n  # follows the SmfInfo datatype\
+    \ from 3GPP TS 29.510\n  smf_info:\n    sNssaiSmfInfoList:\n      {%- for i in\
+    \ conf['PLMN']['plmnInfo'] %}\n      {%- for x in i['nssai'] %}\n      - sNssai:\
+    \ *slice_{{ i['nssai'].index(x) }}\n        dnnSmfInfoList:\n      {%- for d in\
+    \ x['dnnInfo'] %}\n          - dnn: {{ d['name'] }}\n      {%- endfor %}\n   \
+    \   {%- endfor %}\n      {%- endfor %}\n  local_subscription_infos:\n    {%- for\
+    \ i in conf['PLMN']['plmnInfo'] %}\n    {%- for x in i['nssai'] %}\n    {%- for\
+    \ d in x['dnnInfo'] %}\n    - single_nssai: *slice_{{ i['nssai'].index(x) }}\n\
+    \      dnn: {{ d['name'] }}\n      qos_profile:\n        5qi: 5\n        session_ambr_ul:\
+    \ \"200Mbps\"\n        session_ambr_dl: \"400Mbps\"\n    {%- endfor %}\n    {%-\
+    \ endfor %}\n    {%- endfor %}\n## DNN configuration\ndnns:\n  {%- for i in conf['PLMN']['plmnInfo']\
+    \ %}\n  {%- for x in i['nssai'] %}\n  {%- for d in x['dnnInfo'] %}\n  - dnn: \"\
+    {{ d['name'] }}\"\n    pdu_session_type: \"IPV4\"\n    ipv4_subnet: \"{{ d['subnet']\
+    \ }}\"\n  {%- endfor %}\n  {%- endfor %}\n  {%- endfor %}\n"
