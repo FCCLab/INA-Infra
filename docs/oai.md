@@ -1,27 +1,28 @@
 # OAI topology
 
-OpenAirInterface 5G deployment across three workload clusters: **central** (5GC + UPF), **regional** (CU-CP), **edge** (DU + rfsim RU + CU-UP). All manifests are GitOps via Config Sync ([ip.md](ip.md) for addressing).
+OpenAirInterface 5G deployment across four workload clusters: **central** (5GC + UPF), **regional** (CU-CP), **edge** (DU + rfsim RU + CU-UP), **ue** (nrUE RFsim client). All manifests are GitOps via Config Sync ([ip.md](ip.md) for addressing).
 
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
 Untagged **macvlan** on `enp7s0` (Multus NADs). **No host/netplan IP** on `.139` — only OAI pod interfaces. Logical gateway for NAD config: **`10.1.139.1`**. `10.1.138.0/24` stays for MetalLB / OpenSpeedTest only.
 
-**Range `10.1.139.10` – `10.1.139.209`:** four workload clusters × **50 IPs** each (`mgmt` is not on this network). Each cluster assigns macvlan IPs from **`base + 0`** upward. **Deployed today:** 1 CU-CP on **regional**, 1 CU-UP + 1 DU on **edge**, 5GC on **central**.
+**Range `10.1.139.10` – `10.1.139.209`:** four workload clusters × **50 IPs** each (`mgmt` is not on this network). Each cluster assigns macvlan IPs from **`base + 0`** upward. **Deployed today:** 5GC on **central**, 1 CU-CP on **regional**, 1 CU-UP + 1 DU on **edge**, 1 nrUE on **ue**.
 
 | Cluster | Base | Range | Deployed |
 |---------|------|-------|----------|
 | central | `.10` | `10.1.139.10` – `10.1.139.59` | 1× AMF, 1× SMF, 1× UPF |
 | regional | `.60` | `10.1.139.60` – `10.1.139.109` | **1× CU-CP** |
 | edge | `.110` | `10.1.139.110` – `10.1.139.159` | **1× CU-UP + 1× DU** |
-| ue | `.160` | `10.1.139.160` – `10.1.139.209` | — (reserved) |
+| ue | `.160` | `10.1.139.160` – `10.1.139.209` | **1× nrUE** |
 
-### Deployed RAN (3 NFs)
+### Deployed RAN (3 NFs + UE)
 
 | NF | Cluster | IPs (macvlan on `10.1.139.0/24`) |
 |----|---------|-------------------------------------|
 | **CU-CP** | regional | N2 `10.1.139.60` · F1-C `10.1.139.61` · E1 `10.1.139.62` |
 | **CU-UP** | edge | E1 `10.1.139.110` · F1-U `10.1.139.111` · N3 `10.1.139.112` |
 | **DU** | edge | F1 `10.1.139.113` |
+| **nrUE** | ue | RF `10.1.139.160` (RFsim client → edge DU `:4043`) |
 
 ### Deployed 5GC (central)
 
@@ -43,9 +44,10 @@ edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.61  
 edge CU-UP E1       10.1.139.110  ──SCTP──►  CU-CP E1    10.1.139.62   (regional)
 edge CU-UP N3       10.1.139.112  ──GTP-U──►  UPF N3      10.1.139.11   (central)
 central SMF N4      10.1.139.12   ──PFCP──►  UPF N4      10.1.139.13   (central)
+ue nrUE RFsim       10.1.139.160  ──RFsim──►  DU rfsim    10.1.139.113:4043 (edge)
 ```
 
-NRF / UDR / SMF SBI stay **ClusterIP** inside `oai-cn` (unchanged). DNN pool behind UPF N6 stays **`10.1.0.0/24`**.
+NRF / UDR / SMF SBI stay **ClusterIP** inside `oai-cn` (unchanged). DNN pool behind UPF N6 stays **`10.1.0.0/24`** (UE PDU address, e.g. `10.1.0.2`).
 
 ### Slice offsets
 
@@ -83,7 +85,14 @@ Offsets `+1`, `+3`, `+4` are on the same **`upf-core`** pod (N3 / N4 / N6). SMF 
 | `+3` | DU | F1 | `10.1.139.113` |
 | `+4` – `+49` | — | reserved | |
 
-**ue** (base `10.1.139.160`) — entire slice reserved (`+0` – `+49`).
+**ue** (base `10.1.139.160`) — 1× nrUE
+
+| Offset | NF | Interface | IP |
+|--------|-----|-----------|-----|
+| `+0` | nrUE | RF (macvlan `rf`) | `10.1.139.160` |
+| `+1` – `+49` | — | reserved | |
+
+RFsim is **not** SCTP/GTP — the nrUE pod connects to the edge DU rfsim server over site L2 (`10.1.139.113:4043`). No additional macvlan offsets are used on ue today.
 
 When a cluster later runs a full RAN trio (1 CU-CP + 1 CU-UP + 1 DU), continue assigning from `+0` in interface order: CU-CP N2/F1-C/E1 (`+0`–`+2`), CU-UP E1/F1-U/N3 (`+3`–`+5`), DU F1 (`+6`).
 
@@ -124,11 +133,19 @@ flowchart TB
     OPS_RAN_E[oai-ran-operators]
   end
 
+  subgraph ue["ue cluster"]
+    subgraph oai_ue["namespace: oai-ue"]
+      NRUE[nrUE RFsim client]
+    end
+  end
+
   OPS_CN -.->|NFDeployment| oai_cn
   OPS_CN -.->|NFDeployment| oai_upf
   OPS_RAN_R -.->|NFDeployment| oai_cucp
   OPS_RAN_E -.->|NFDeployment| oai_du
   OPS_RAN_E -.->|NFDeployment| oai_cuup
+
+  NRUE -->|"RFsim :4043"| DU
 
   NRF --- SMF
   NRF --- AMF
@@ -143,25 +160,31 @@ flowchart TB
 | **central** | NRF, AMF, SMF, UDM, UDR, AUSF, MySQL, UPF | `oai-cn`, `oai-upf`, `oai-cn-operators` |
 | **regional** | CU-CP | `oai-ran-cucp`, `oai-ran-operators` |
 | **edge** | DU (rfsim RU), CU-UP | `oai-ran-du`, `oai-ran-cuup`, `oai-ran-operators` |
+| **ue** | nrUE (RFsim client) | `oai-ue` |
 
 ## RAN split (DU / CU-CP / CU-UP)
 
 ```mermaid
 flowchart LR
+  subgraph ue["ue"]
+    NRUE["nrUE<br/>RF 10.1.139.160"]
+  end
+
   subgraph edge["edge"]
     DU["DU + rfsim RU<br/>F1 10.1.139.113"]
-    CUUP["CU-UP<br/>E1 .110 · F1U .111 · N3 .112"]
+    CUUP["CU-UP<br/>E1: 10.1.139.110<br/>F1U: 10.1.139.111<br/>N3: 10.1.139.112"]
   end
 
   subgraph regional["regional"]
-    CUCP["CU-CP<br/>N2 .60 · F1c .61 · E1 .62"]
+    CUCP["CU-CP<br/>N2: 10.1.139.60<br/>F1-C: 10.1.139.61<br/>E1: 10.1.139.62"]
   end
 
   subgraph central["central"]
     AMF["AMF<br/>N2 10.1.139.10"]
-    UPF["UPF upf-core<br/>N3 .11 · N4 .13 · N6 .14"]
+    UPF["UPF upf-core<br/>N3: 10.1.139.11<br/>N4: 10.1.139.13<br/>N6: 10.1.139.14"]
   end
 
+  NRUE -->|"RFsim :4043"| DU
   DU -->|"F1 SCTP :38472"| CUCP
   CUUP -->|"E1 SCTP :38462"| CUCP
   CUUP -->|"F1U GTP-U :2152"| DU
@@ -169,7 +192,7 @@ flowchart LR
   CUUP -->|"N3 GTP-U :2152"| UPF
 ```
 
-CU-CP is the control-plane anchor: it terminates **N2** toward the core, **F1-C** toward the DU, and **E1** toward the CU-UP. CU-UP handles the user plane (**F1-U** to DU, **N3** to UPF).
+CU-CP is the control-plane anchor: it terminates **N2** toward the core, **F1-C** toward the DU, and **E1** toward the CU-UP. CU-UP handles the user plane (**F1-U** to DU, **N3** to UPF). The **nrUE** on ue attaches over **RFsim** to the edge DU (no macvlan SCTP/GTP on ue beyond the RF NAD).
 
 ## 5GC service-based interfaces (central only)
 
@@ -204,6 +227,7 @@ All OAI data-plane interfaces use Multus **macvlan** on `enp7s0` in **`10.1.139.
 
 | Link | Protocol | Local | Remote | Cluster(s) |
 |------|----------|-------|--------|------------|
+| **RFsim** (nrUE ↔ DU) | OAI RFsim :4043 | nrUE `10.1.139.160` | DU `10.1.139.113` | ue → edge |
 | **N2** (gNB ↔ AMF) | SCTP :38412 | CU-CP `10.1.139.60` | AMF `10.1.139.10` | regional → central |
 | **F1-C** (DU ↔ CU-CP) | SCTP :38472 | DU `10.1.139.113` | CU-CP `10.1.139.61` | edge → regional |
 | **E1** (CU-UP ↔ CU-CP) | SCTP :38462 | CU-UP `10.1.139.110` | CU-CP `10.1.139.62` | edge → regional |
@@ -219,7 +243,9 @@ Cross-cluster traffic uses the site L2 fabric (`enp7s0` → vm-sw), not Kubernet
 ```mermaid
 flowchart TB
   subgraph CP["Control plane"]
-    DU_CP[DU] --> F1C[F1-C SCTP]
+    UE_CP[nrUE] --> RF[RFsim]
+    RF --> DU_CP[DU]
+    DU_CP --> F1C[F1-C SCTP]
     F1C --> CUCP[CU-CP]
     CUCP --> N2[N2 NGAP SCTP]
     N2 --> AMF[AMF]
@@ -228,7 +254,8 @@ flowchart TB
   end
 
   subgraph UP["User plane"]
-    DU_UP[DU] --> F1U[F1-U GTP-U]
+    UE_UP[nrUE] --> DU_UP[DU]
+    DU_UP --> F1U[F1-U GTP-U]
     F1U --> CUUP[CU-UP]
     CUUP --> N3[N3 GTP-U]
     N3 --> UPF[UPF]
@@ -245,6 +272,7 @@ flowchart TB
 | CU-CP | `oaisoftwarealliance/oai-gnb:v2.3.0` | regional |
 | DU | `oaisoftwarealliance/oai-gnb:v2.3.0` (rfsim RU) | edge |
 | CU-UP | `oaisoftwarealliance/oai-nr-cuup:v2.3.0` | edge |
+| nrUE | `oaisoftwarealliance/oai-nr-ue:v2.3.0` | ue |
 | AMF | `oaisoftwarealliance/oai-amf:v2.0.1` | central |
 | RAN operator | `nephio/oai-ran-controller:latest` | regional, edge |
 | CN operators | OAI upstream controllers | central |
@@ -260,10 +288,52 @@ PLMN: **MCC 001 / MNC 01**, SST **1**, SD **ffffff**, DNN **internet**.
 | CU-CP (regional) | [scripts/render_oai_ran_gitops.sh](../scripts/render_oai_ran_gitops.sh) |
 | DU + rfsim (edge) | [scripts/render_oai_ran_du_gitops.sh](../scripts/render_oai_ran_du_gitops.sh) |
 | CU-UP (edge) | [scripts/render_oai_ran_cuup_gitops.sh](../scripts/render_oai_ran_cuup_gitops.sh) |
+| UE sim (ue) | [scripts/render_oai_ue_gitops.sh](../scripts/render_oai_ue_gitops.sh) |
 | Multus CNI | [scripts/render_multus_gitops.sh](../scripts/render_multus_gitops.sh) |
+| PFCP reconcile (central) | [scripts/reconcile_oai_pfcp.sh](../scripts/reconcile_oai_pfcp.sh) |
 | Push to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](../bringup/03_push_to_git_repos/push_git_repos.sh) |
 
-**Executor pattern:** RAN workloads (CU-CP, DU, CU-UP) use static executor manifests in git (Deployment, ConfigMap, NADs) because Config Sync prunes operator-created pods. Core NFs on central are reconciled by OAI CN operators from `NFDeployment` CRs.
+**Executor pattern:** RAN workloads (CU-CP, DU, CU-UP) use static executor manifests in git (Deployment, ConfigMap, NADs) because Config Sync prunes operator-created pods. Core NFs on central are reconciled by OAI CN operators from `NFDeployment` CRs. The **nrUE** on ue is a static Deployment (no operator).
+
+## UE sim (ue cluster)
+
+OAI **nrUE** in namespace **`oai-ue`** on the **ue** cluster. One macvlan NAD (`ue-sim-rf`, interface `rf`) at **`10.1.139.160`**. RFsim client targets edge DU at **`10.1.139.113:4043`** (same host as DU F1, rfsim server port).
+
+| Item | Value |
+|------|-------|
+| Namespace | `oai-ue` |
+| Deployment | `oai-ue` |
+| Macvlan IP | `10.1.139.160` (base `+0`) |
+| RFsim target | `10.1.139.113:4043` (edge DU) |
+| IMSI | `001010000000100` |
+| DNN / slice | `internet` · SST `1` · SD `ffffff` |
+| RF params | `-C 3609120000 -r 51 --numerology 1 --ssb 234 --band 78` |
+| PDU IPv4 pool | `10.1.0.0/24` (assigned by SMF/UPF, e.g. `10.1.0.2`) |
+
+**Prerequisites:** Multus on ue; edge DU running with rfsim; central 5GC + PFCP association; subscriber `001010000000100` in central MySQL.
+
+```bash
+./scripts/render_multus_gitops.sh ue
+./scripts/render_oai_ue_gitops.sh ue
+./bringup/03_push_to_git_repos/push_git_repos.sh ue
+
+# After central core + edge RAN are up:
+./scripts/reconcile_oai_pfcp.sh central-0
+ssh ue-0 kubectl rollout restart deployment/oai-ue -n oai-ue
+```
+
+## PFCP (SMF ↔ UPF)
+
+PDU sessions require an active PFCP association on N4 (`10.1.139.12` ↔ `10.1.139.13`). On cold start, UPF may register with NRF before SMF subscribes; SMF then logs **No UPF available** and AMF cannot create SM contexts.
+
+```bash
+# Fix: restart UPF after SMF is ready (or use reconcile script)
+./scripts/reconcile_oai_pfcp.sh central-0
+
+# Verify
+ssh central-0 kubectl logs -n oai-cn deploy/smf-core --since=5m | grep -i 'ASSOCIATION SETUP RESPONSE'
+ssh central-0 kubectl logs -n oai-upf deploy/upf-core --since=5m | grep -i 'HEARTBEAT'
+```
 
 ## Quick health checks
 
@@ -279,4 +349,8 @@ ssh edge-0 kubectl logs -n oai-ran-du -l app.kubernetes.io/name=oai-du --tail=30
 
 # CU-UP E1 / GTP-U
 ssh edge-0 kubectl logs -n oai-ran-cuup -l app.kubernetes.io/name=oai-cu-up --tail=30
+
+# UE registration + PDU (expect 10.1.0.x and ping 8.8.8.8)
+ssh ue-0 kubectl logs -n oai-ue deploy/oai-ue | grep -iE 'Registration Accept|PDU Session|IPv4'
+ssh ue-0 kubectl exec -n oai-ue deploy/oai-ue -- ping -c 2 8.8.8.8
 ```

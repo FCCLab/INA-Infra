@@ -43,7 +43,7 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-OAI 5GC on **central**; OAI **CU-CP** on **regional**; OAI **DU + rfsim RU** and **CU-UP** on **edge** — macvlan on **`10.1.139.0/24`** ([oai.md](oai.md)).
+OAI 5GC on **central**; OAI **CU-CP** on **regional**; OAI **DU + rfsim RU** and **CU-UP** on **edge**; OAI **nrUE** (RFsim client) on **ue** — macvlan on **`10.1.139.0/24`** ([oai.md](oai.md)).
 
 ## Cluster-local services (no MetalLB VIP)
 

@@ -22,7 +22,7 @@ data:
     \      port: 80\n      api_version: v1\n############## NF-specific configuration\n\
     smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
     \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
-    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: yes\n  #\
+    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
     \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
     \  {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n        enable_usage_reporting:\
     \ no\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4: {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns']\

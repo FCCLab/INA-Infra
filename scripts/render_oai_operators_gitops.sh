@@ -124,6 +124,17 @@ def patch_operator_svc(doc):
     containers[0]["env"] = env
 
 
+def patch_nf_conf(doc):
+    if doc.get("kind") != "ConfigMap" or doc["metadata"].get("name") != "oai-smf-nf-conf":
+        return
+    data = doc.get("data")
+    if not isinstance(data, dict):
+        return
+    for key, val in list(data.items()):
+        if isinstance(val, str):
+            data[key] = val.replace("discover_upf: yes", "discover_upf: no")
+
+
 def patch_op_conf(doc):
     if doc.get("kind") != "ConfigMap" or "-op-conf" not in doc["metadata"].get("name", ""):
         return
@@ -150,6 +161,7 @@ for path in sorted(src.glob("*.yaml")):
     for doc in load_docs(path):
         rewrite_namespace(doc)
         patch_op_conf(doc)
+        patch_nf_conf(doc)
         patch_operator_svc(doc)
         clean_metadata(doc.get("metadata"))
         if doc["kind"] == "Deployment":

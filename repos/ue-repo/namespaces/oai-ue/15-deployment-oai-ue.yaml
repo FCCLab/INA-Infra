@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ue
+  namespace: oai-ue
+  labels:
+    app.kubernetes.io/name: oai-ue
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ue
+  template:
+    metadata:
+      labels:
+        app: oai-ue
+        app.kubernetes.io/name: oai-ue
+      annotations:
+        k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"ue-sim-rf\",\n  \"interface\"\
+          : \"rf\",\n  \"ips\": [\"10.1.139.160/24\"],\n  \"gateways\": [\"10.1.139.1\"\
+          ]\n }\n]"
+    spec:
+      serviceAccountName: oai-ue-sa
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: ue
+        image: docker.io/oaisoftwarealliance/oai-nr-ue:v2.3.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr
+            10.1.139.113 --rfsimulator.serverport 4043 -C 3609120000 -r 51 --numerology
+            1 --ssb 234 --band 78 --uicc0.imsi 001010000000100
+        - name: TZ
+          value: Europe/Paris
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 1Gi
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
+          subPath: ue.conf
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-ue-configmap

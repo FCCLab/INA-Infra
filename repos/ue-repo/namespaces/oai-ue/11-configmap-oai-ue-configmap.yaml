@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-configmap
+  namespace: oai-ue
+data:
+  ue.conf: "uicc0 = {\n  imsi = \"001010000000100\";\n  key = \"fec86ba6eb707ed08905757b1bb44b8f\"\
+    ;\n  opc = \"C42449363BBAD02B66D16BC975D77CC1\";\n  dnn = \"internet\";\n  nssai_sst\
+    \ = 1;\n  nssai_sd = 0xFFFFFF;\n}\n\nposition0 = {\n  x = 0.0;\n  y = 0.0;\n \
+    \ z = 6377900.0;\n}\n"
