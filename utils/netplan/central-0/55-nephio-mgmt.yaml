@@ -11,4 +11,4 @@ network:
           via: 10.1.132.1
       nameservers:
         addresses:
-          - 10.1.132.200
+          - 8.8.8.8
