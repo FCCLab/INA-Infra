@@ -170,48 +170,92 @@ ping -c2 10.1.132.200
 
 ## Relation to site testbed
 
-```mermaid
-flowchart LR
-  subgraph mgmt_plane["Mgmt plane — 10.1.132.0/24"]
-    brmgmt["br-mgmt"]
-    eno1["eno1 wire<br/>GW 10.1.132.1"]
-    brmgmt --- eno1
-  end
+Each Nephio VM sits on **two planes**: mgmt (`enp1s0` on `br-mgmt`) and site (`enp7s0` on `br-int-<site>`). The hypervisor stitches physical wires, Linux bridges, libvirt `vnet*` ports, and guest NICs into one L2 path per plane.
 
-  subgraph site_plane["Site plane — 10.1.137.0/24 + 10.1.138.0/24"]
-    BC["br-int-central<br/>10.1.137.10"]
-    BR["br-int-regional<br/>10.1.137.11"]
-    BE["br-int-edge<br/>10.1.137.12"]
-    BU["br-int-ue<br/>10.1.137.13"]
-    sw["vm-sw-*"]
-    BC --- sw
-    BR --- sw
-    BE --- sw
-    BU --- sw
-  end
+```text
+  EXTERNAL                    HOST                         GUEST VM
+  ---------                   ----                         --------
 
-  VM["workload VM<br/>enp1s0 .132.x<br/>enp7s0 .137.x + .138.x"]
-  VM --> brmgmt
-  VM --> BC
-  VM --> BR
-  VM --> BE
-  VM --> BU
+  mgmt LAN (.132)  ── eno1 ── br-mgmt ── vnet* ── enp1s0  (SSH, route, dashboard)
+  edge site (.137) ── eno2 ── br-int-edge ── vnet* ── enp7s0  (K8s, Flannel, MetalLB)
+                                    │
+                               vm-sw-edge ── br-ext-eu ── … (other sites)
 ```
 
-Example (**central-0**): mgmt `10.1.132.210` on `br-mgmt`; site `10.1.137.110` + `10.1.138.110` on `br-int-central` (`10.1.137.10/24`).
+### All sites on the host
 
-- **Mgmt:** `eno1` → `br-mgmt` → `10.1.132.0/24` physical LAN.
-- **Site:** `br-int-<site>` → `vm-sw-<site>` → `br-ext-*` interconnect (see [testbed readme](../bringup/00_testbed/readme.md)).
+```mermaid
+flowchart LR
+  subgraph ext["External"]
+    E1["mgmt LAN .132<br/>eno1"]
+    E2["edge wire .137<br/>eno2 optional"]
+  end
+
+  subgraph host_br["Host bridges"]
+    BM["br-mgmt"]
+    BC["br-int-central<br/>.10"]
+    BR["br-int-regional<br/>.11"]
+    BE["br-int-edge<br/>.12"]
+    BU["br-int-ue<br/>.13"]
+  end
+
+  subgraph vms["Workload VMs — dual NIC"]
+    VM["enp1s0 → br-mgmt<br/>enp7s0 → br-int-site"]
+  end
+
+  E1 --- BM
+  E2 --- BE
+  BM --- VM
+  BC --- VM
+  BR --- VM
+  BE --- VM
+  BU --- VM
+```
+
+Central / regional / UE site bridges are **host-internal** unless you add another physical uplink the same way as `eno2` → `br-int-edge`.
+
+### Layer map
+
+| Layer | Mgmt plane | Site plane (edge) |
+|-------|------------|-------------------|
+| **External** | `10.1.132.0/24` LAN, GW `10.1.132.1` | Optional L2 peer on `eno2` cable |
+| **Physical** | `eno1` → enslaved to `br-mgmt` | `eno2` → enslaved to `br-int-edge` |
+| **Host bridge** | `br-mgmt` (`10.1.132.10`) | `br-int-edge` (`10.1.137.12`) |
+| **Libvirt** | `vnet*` on `br-mgmt` | `vnet*` on `br-int-edge` |
+| **Guest NIC** | `enp1s0` (`.132.230` on edge-0) | `enp7s0` (`.137.130` + `.138.130`) |
+| **Beyond site** | — | `vm-sw-edge` → `br-ext-eu` → UE tier |
+
+| Plane | Host bridge | Physical NIC | Guest NIC | Subnets |
+|-------|-------------|--------------|-----------|---------|
+| **Mgmt** | `br-mgmt` | **`eno1`** | `enp1s0` (all VMs) | `10.1.132.0/24` |
+| **Site (edge)** | `br-int-edge` | **`eno2`** (optional) | `enp7s0` (Edge VMs) | `10.1.137.0/24`, `10.1.138.0/24` |
+| **Site (other)** | `br-int-central` / `regional` / `ue` | none (internal `vnet*` only) | `enp7s0` | `10.1.137.0/24`, `10.1.138.0/24` |
+
+One NIC → one bridge. **`eno1` is for `br-mgmt` only.** Edge wire: [`scripts/br-int-edge_2_eno2.sh`](../scripts/br-int-edge_2_eno2.sh). Mgmt wire: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh).
+
+**edge-0:** mgmt `10.1.132.230` on `enp1s0` ← `br-mgmt` ← `eno1`; site `10.1.137.130` + `10.1.138.130` on `enp7s0` ← `br-int-edge` ← `eno2` (optional).
+
+**central-0:** same mgmt path; site on `br-int-central` (`10.1.137.10/24`) — internal, no `eno2` by default.
+
+Site interconnect (`br-int-*` → `vm-sw-*` → `br-ext-*`): [testbed readme](../bringup/00_testbed/readme.md).
 
 ## Persistence
 
-`setup_mgmt_bridge.sh` is runtime-only. After reboot, run `sudo ./scripts/setup_mgmt_bridge.sh up` again (or add a systemd oneshot / netplan hook). Libvirt `--config` attachments survive reboot once `br-mgmt` exists.
+`setup_mgmt_bridge.sh` and `br-int-edge_2_eno2.sh` are runtime-only. After reboot:
+
+```bash
+sudo ./scripts/setup_mgmt_bridge.sh up
+sudo ./scripts/br-int-edge_2_eno2.sh setup   # if using eno2 wire uplink
+```
+
+Libvirt `--config` attachments survive reboot once the bridges exist.
 
 ## Related scripts
 
 | Script | Purpose |
 |--------|---------|
 | [scripts/setup_mgmt_bridge.sh](../scripts/setup_mgmt_bridge.sh) | Create `br-mgmt`, enslave `eno1`, attach VMs |
+| [scripts/br-int-edge_2_eno2.sh](../scripts/br-int-edge_2_eno2.sh) | Optional: enslave `eno2` to `br-int-edge` |
 | [scripts/setup_ip.sh](../scripts/setup_ip.sh) | Push mgmt + site netplan to guests |
 | [scripts/bringup_cluster.sh](../scripts/bringup_cluster.sh) | Kubernetes bootstrap (mgmt on `enp1s0`) |
 | [bringup/00_testbed/attach_vm.sh](../bringup/00_testbed/attach_vm.sh) | Attach site NIC to `br-int-*` |
