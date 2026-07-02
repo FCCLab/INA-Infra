@@ -54,6 +54,23 @@ spec:
         - name: configuration
           mountPath: /opt/oai-gnb/etc/gnb.conf
           subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
       volumes:
       - name: configuration
         configMap:

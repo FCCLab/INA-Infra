@@ -39,6 +39,10 @@ spec:
           value: 'no'
         - name: KUBERNETES_BASE_URL
           value: https://kubernetes.default.svc
+        - name: DEBUG_SIDECAR
+          value: 'yes'
+        - name: DEBUG_SIDECAR_IMAGE
+          value: docker.io/nicolaka/netshoot
         - name: SVC_TYPE
           value: ClusterIP
         volumeMounts:
@@ -46,6 +50,9 @@ spec:
           name: opconf
         - mountPath: /tmp/nf
           name: nfconf
+        - name: utils-patch
+          mountPath: /root/.local/utils.py
+          subPath: utils.py
         resources:
           requests:
             memory: 256Mi
@@ -60,6 +67,9 @@ spec:
       - configMap:
           name: oai-upf-nf-conf
         name: nfconf
+      - name: utils-patch
+        configMap:
+          name: oai-upf-controller-utils
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       serviceAccountName: oai-upf-operator

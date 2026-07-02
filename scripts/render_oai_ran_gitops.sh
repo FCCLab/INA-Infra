@@ -58,7 +58,9 @@ write_ran_gitops() {
   python3 - "$src_dir" "$dest_ops" "$dest_cucp" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_CUCP_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$cucp_name" "$cucp_n2" "$amf_n2" "$cucp_f1c" "$cucp_e1" "$OAI_MACVLAN_GW" \
-    "$OAI_GNB_IMAGE" "$SITE_IFACE" <<'PY'
+    "$OAI_GNB_IMAGE" "$SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
+    "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -66,7 +68,12 @@ from pathlib import Path
 import yaml
 
 (src_dir, dest_ops, dest_cucp, dest_cluster, ops_ns, cucp_ns, operator_image,
- cucp_name, cucp_n2, amf_n2, f1c_ip, e1_ip, oai_gw, gnb_image, nad_parent) = sys.argv[1:16]
+ cucp_name, cucp_n2, amf_n2, f1c_ip, e1_ip, oai_gw, gnb_image, nad_parent,
+ debug_lib, debug_image) = sys.argv[1:18]
+spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
+oai_debug = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(oai_debug)
+debug_container = oai_debug.debug_sidecar_container(debug_image)
 
 dest_ops = Path(dest_ops)
 dest_cucp = Path(dest_cucp)
@@ -443,7 +450,7 @@ write_doc({
                         "mountPath": "/opt/oai-gnb/etc/gnb.conf",
                         "subPath": "gnb.conf",
                     }],
-                }],
+                }, debug_container],
                 "volumes": [{
                     "name": "configuration",
                     "configMap": {"name": "oai-cu-cp-configmap"},
@@ -495,7 +502,7 @@ main() {
   echo
   echo "Namespaces: ${OAI_RAN_OPERATORS_NS} (operator), ${OAI_RAN_CUCP_NS} (CU-CP executor)"
   echo "Prerequisites on target cluster: Multus (./scripts/render_multus_gitops.sh <cluster>)"
-  echo "Central AMF must be running; CU-CP N2 ${cucp_n2} → AMF N2 $(amf_n2_vip central) on 10.1.139.0/24"
+  echo "Central AMF must be running; CU-CP N2 $(oai_macvlan_ip regional 0) → AMF N2 $(amf_n2_vip central) on 10.1.139.0/24"
   echo
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
 }

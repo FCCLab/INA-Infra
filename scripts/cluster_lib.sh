@@ -277,6 +277,9 @@ kube_context() {
   printf '%s@%s' "$1" "$1"
 }
 
+# netshoot sidecar for OAI pod network troubleshooting (tcpdump, ping, etc.)
+OAI_DEBUG_SIDECAR_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
+
 # Gitea deployment repo name (nephio/<name>); workload clusters use {cluster}-repo.
 cluster_gitea_repo_name() {
   local cluster="$1"

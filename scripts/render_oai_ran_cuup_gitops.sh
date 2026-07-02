@@ -68,7 +68,9 @@ write_cuup_gitops() {
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_CUUP_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$cuup_name" "$cuup_e1" "$cuup_f1u" "$cuup_n3" \
     "$CUCP_E1_IP" "$CUCP_E1_GW" "$CUUP_F1U_GW" "$UPF_N3_IP" "$UPF_N3_GW" \
-    "$cucp_name" "$CUCP_CLUSTER" "$UPF_CLUSTER" "$OAI_CUUP_IMAGE" "$SITE_IFACE" <<'PY'
+    "$cucp_name" "$CUCP_CLUSTER" "$UPF_CLUSTER" "$OAI_CUUP_IMAGE" "$SITE_IFACE" \
+    "$SCRIPT_DIR/oai_debug_sidecar.py" "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -77,7 +79,12 @@ import yaml
 
 (src_dir, dest_ops, dest_cuup, dest_cluster, ops_ns, cuup_ns, operator_image,
  cuup_name, cuup_e1, cuup_f1u, cuup_n3, cucp_e1, cucp_e1_gw, f1u_gw, upf_n3, upf_n3_gw,
- cucp_name, cucp_cluster, upf_cluster, cuup_image, nad_parent) = sys.argv[1:]
+ cucp_name, cucp_cluster, upf_cluster, cuup_image, nad_parent,
+ debug_lib, debug_image) = sys.argv[1:24]
+spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
+oai_debug = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(oai_debug)
+debug_container = oai_debug.debug_sidecar_container(debug_image)
 
 dest_ops = Path(dest_ops)
 dest_cuup = Path(dest_cuup)
@@ -459,7 +466,7 @@ write_doc({
                         "mountPath": "/opt/oai-gnb/etc/gnb.conf",
                         "subPath": "gnb.conf",
                     }],
-                }],
+                }, debug_container],
                 "volumes": [{
                     "name": "configuration",
                     "configMap": {"name": "oai-cu-up-configmap"},

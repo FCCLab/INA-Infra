@@ -25,8 +25,9 @@ data:
     \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
     \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
     \  {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n        enable_usage_reporting:\
-    \ no\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4: {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns']\
-    \ }}\n    primary_ipv6: \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
+    \ no\n        n3_local_ipv4: 10.1.139.11\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4:\
+    \ {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns'] }}\n    primary_ipv6:\
+    \ \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
     \ }}\n    secondary_ipv6: \"2001:4860:4860::8888\"\n  ims:\n    pcscf_ipv4: \"\
     192.168.70.139\"\n    pcscf_ipv6: \"fe80::7915:f408:1787:db8b\"\n  # the DNN you\
     \ configure here should be configured in \"dnns\"\n  # follows the SmfInfo datatype\

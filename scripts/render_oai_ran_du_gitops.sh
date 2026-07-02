@@ -64,7 +64,9 @@ write_du_gitops() {
   python3 - "$src_dir" "$dest_ops" "$dest_du" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_DU_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$du_name" "$du_f1" "$CUCP_F1C_IP" "$CUCP_F1C_GW" "$cucp_name" \
-    "$CUCP_CLUSTER" "$OAI_GNB_IMAGE" "$SITE_IFACE" <<'PY'
+    "$CUCP_CLUSTER" "$OAI_GNB_IMAGE" "$SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
+    "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -73,7 +75,11 @@ import yaml
 
 (src_dir, dest_ops, dest_du, dest_cluster, ops_ns, du_ns, operator_image,
  du_name, du_f1, cucp_f1c, cucp_f1c_gw, cucp_name, cucp_cluster, gnb_image,
- nad_parent) = sys.argv[1:]
+ nad_parent, debug_lib, debug_image) = sys.argv[1:18]
+spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
+oai_debug = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(oai_debug)
+debug_container = oai_debug.debug_sidecar_container(debug_image)
 
 dest_ops = Path(dest_ops)
 dest_du = Path(dest_du)
@@ -492,7 +498,7 @@ write_doc({
                         "mountPath": "/opt/oai-gnb/etc/gnb.conf",
                         "subPath": "gnb.conf",
                     }],
-                }],
+                }, debug_container],
                 "volumes": [{
                     "name": "configuration",
                     "configMap": {"name": "oai-du-configmap"},

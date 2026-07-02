@@ -26,10 +26,15 @@ data:
     \ used as datapath else simpleswitch is used, DEFAULT= off\n    enable_snat: yes\
     \           # If \"on\": Source natting is done for UE, DEFAULT= off\n  remote_n6_gw:\
     \ 127.0.0.1      # Dummy host since simple-switch does not use N6 GW\n  upf_info:\n\
-    \    sNssaiUpfInfoList:\n      {%- for i in conf['PLMN']['plmnInfo'] %}\n    \
-    \  {%- for x in i['nssai'] %}\n      - sNssai: *slice_{{ i['nssai'].index(x) }}\n\
-    \        dnnUpfInfoList:\n      {%- for d in x['dnnInfo'] %}\n          - dnn:\
-    \ {{ d['name'] }}\n      {%- endfor %}\n      {%- endfor %}\n      {%- endfor\
+    \    interfaceUpfInfoList:\n    {%- for iface in conf['interfaces'] %}\n    {%-\
+    \ if iface['name'] == 'n3' %}\n      - interfaceType: N3\n        ipv4EndpointAddresses:\n\
+    \          - {{ iface['ipv4']['address'].split('/')[0] }}\n    {%- elif iface['name']\
+    \ == 'n6' %}\n      - interfaceType: N6\n        ipv4EndpointAddresses:\n    \
+    \      - {{ iface['ipv4']['address'].split('/')[0] }}\n    {%- endif %}\n    {%-\
+    \ endfor %}\n    sNssaiUpfInfoList:\n      {%- for i in conf['PLMN']['plmnInfo']\
+    \ %}\n      {%- for x in i['nssai'] %}\n      - sNssai: *slice_{{ i['nssai'].index(x)\
+    \ }}\n        dnnUpfInfoList:\n      {%- for d in x['dnnInfo'] %}\n          -\
+    \ dnn: {{ d['name'] }}\n      {%- endfor %}\n      {%- endfor %}\n      {%- endfor\
     \ %}\n## DNN configuration\ndnns:\n  {%- for i in conf['PLMN']['plmnInfo'] %}\n\
     \  {%- for x in i['nssai'] %}\n  {%- for d in x['dnnInfo'] %}\n  - dnn: \"{{ d['name']\
     \ }}\"\n    pdu_session_type: \"IPV4\"\n    ipv4_subnet: \"{{ d['subnet'] }}\"\

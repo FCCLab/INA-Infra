@@ -335,6 +335,49 @@ ssh central-0 kubectl logs -n oai-cn deploy/smf-core --since=5m | grep -i 'ASSOC
 ssh central-0 kubectl logs -n oai-upf deploy/upf-core --since=5m | grep -i 'HEARTBEAT'
 ```
 
+## User plane (N3 GTP-U)
+
+CU-UP must send GTP-U to **UPF N3** (`10.1.139.11`), not N4 (`10.1.139.13`). Two OAI gaps caused the wrong address:
+
+1. **UPF NRF profile** — `upf_info` lacked `interfaceUpfInfoList`; UPF registered only `ipv4Addresses: [N4]`.
+2. **SMF `upfs` config** — the OAI SMF operator sets `upfs[].host` to UPF **N4** (PFCP); SMF then used that as the N3 UL FTEID unless `n3_local_ipv4` is set.
+
+Fixes are in `configmap-oai-upf-nf-conf` (`interfaceUpfInfoList` from NFDeployment interfaces) and `configmap-oai-smf-nf-conf` (`n3_local_ipv4` injected by [render_oai_operators_gitops.sh](../scripts/render_oai_operators_gitops.sh)).
+
+After pushing operator ConfigMaps, restart controllers and recreate NF pods:
+
+```bash
+ssh central-0 kubectl rollout restart deployment/oai-smf-controller deployment/oai-upf-controller -n oai-cn-operators
+ssh central-0 kubectl delete pod -n oai-cn -l workload.nephio.org/oai=smf
+ssh central-0 kubectl delete pod -n oai-upf -l workload.nephio.org/oai=upf
+./scripts/reconcile_oai_pfcp.sh central-0
+ssh ue-0 kubectl rollout restart deployment/oai-ue -n oai-ue
+```
+
+Verify (real user plane — not pod `eth0`):
+
+```bash
+ssh ue-0 kubectl exec -n oai-ue deploy/oai-ue -- ping -I oaitun_ue1 -c 3 8.8.8.8
+ssh central-0 kubectl logs -n oai-cn deploy/smf-core --since=5m | grep -A4 'PDU SESSION'
+# expect: UL FTEID ... IPv4=10.1.139.11
+```
+
+## Debug sidecar (`netshoot`)
+
+CU-CP, CU-UP, DU, AMF, and UPF pods include a **`debug`** container (`nicolaka/netshoot`) for packet capture and shell troubleshooting. RAN executors embed it in the Deployment; AMF/UPF get it via a patched OAI operator (`DEBUG_SIDECAR=yes`).
+
+```bash
+# RAN (regional / edge)
+kubectl exec -it -n oai-ran-cuup deploy/oai-cu-up -c debug -- sh
+tcpdump -i f1u -n port 2152
+
+# AMF / UPF (central) — after operator restart + NF pod recreate
+kubectl exec -it -n oai-cn deploy/amf-core -c debug -- sh
+kubectl exec -it -n oai-upf deploy/upf-core -c debug -- sh
+```
+
+After pushing operator changes, restart AMF/UPF controllers and delete `amf-core` / `upf-core` Deployments so the operator recreates pods with the sidecar.
+
 ## Quick health checks
 
 ```bash

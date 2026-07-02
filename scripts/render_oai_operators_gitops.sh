@@ -69,13 +69,20 @@ split_operator_manifests() {
   upf_n3_vip="$(upf_n3_vip "$cluster")"
 
   python3 - "$src_dir" "$dest_cluster" "$dest_ns" "$OAI_CN_OPERATORS_NS" "$UPSTREAM_OPERATORS_NS" \
-    "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" "$amf_n2_vip" "$upf_n3_vip" <<'PY'
+    "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" "$amf_n2_vip" "$upf_n3_vip" \
+    "$OAI_OPERATORS_REF" "$SCRIPT_DIR/oai_debug_sidecar.py" "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+import importlib.util
 import sys
+import urllib.request
 from pathlib import Path
 
 import yaml
 
-src_dir, dest_cluster, dest_ns, target_ns, upstream_ns, cn_ns, upstream_cn_ns, nad_parent, amf_n2_vip, upf_n3_vip = sys.argv[1:11]
+(src_dir, dest_cluster, dest_ns, target_ns, upstream_ns, cn_ns, upstream_cn_ns,
+ nad_parent, amf_n2_vip, upf_n3_vip, operators_ref, debug_lib, debug_image) = sys.argv[1:14]
+spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
+oai_debug = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(oai_debug)
 cluster_kinds = {"ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition"}
 cluster_docs = []
 ns_docs = []
@@ -100,6 +107,32 @@ def rewrite_namespace(obj):
                 subject["namespace"] = target_ns
 
 
+def patch_operator_controller_debug(doc, name):
+    spec = doc["spec"]["template"]["spec"]
+    containers = spec["containers"]
+    env = containers[0].setdefault("env", [])
+    env = [item for item in env if item.get("name") not in ("DEBUG_SIDECAR", "DEBUG_SIDECAR_IMAGE")]
+    env.extend([
+        {"name": "DEBUG_SIDECAR", "value": "yes"},
+        {"name": "DEBUG_SIDECAR_IMAGE", "value": debug_image},
+    ])
+    containers[0]["env"] = env
+    nf = "amf" if "amf" in name else "upf"
+    volumes = [v for v in spec.get("volumes", []) if v.get("name") != "utils-patch"]
+    volumes.append({
+        "name": "utils-patch",
+        "configMap": {"name": f"oai-{nf}-controller-utils"},
+    })
+    spec["volumes"] = volumes
+    mounts = [m for m in containers[0].get("volumeMounts", []) if m.get("name") != "utils-patch"]
+    mounts.append({
+        "name": "utils-patch",
+        "mountPath": "/root/.local/utils.py",
+        "subPath": "utils.py",
+    })
+    containers[0]["volumeMounts"] = mounts
+
+
 def patch_operator_svc(doc):
     if doc.get("kind") != "Deployment":
         return
@@ -109,6 +142,7 @@ def patch_operator_svc(doc):
     # AMF/UPF N3 are macvlan on 10.1.139.0/24, not Kubernetes LoadBalancer VIPs.
     if name in ("oai-amf-controller", "oai-upf-controller"):
         svc_type = "ClusterIP"
+        patch_operator_controller_debug(doc, name)
     elif name in ("oai-nrf-controller", "oai-udr-controller"):
         svc_type = "ClusterIP"
     else:
@@ -124,15 +158,41 @@ def patch_operator_svc(doc):
     containers[0]["env"] = env
 
 
-def patch_nf_conf(doc):
-    if doc.get("kind") != "ConfigMap" or doc["metadata"].get("name") != "oai-smf-nf-conf":
+def patch_nf_conf(doc, upf_n3_vip):
+    if doc.get("kind") != "ConfigMap":
         return
+    name = doc["metadata"].get("name", "")
     data = doc.get("data")
     if not isinstance(data, dict):
         return
+    upf_iface_block = """interfaceUpfInfoList:
+    {%- for iface in conf['interfaces'] %}
+    {%- if iface['name'] == 'n3' %}
+      - interfaceType: N3
+        ipv4EndpointAddresses:
+          - {{ iface['ipv4']['address'].split('/')[0] }}
+    {%- elif iface['name'] == 'n6' %}
+      - interfaceType: N6
+        ipv4EndpointAddresses:
+          - {{ iface['ipv4']['address'].split('/')[0] }}
+    {%- endif %}
+    {%- endfor %}
+    sNssaiUpfInfoList:"""
     for key, val in list(data.items()):
-        if isinstance(val, str):
-            data[key] = val.replace("discover_upf: yes", "discover_upf: no")
+        if not isinstance(val, str):
+            continue
+        if name == "oai-smf-nf-conf":
+            val = val.replace("discover_upf: yes", "discover_upf: no")
+            val = val.replace(
+                "enable_usage_reporting: no",
+                f"enable_usage_reporting: no\n        n3_local_ipv4: {upf_n3_vip}",
+            )
+        elif name == "oai-upf-nf-conf":
+            val = val.replace(
+                "upf_info:\n    sNssaiUpfInfoList:",
+                f"upf_info:\n    {upf_iface_block}",
+            )
+        data[key] = val
 
 
 def patch_op_conf(doc):
@@ -161,7 +221,7 @@ for path in sorted(src.glob("*.yaml")):
     for doc in load_docs(path):
         rewrite_namespace(doc)
         patch_op_conf(doc)
-        patch_nf_conf(doc)
+        patch_nf_conf(doc, upf_n3_vip)
         patch_operator_svc(doc)
         clean_metadata(doc.get("metadata"))
         if doc["kind"] == "Deployment":
@@ -180,6 +240,23 @@ for path in sorted((src / "crd").glob("*.yaml")):
     for doc in load_docs(path):
         clean_metadata(doc.get("metadata"))
         cluster_docs.append(doc)
+
+for nf_type in ("amf", "upf"):
+    utils_url = (
+        f"https://raw.githubusercontent.com/openairinterface/oai-operators/"
+        f"{operators_ref}/operators/{nf_type}/controllers/utils.py"
+    )
+    with urllib.request.urlopen(utils_url) as resp:
+        utils_text = resp.read().decode("utf-8")
+    ns_docs.append({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": f"oai-{nf_type}-controller-utils",
+            "namespace": target_ns,
+        },
+        "data": {"utils.py": oai_debug.patch_operator_utils_py(utils_text)},
+    })
 
 
 def write_docs(docs, directory, managed_prefixes):
