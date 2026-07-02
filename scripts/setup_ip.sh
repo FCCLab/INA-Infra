@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy per-host netplan (55-nephio-mgmt.yaml + 60-nephio.yaml) to workload VMs.
+# Deploy per-host netplan (55-nephio-mgmt.yaml; + 60-nephio.yaml on workload VMs).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,24 +12,30 @@ NETPLAN_SITE="${NETPLAN_SITE:-60-nephio.yaml}"
 MGMT_GATEWAY="${MGMT_GATEWAY:-10.1.132.1}"
 
 ALL_HOSTS=(
+  mgmt-0 mgmt-1
   central-0 central-1
   regional-0 regional-1
   edge-0 edge-1
   ue-0 ue-1
 )
 
+MGMT_ONLY_HOSTS=(mgmt-0 mgmt-1)
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [server-name ...]
 
-Copy utils/netplan/<host>/${NETPLAN_MGMT} and ${NETPLAN_SITE} to each host
-and run netplan apply. With no arguments, deploys to all workload nodes.
+Copy utils/netplan/<host>/${NETPLAN_MGMT} (and ${NETPLAN_SITE} when present) to each
+host and run netplan apply. With no arguments, deploys to all testbed nodes.
 
-${NETPLAN_MGMT}  enp1s0 mgmt IP, default via ${MGMT_GATEWAY}, DNS Pi-hole
+${NETPLAN_MGMT}  enp1s0 mgmt IP, default via ${MGMT_GATEWAY}
+                 mgmt-0 DNS 127.0.0.1 (Pi-hole); others DNS 10.1.132.200
 ${NETPLAN_SITE}  enp7s0 site IPs on 10.1.137.0/24 (K8s) + 10.1.138.0/24 (MetalLB)
+                 workload nodes only (mgmt-0/mgmt-1 have no site NIC)
 
 Examples:
   $(basename "$0")
+  $(basename "$0") mgmt-0 mgmt-1
   $(basename "$0") regional-0 regional-1
 
 Environment:
@@ -42,6 +48,34 @@ EOF
 site_ip_from_file() {
   local file="$1"
   grep -E '^[[:space:]]*-[[:space:]]*10\.1\.137\.' "$file" | head -1 | awk '{print $2}' | tr -d '/24'
+}
+
+is_mgmt_only_host() {
+  local host="$1" h
+  for h in "${MGMT_ONLY_HOSTS[@]}"; do
+    [[ "$host" == "$h" ]] && return 0
+  done
+  return 1
+}
+
+remote_apply_netplan_mgmt() {
+  local mgmt_src="$1"
+
+  if [[ "$EUID" -ne 0 ]]; then
+    echo "Please run as root (use sudo)." >&2
+    exit 1
+  fi
+
+  echo "=== Applying mgmt netplan (default via ${MGMT_GATEWAY}) ==="
+
+  install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
+  netplan apply
+
+  echo "Routes:"
+  ip -4 route show default || true
+  echo "Addresses:"
+  ip -4 -br addr show enp1s0 2>/dev/null || ip -4 -br addr
+  echo "=== Done ==="
 }
 
 remote_apply_netplan() {
@@ -95,17 +129,24 @@ run_remote() {
     echo "error: missing ${mgmt_file}" >&2
     return 1
   fi
-  if [[ ! -f "$site_file" ]]; then
-    echo "error: missing ${site_file}" >&2
-    return 1
-  fi
 
   echo ">>> ${server_name}"
   scp -q -F "$SSH_CONFIG" "$mgmt_file" "${server_name}:${remote_mgmt}"
-  scp -q -F "$SSH_CONFIG" "$site_file" "${server_name}:${remote_site}"
   scp -q -F "$SSH_CONFIG" "$0" "${server_name}:/tmp/setup_ip.$$"
-  ssh -F "$SSH_CONFIG" -t "$server_name" \
-    "sudo SETUP_IP_REMOTE=1 bash /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; ec=\$?; rm -f /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; exit \$ec"
+
+  if is_mgmt_only_host "$server_name" || [[ ! -f "$site_file" ]]; then
+    if ! ssh -F "$SSH_CONFIG" -t "$server_name" \
+      "sudo SETUP_IP_REMOTE=1 SETUP_IP_MGMT_ONLY=1 bash /tmp/setup_ip.$$ '${remote_mgmt}'; ec=\$?; rm -f /tmp/setup_ip.$$ '${remote_mgmt}'; exit \$ec"; then
+      return 1
+    fi
+    return 0
+  fi
+
+  scp -q -F "$SSH_CONFIG" "$site_file" "${server_name}:${remote_site}"
+  if ! ssh -F "$SSH_CONFIG" -t "$server_name" \
+    "sudo SETUP_IP_REMOTE=1 bash /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; ec=\$?; rm -f /tmp/setup_ip.$$ '${remote_mgmt}' '${remote_site}'; exit \$ec"; then
+    return 1
+  fi
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -114,6 +155,14 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 if [[ "${SETUP_IP_REMOTE:-}" == "1" ]]; then
+  if [[ "${SETUP_IP_MGMT_ONLY:-}" == "1" ]]; then
+    if [[ $# -lt 1 ]]; then
+      echo "Usage: SETUP_IP_REMOTE=1 SETUP_IP_MGMT_ONLY=1 $0 <mgmt-netplan>" >&2
+      exit 1
+    fi
+    remote_apply_netplan_mgmt "$1"
+    exit 0
+  fi
   if [[ $# -lt 2 ]]; then
     echo "Usage: SETUP_IP_REMOTE=1 $0 <mgmt-netplan> <site-netplan>" >&2
     exit 1
