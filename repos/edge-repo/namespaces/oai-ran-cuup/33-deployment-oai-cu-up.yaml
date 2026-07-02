@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-cu-up
+  namespace: oai-ran-cuup
+  labels:
+    app.kubernetes.io/name: oai-cu-up
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-cu-up
+  template:
+    metadata:
+      labels:
+        app: oai-cu-up
+        app.kubernetes.io/name: oai-cu-up
+      annotations:
+        k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"cuup-edge-e1\",\n  \"interface\"\
+          : \"e1\",\n  \"ips\": [\"172.4.0.253/24\"],\n  \"gateways\": [\"172.4.0.1\"\
+          ]\n },\n {\n  \"name\": \"cuup-edge-f1u\",\n  \"interface\": \"f1u\",\n\
+          \  \"ips\": [\"172.5.0.251/24\"],\n  \"gateways\": [\"172.5.0.1\"]\n },\n\
+          \ {\n  \"name\": \"cuup-edge-n3\",\n  \"interface\": \"n3\",\n  \"ips\"\
+          : [\"172.3.0.253/24\"],\n  \"gateways\": [\"172.3.0.1\"]\n }\n]"
+    spec:
+      serviceAccountName: oai-cu-up-sa
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: cuup
+        image: docker.io/oaisoftwarealliance/oai-nr-cuup:v2.3.0
+        securityContext:
+          privileged: true
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --sa --log_config.global_log_options level,nocolor,time
+        - name: USE_VOLUMED_CONF
+          value: 'yes'
+        ports:
+        - name: n3
+          containerPort: 2152
+          protocol: UDP
+        - name: e1
+          containerPort: 38462
+          protocol: SCTP
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-cu-up-configmap

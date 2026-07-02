@@ -1,0 +1,20 @@
+apiVersion: ref.nephio.org/v1alpha1
+kind: Config
+metadata:
+  name: cucp-regional-amf-central
+  namespace: oai-ran-cucp
+spec:
+  config:
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFDeployment
+    metadata:
+      name: amf-core
+      namespace: oai-cn
+    spec:
+      provider: amf.openairinterface.org
+      interfaces:
+      - name: n2
+        ipv4:
+          address: 10.1.138.102/24
+          gateway: 10.1.138.1
+        vlanID: 4

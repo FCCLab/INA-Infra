@@ -55,7 +55,8 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.138.151
   [ue]=10.1.138.176
 )
-# 3rd/4th VIP in each cluster slice: OAI N2/N3 (MetalLB on enp7s0).
+# 3rd/4th VIP in each cluster slice on .138 (MetalLB or macvlan on enp7s0).
+# central: AMF N2 / UPF N3. regional: CU-CP N2 (toward central AMF).
 declare -A CLUSTER_AMF_N2_VIP=(
   [central]=10.1.138.102
   [regional]=10.1.138.127
@@ -213,6 +214,11 @@ amf_n2_vip() {
 
 upf_n3_vip() {
   printf '%s' "${CLUSTER_UPF_N3_VIP[$1]}"
+}
+
+# Regional/edge/ue CU-CP N2 on site .138 (3rd IP in slice); central uses AMF N2 slot.
+cucp_n2_vip() {
+  printf '%s' "${CLUSTER_AMF_N2_VIP[$1]}"
 }
 
 dashboard_vip() {

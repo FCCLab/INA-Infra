@@ -106,9 +106,9 @@ def patch_operator_svc(doc):
     name = doc.get("metadata", {}).get("name", "")
     svc_type = None
     lb_ip = None
+    # AMF N2 is macvlan SCTP on site .138, not a Kubernetes LoadBalancer VIP.
     if name == "oai-amf-controller":
-        svc_type = "LoadBalancer"
-        lb_ip = amf_n2_vip
+        svc_type = "ClusterIP"
     elif name == "oai-upf-controller":
         svc_type = "LoadBalancer"
         lb_ip = upf_n3_vip

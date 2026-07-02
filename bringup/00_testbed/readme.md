@@ -17,7 +17,7 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 
 **Dashboard:** all clusters use GitOps **NodePort 30443** on the control-plane mgmt IP (no MetalLB VIP). Run `./scripts/kubectl_forward.sh` for `:8443` if NodePort is blocked. Render with `./scripts/render_dashboard_gitops.sh`; tokens: `./scripts/get_dashboard_key.sh`.
 
-**MetalLB (`.138` workload / `.132` mgmt):** OpenSpeedTest (2nd IP per slice). OAI AMF N2 / UPF N3 (3rd/4th) on **central** only — OAI CN operators live there, not on regional/edge/ue.
+**MetalLB (`.138` workload / `.132` mgmt):** OpenSpeedTest (2nd IP per slice). **Central:** OAI AMF N2 / UPF N3. **Regional:** OAI CU-CP N2 (`10.1.138.127` → central AMF `10.1.138.102`).
 
 **k9s** (local operator machine and all testbed nodes):
 

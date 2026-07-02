@@ -76,6 +76,9 @@ Verify:
 ./scripts/render_multus_gitops.sh          # workload clusters; before OAI NADs
 ./scripts/render_oai_operators_gitops.sh central
 ./scripts/render_oai_core_gitops.sh central
+./scripts/render_oai_ran_gitops.sh regional   # CU-CP operator + executor (needs Multus)
+./scripts/render_oai_ran_du_gitops.sh edge  # DU operator + rfsim RU (needs Multus + regional CU-CP)
+./scripts/render_oai_ran_cuup_gitops.sh edge  # CU-UP (needs Multus + regional CU-CP + central UPF)
 ./scripts/render_metallb_gitops.sh mgmt central regional edge ue
 ./scripts/render_dashboard_gitops.sh mgmt central regional edge ue
 ./bringup/03_push_to_git_repos/push_git_repos.sh

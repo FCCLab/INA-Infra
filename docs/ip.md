@@ -41,10 +41,13 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.138.102 | central | OAI AMF N2 | 38412/sctp | — | `amf-n2-central.nephio.lab` |
 | 10.1.138.103 | central | OAI UPF N3 | 2152/udp | — | `upf-n3-central.nephio.lab` |
 | 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
+| 10.1.138.127 | regional | OAI CU-CP N2 | 38412/sctp | — | — |
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
+| — | edge | OAI DU F1 (macvlan) | 38472/sctp | `172.5.0.253` → regional CU-CP F1-C `172.5.0.252` | — |
+| — | edge | OAI CU-UP E1 / F1U / N3 (macvlan) | 38462/sctp, 2152/udp | E1 `172.4.0.253` → CU-CP `172.4.0.252`; F1U `172.5.0.251`; N3 `172.3.0.253` → UPF `172.3.0.254` | — |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-OAI 5GC (operators + NFs) is deployed on **central** only; regional/edge/ue have OpenSpeedTest MetalLB VIPs but no OAI CN operators.
+OAI 5GC on **central**; OAI **CU-CP** on **regional** (`oai-ran-operators`, `oai-ran-cucp`); OAI **DU + rfsim RU** and **CU-UP** on **edge** (`oai-ran-operators`, `oai-ran-du`, `oai-ran-cuup`). UE site: OpenSpeedTest MetalLB only.
 
 ## Cluster-local services (no MetalLB VIP)
 
@@ -113,8 +116,11 @@ Reach workload APIs on `10.1.137.0/24`, MetalLB VIPs on `10.1.138.0/24`, from th
 | Multus CNI (GitOps render) | [scripts/render_multus_gitops.sh](scripts/render_multus_gitops.sh) |
 | Kubernetes Dashboard (GitOps render) | [scripts/render_dashboard_gitops.sh](scripts/render_dashboard_gitops.sh) |
 | Kubernetes Dashboard (remove imperative install) | [scripts/uninstall_dashboard.sh](scripts/uninstall_dashboard.sh) |
-| OAI CN operators (GitOps render, central only) | [scripts/render_oai_operators_gitops.sh](scripts/render_oai_operators_gitops.sh) |
-| OAI core NFs (GitOps render, central only) | [scripts/render_oai_core_gitops.sh](scripts/render_oai_core_gitops.sh) |
+| OAI CN operators (GitOps, central) | [scripts/render_oai_operators_gitops.sh](scripts/render_oai_operators_gitops.sh) |
+| OAI core NFs (GitOps, central) | [scripts/render_oai_core_gitops.sh](scripts/render_oai_core_gitops.sh) |
+| OAI RAN CU-CP (GitOps, regional) | [scripts/render_oai_ran_gitops.sh](scripts/render_oai_ran_gitops.sh) |
+| OAI RAN DU + rfsim RU (GitOps, edge) | [scripts/render_oai_ran_du_gitops.sh](scripts/render_oai_ran_du_gitops.sh) |
+| OAI RAN CU-UP (GitOps, edge) | [scripts/render_oai_ran_cuup_gitops.sh](scripts/render_oai_ran_cuup_gitops.sh) |
 | local-path StorageClass (GitOps render) | [scripts/render_local_path_gitops.sh](scripts/render_local_path_gitops.sh) |
 | Push GitOps to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](bringup/03_push_to_git_repos/push_git_repos.sh) |
 | Config Sync status | [scripts/check-configsync.sh](scripts/check-configsync.sh) |

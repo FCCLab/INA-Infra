@@ -18,6 +18,8 @@ UPF_NF_NAME="${UPF_NF_NAME:-upf-core}"
 UPF_UPSTREAM_NAME="${UPF_UPSTREAM_NAME:-upf-edge}"
 UPSTREAM_CN_NS="${UPSTREAM_CN_NS:-oaicp}"
 OAI_NAD_PARENT="${OAI_NAD_PARENT:-$SITE_IFACE}"
+SITE_N2_GW="${SITE_N2_GW:-10.1.138.1}"
+OAI_AMF_IMAGE="${OAI_AMF_IMAGE:-docker.io/oaisoftwarealliance/oai-amf:v2.0.1}"
 # emptyDir: no StorageClass needed. Set MYSQL_STORAGE=pvc when local-path is deployed.
 MYSQL_STORAGE="${MYSQL_STORAGE:-pvc}"
 MYSQL_STORAGE_CLASS="${MYSQL_STORAGE_CLASS:-local-path}"
@@ -58,8 +60,10 @@ write_core_manifests() {
   local src_dir="$2"
   local mysql_chart="$3"
   local repo_name dest_cn dest_upf dest_cluster
+  local amf_n2
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
+  amf_n2="$(amf_n2_vip "$cluster")"
   dest_cn="${REPOS_DIR}/${repo_name}/namespaces/${OAI_CN_NS}"
   dest_upf="${REPOS_DIR}/${repo_name}/namespaces/${OAI_UPF_NS}"
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
@@ -67,7 +71,8 @@ write_core_manifests() {
 
   python3 - "$src_dir" "$mysql_chart" "$dest_cn" "$dest_upf" "$dest_cluster" \
     "$OAI_CN_NS" "$OAI_UPF_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" \
-    "$MYSQL_STORAGE" "$MYSQL_STORAGE_CLASS" "$UPF_NF_NAME" "$UPF_UPSTREAM_NAME" <<'PY'
+    "$MYSQL_STORAGE" "$MYSQL_STORAGE_CLASS" "$UPF_NF_NAME" "$UPF_UPSTREAM_NAME" \
+    "$amf_n2" "$SITE_N2_GW" "$OAI_AMF_IMAGE" <<'PY'
 import json
 import subprocess
 import sys
@@ -77,7 +82,7 @@ import yaml
 
 (src_dir, mysql_chart, dest_cn, dest_upf, dest_cluster,
  cn_ns, upf_ns, upstream_cn_ns, nad_parent, mysql_storage, mysql_sc,
- upf_name, upf_upstream) = sys.argv[1:14]
+ upf_name, upf_upstream, amf_n2, n2_gw, amf_image) = sys.argv[1:17]
 
 dest_cn = Path(dest_cn)
 dest_upf = Path(dest_upf)
@@ -157,7 +162,22 @@ def patch_nad(doc):
     for plugin in cfg.get("plugins", []):
         if plugin.get("type") == "macvlan" and "master" in plugin:
             plugin["master"] = nad_parent
+            if doc.get("metadata", {}).get("name") == "amf-core-n2":
+                plugin["ipam"] = {
+                    "type": "static",
+                    "addresses": [{"address": f"{amf_n2}/24", "gateway": n2_gw}],
+                }
     doc["spec"]["config"] = json.dumps(cfg)
+
+
+def patch_amf_nfdeployment(doc):
+    if doc.get("kind") != "NFDeployment":
+        return
+    if doc.get("metadata", {}).get("name") != "amf-core":
+        return
+    for iface in doc.get("spec", {}).get("interfaces", []):
+        if iface.get("name") == "n2":
+            iface["ipv4"] = {"address": f"{amf_n2}/24", "gateway": n2_gw}
 
 
 def target_dir(doc):
@@ -247,8 +267,11 @@ for fname, prefix in order.items():
         rewrite_ns(doc)
         rename_upf(doc)
         fix_plmn_typos(doc)
+        patch_amf_nfdeployment(doc)
         clean_metadata(doc.get("metadata"))
         write_doc(doc, prefix=prefix)
+
+print(f"  AMF N2 (NFDeployment): {amf_n2}/24 (gw {n2_gw})")
 
 # MySQL for UDR (helm → plain manifests in oai-cn)
 helm_out = subprocess.check_output(

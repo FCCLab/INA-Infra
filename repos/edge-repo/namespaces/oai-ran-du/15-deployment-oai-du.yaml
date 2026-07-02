@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-du
+  namespace: oai-ran-du
+  labels:
+    app.kubernetes.io/name: oai-du
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-du
+  template:
+    metadata:
+      labels:
+        app: oai-du
+        app.kubernetes.io/name: oai-du
+      annotations:
+        k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"du-edge-f1\",\n  \"interface\"\
+          : \"f1\",\n  \"ips\": [\"172.5.0.253/24\"],\n  \"gateways\": [\"172.5.0.1\"\
+          ]\n }\n]"
+    spec:
+      serviceAccountName: oai-du-sa
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: du
+        image: docker.io/oaisoftwarealliance/oai-gnb:v2.3.0
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --sa --rfsim --log_config.global_log_options level,nocolor,time --telnetsrv
+            --telnetsrv.shrmod o1 --telnetsrv.listenaddr 192.168.74.2
+        ports:
+        - name: f1c
+          containerPort: 38472
+          protocol: SCTP
+        - name: f1u
+          containerPort: 2152
+          protocol: UDP
+        resources:
+          requests:
+            cpu: 2000m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-du-configmap
