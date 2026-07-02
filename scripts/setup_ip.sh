@@ -46,7 +46,20 @@ EOF
 
 site_ip_from_file() {
   local file="$1"
-  grep -E '^[[:space:]]*-[[:space:]]*10\.1\.137\.' "$file" | head -1 | awk '{print $2}' | tr -d '/24'
+  grep -E '^[[:space:]]*-[[:space:]]*10\.1\.137\.' "$file" | head -1 | awk '{print $2}' | sed 's#/24##'
+}
+
+sync_resolv_conf() {
+  local mgmt_src="$1"
+  local dns
+  dns="$(grep -A3 'nameservers:' "$mgmt_src" | grep -E '^[[:space:]]*-' | head -1 | awk '{print $2}')"
+  if [[ -z "$dns" ]]; then
+    dns="8.8.8.8"
+  fi
+  rm -f /etc/resolv.conf
+  printf 'nameserver %s\n' "$dns" > /etc/resolv.conf
+  chmod 644 /etc/resolv.conf
+  echo "resolv.conf: nameserver ${dns}"
 }
 
 is_mgmt_only_host() {
@@ -69,6 +82,7 @@ remote_apply_netplan_mgmt() {
 
   install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
   netplan apply
+  sync_resolv_conf "$mgmt_src"
 
   echo "Routes:"
   ip -4 route show default || true
@@ -109,6 +123,7 @@ remote_apply_netplan() {
   install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
   install -m 600 "$site_src" "/etc/netplan/${NETPLAN_SITE}"
   netplan apply
+  sync_resolv_conf "$mgmt_src"
 
   echo "Routes:"
   ip -4 route show default || true
