@@ -106,12 +106,9 @@ def patch_operator_svc(doc):
     name = doc.get("metadata", {}).get("name", "")
     svc_type = None
     lb_ip = None
-    # AMF N2 is macvlan SCTP on site .138, not a Kubernetes LoadBalancer VIP.
-    if name == "oai-amf-controller":
+    # AMF/UPF N3 are macvlan on 10.1.139.0/24, not Kubernetes LoadBalancer VIPs.
+    if name in ("oai-amf-controller", "oai-upf-controller"):
         svc_type = "ClusterIP"
-    elif name == "oai-upf-controller":
-        svc_type = "LoadBalancer"
-        lb_ip = upf_n3_vip
     elif name in ("oai-nrf-controller", "oai-udr-controller"):
         svc_type = "ClusterIP"
     else:
@@ -255,7 +252,7 @@ main() {
   echo "Nephio CRDs: ref.nephio.org/config, workload.nephio.org/nfdeployments|nfconfigs"
   echo
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
-  echo "NRF/UDR use ClusterIP (in-cluster SBI only). AMF N2 / UPF N3 use fixed MetalLB VIPs."
+  echo "NRF/UDR use ClusterIP (in-cluster SBI only). AMF/UPF data-plane N2/N3 are macvlan on 10.1.139.0/24."
   echo "Optional docker hub pull secret in ${OAI_CN_OPERATORS_NS}: regcred"
 }
 

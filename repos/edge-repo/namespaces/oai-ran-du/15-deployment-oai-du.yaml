@@ -19,7 +19,7 @@ spec:
         app.kubernetes.io/name: oai-du
       annotations:
         k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"du-edge-f1\",\n  \"interface\"\
-          : \"f1\",\n  \"ips\": [\"172.5.0.253/24\"],\n  \"gateways\": [\"172.5.0.1\"\
+          : \"f1\",\n  \"ips\": [\"10.1.139.113/24\"],\n  \"gateways\": [\"10.1.139.1\"\
           ]\n }\n]"
     spec:
       serviceAccountName: oai-du-sa

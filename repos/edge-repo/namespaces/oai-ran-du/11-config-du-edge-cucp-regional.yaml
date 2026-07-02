@@ -15,6 +15,6 @@ spec:
       interfaces:
       - name: f1c
         ipv4:
-          address: 172.5.0.252/24
-          gateway: 172.5.0.1
+          address: 10.1.139.61/24
+          gateway: 10.1.139.1
         vlanID: 5

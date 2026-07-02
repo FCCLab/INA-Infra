@@ -8,18 +8,18 @@ spec:
   interfaces:
   - name: e1
     ipv4:
-      address: 172.4.0.253/24
-      gateway: 172.4.0.1
+      address: 10.1.139.110/24
+      gateway: 10.1.139.1
     vlanID: 6
   - name: f1u
     ipv4:
-      address: 172.5.0.251/24
-      gateway: 172.5.0.1
+      address: 10.1.139.111/24
+      gateway: 10.1.139.1
     vlanID: 5
   - name: n3
     ipv4:
-      address: 172.3.0.253/24
-      gateway: 172.3.0.1
+      address: 10.1.139.112/24
+      gateway: 10.1.139.1
     vlanID: 4
   networkInstances:
   - name: vpc-cu-e1

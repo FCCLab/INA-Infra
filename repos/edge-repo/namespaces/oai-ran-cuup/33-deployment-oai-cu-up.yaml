@@ -19,11 +19,11 @@ spec:
         app.kubernetes.io/name: oai-cu-up
       annotations:
         k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"cuup-edge-e1\",\n  \"interface\"\
-          : \"e1\",\n  \"ips\": [\"172.4.0.253/24\"],\n  \"gateways\": [\"172.4.0.1\"\
+          : \"e1\",\n  \"ips\": [\"10.1.139.110/24\"],\n  \"gateways\": [\"10.1.139.1\"\
           ]\n },\n {\n  \"name\": \"cuup-edge-f1u\",\n  \"interface\": \"f1u\",\n\
-          \  \"ips\": [\"172.5.0.251/24\"],\n  \"gateways\": [\"172.5.0.1\"]\n },\n\
+          \  \"ips\": [\"10.1.139.111/24\"],\n  \"gateways\": [\"10.1.139.1\"]\n },\n\
           \ {\n  \"name\": \"cuup-edge-n3\",\n  \"interface\": \"n3\",\n  \"ips\"\
-          : [\"172.3.0.253/24\"],\n  \"gateways\": [\"172.3.0.1\"]\n }\n]"
+          : [\"10.1.139.112/24\"],\n  \"gateways\": [\"10.1.139.1\"]\n }\n]"
     spec:
       serviceAccountName: oai-cu-up-sa
       terminationGracePeriodSeconds: 5

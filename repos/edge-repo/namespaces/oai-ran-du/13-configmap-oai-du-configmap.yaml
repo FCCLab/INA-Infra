@@ -32,8 +32,8 @@ data:
     \ = 4;\n      ssPBCH_BlockPower = -25;\n     }\n  );\n    SCTP :\n    {\n    \
     \    SCTP_INSTREAMS  = 2;\n        SCTP_OUTSTREAMS = 2;\n    };\n  }\n);\n\nMACRLCs\
     \ = (\n  {\n    num_cc = 1;\n    tr_s_preference = \"local_L1\";\n    tr_n_preference\
-    \ = \"f1\";\n    local_n_address = \"172.5.0.253\";\n    remote_n_address = \"\
-    172.5.0.252\";\n    local_n_portc = 500;\n    local_n_portd = 2152;\n    remote_n_portc\
+    \ = \"f1\";\n    local_n_address = \"10.1.139.113\";\n    remote_n_address = \"\
+    10.1.139.61\";\n    local_n_portc = 500;\n    local_n_portd = 2152;\n    remote_n_portc\
     \ = 501;\n    remote_n_portd = 2152;\n    pusch_TargetSNRx10 = 200;\n    pucch_TargetSNRx10\
     \ = 200;\n  }\n);\n\nL1s = (\n{\n  num_cc = 1;\n  tr_n_preference = \"local_mac\"\
     ;\n  prach_dtx_threshold = 200;\n  pucch0_dtx_threshold = 150;\n  ofdm_offset_divisor\

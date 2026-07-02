@@ -18,7 +18,6 @@ UPF_NF_NAME="${UPF_NF_NAME:-upf-core}"
 UPF_UPSTREAM_NAME="${UPF_UPSTREAM_NAME:-upf-edge}"
 UPSTREAM_CN_NS="${UPSTREAM_CN_NS:-oaicp}"
 OAI_NAD_PARENT="${OAI_NAD_PARENT:-$SITE_IFACE}"
-SITE_N2_GW="${SITE_N2_GW:-10.1.138.1}"
 OAI_AMF_IMAGE="${OAI_AMF_IMAGE:-docker.io/oaisoftwarealliance/oai-amf:v2.0.1}"
 # emptyDir: no StorageClass needed. Set MYSQL_STORAGE=pvc when local-path is deployed.
 MYSQL_STORAGE="${MYSQL_STORAGE:-pvc}"
@@ -60,10 +59,14 @@ write_core_manifests() {
   local src_dir="$2"
   local mysql_chart="$3"
   local repo_name dest_cn dest_upf dest_cluster
-  local amf_n2
+  local amf_n2 smf_n4 upf_n3 upf_n4 upf_n6
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
-  amf_n2="$(amf_n2_vip "$cluster")"
+  amf_n2="$(oai_macvlan_ip central 0)"
+  upf_n3="$(oai_macvlan_ip central 1)"
+  smf_n4="$(oai_macvlan_ip central 2)"
+  upf_n4="$(oai_macvlan_ip central 3)"
+  upf_n6="$(oai_macvlan_ip central 4)"
   dest_cn="${REPOS_DIR}/${repo_name}/namespaces/${OAI_CN_NS}"
   dest_upf="${REPOS_DIR}/${repo_name}/namespaces/${OAI_UPF_NS}"
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
@@ -72,7 +75,7 @@ write_core_manifests() {
   python3 - "$src_dir" "$mysql_chart" "$dest_cn" "$dest_upf" "$dest_cluster" \
     "$OAI_CN_NS" "$OAI_UPF_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" \
     "$MYSQL_STORAGE" "$MYSQL_STORAGE_CLASS" "$UPF_NF_NAME" "$UPF_UPSTREAM_NAME" \
-    "$amf_n2" "$SITE_N2_GW" "$OAI_AMF_IMAGE" <<'PY'
+    "$amf_n2" "$smf_n4" "$upf_n3" "$upf_n4" "$upf_n6" "$OAI_MACVLAN_GW" "$OAI_AMF_IMAGE" <<'PY'
 import json
 import subprocess
 import sys
@@ -82,7 +85,7 @@ import yaml
 
 (src_dir, mysql_chart, dest_cn, dest_upf, dest_cluster,
  cn_ns, upf_ns, upstream_cn_ns, nad_parent, mysql_storage, mysql_sc,
- upf_name, upf_upstream, amf_n2, n2_gw, amf_image) = sys.argv[1:17]
+ upf_name, upf_upstream, amf_n2, smf_n4, upf_n3, upf_n4, upf_n6, oai_gw, amf_image) = sys.argv[1:21]
 
 dest_cn = Path(dest_cn)
 dest_upf = Path(dest_upf)
@@ -150,6 +153,15 @@ def rename_upf(obj):
             rename_upf(item)
 
 
+NAD_IPS = {
+    "amf-core-n2": amf_n2,
+    "smf-core-n4": smf_n4,
+    f"{upf_name}-n3": upf_n3,
+    f"{upf_name}-n4": upf_n4,
+    f"{upf_name}-n6": upf_n6,
+}
+
+
 def patch_nad(doc):
     if doc.get("kind") != "NetworkAttachmentDefinition":
         return
@@ -159,13 +171,15 @@ def patch_nad(doc):
     cfg = json.loads(raw)
     if cfg.get("name", "").startswith(f"{upf_upstream}-"):
         cfg["name"] = cfg["name"].replace(upf_upstream, upf_name, 1)
+    nad_name = doc.get("metadata", {}).get("name", "")
+    addr = NAD_IPS.get(nad_name)
     for plugin in cfg.get("plugins", []):
         if plugin.get("type") == "macvlan" and "master" in plugin:
             plugin["master"] = nad_parent
-            if doc.get("metadata", {}).get("name") == "amf-core-n2":
+            if addr:
                 plugin["ipam"] = {
                     "type": "static",
-                    "addresses": [{"address": f"{amf_n2}/24", "gateway": n2_gw}],
+                    "addresses": [{"address": f"{addr}/24", "gateway": oai_gw}],
                 }
     doc["spec"]["config"] = json.dumps(cfg)
 
@@ -177,7 +191,43 @@ def patch_amf_nfdeployment(doc):
         return
     for iface in doc.get("spec", {}).get("interfaces", []):
         if iface.get("name") == "n2":
-            iface["ipv4"] = {"address": f"{amf_n2}/24", "gateway": n2_gw}
+            iface["ipv4"] = {"address": f"{amf_n2}/24", "gateway": oai_gw}
+
+
+def patch_smf_nfdeployment(doc):
+    if doc.get("kind") != "NFDeployment" or doc.get("metadata", {}).get("name") != "smf-core":
+        return
+    for iface in doc.get("spec", {}).get("interfaces", []):
+        if iface.get("name") == "n4":
+            iface["ipv4"] = {"address": f"{smf_n4}/24", "gateway": oai_gw}
+
+
+def patch_upf_nfdeployment(doc):
+    if doc.get("kind") != "NFDeployment" or doc.get("metadata", {}).get("name") != upf_name:
+        return
+    iface_addrs = {"n3": upf_n3, "n4": upf_n4, "n6": upf_n6}
+    for iface in doc.get("spec", {}).get("interfaces", []):
+        name = iface.get("name")
+        if name in iface_addrs:
+            iface["ipv4"] = {"address": f"{iface_addrs[name]}/24", "gateway": oai_gw}
+
+
+def patch_smf_upf_config(doc):
+    if doc.get("kind") != "Config":
+        return
+    if doc.get("metadata", {}).get("name") != f"smf-core-{upf_name}":
+        return
+    nested = doc.get("spec", {}).get("config", {})
+    if nested.get("kind") != "NFDeployment":
+        return
+    patch_upf_nfdeployment(nested)
+
+
+def patch_oai_nf(doc):
+    patch_amf_nfdeployment(doc)
+    patch_smf_nfdeployment(doc)
+    patch_upf_nfdeployment(doc)
+    patch_smf_upf_config(doc)
 
 
 def target_dir(doc):
@@ -268,10 +318,13 @@ for fname, prefix in order.items():
         rename_upf(doc)
         fix_plmn_typos(doc)
         patch_amf_nfdeployment(doc)
+        patch_smf_nfdeployment(doc)
+        patch_upf_nfdeployment(doc)
+        patch_smf_upf_config(doc)
         clean_metadata(doc.get("metadata"))
         write_doc(doc, prefix=prefix)
 
-print(f"  AMF N2 (NFDeployment): {amf_n2}/24 (gw {n2_gw})")
+print(f"  OAI macvlan central: AMF {amf_n2} UPF N3 {upf_n3} SMF {smf_n4} UPF N4 {upf_n4} UPF N6 {upf_n6} (gw {oai_gw})")
 
 # MySQL for UDR (helm → plain manifests in oai-cn)
 helm_out = subprocess.check_output(

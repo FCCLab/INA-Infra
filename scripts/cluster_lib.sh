@@ -55,19 +55,27 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.138.151
   [ue]=10.1.138.176
 )
-# 3rd/4th VIP in each cluster slice on .138 (MetalLB or macvlan on enp7s0).
-# central: AMF N2 / UPF N3. regional: CU-CP N2 (toward central AMF).
+# OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md.
+OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
+OAI_MACVLAN_PREFIX="${OAI_MACVLAN_PREFIX:-10.1.139}"
+declare -A OAI_MACVLAN_BASE=(
+  [central]=10
+  [regional]=60
+  [edge]=110
+  [ue]=160
+)
+# Legacy names: AMF N2 / CU-CP N2 / UPF N3 on macvlan .139 (not MetalLB .138).
 declare -A CLUSTER_AMF_N2_VIP=(
-  [central]=10.1.138.102
-  [regional]=10.1.138.127
-  [edge]=10.1.138.152
-  [ue]=10.1.138.177
+  [central]=10.1.139.10
+  [regional]=10.1.139.60
+  [edge]=10.1.139.110
+  [ue]=10.1.139.160
 )
 declare -A CLUSTER_UPF_N3_VIP=(
-  [central]=10.1.138.103
-  [regional]=10.1.138.128
-  [edge]=10.1.138.153
-  [ue]=10.1.138.178
+  [central]=10.1.139.11
+  [regional]=10.1.139.61
+  [edge]=10.1.139.111
+  [ue]=10.1.139.161
 )
 # Nephio PackageVariantSet / WorkloadCluster label (nephio.org/site-type)
 declare -A CLUSTER_SITE_TYPE=(
@@ -216,7 +224,14 @@ upf_n3_vip() {
   printf '%s' "${CLUSTER_UPF_N3_VIP[$1]}"
 }
 
-# Regional/edge/ue CU-CP N2 on site .138 (3rd IP in slice); central uses AMF N2 slot.
+# OAI macvlan IP: cluster_base + offset on 10.1.139.0/24.
+oai_macvlan_ip() {
+  local cluster="$1"
+  local offset="$2"
+  printf '%s.%s' "$OAI_MACVLAN_PREFIX" "$((OAI_MACVLAN_BASE[$cluster] + offset))"
+}
+
+# Regional/edge CU-CP N2 on site macvlan .139.
 cucp_n2_vip() {
   printf '%s' "${CLUSTER_AMF_N2_VIP[$1]}"
 }

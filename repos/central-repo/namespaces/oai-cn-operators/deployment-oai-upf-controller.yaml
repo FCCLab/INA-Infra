@@ -40,9 +40,7 @@ spec:
         - name: KUBERNETES_BASE_URL
           value: https://kubernetes.default.svc
         - name: SVC_TYPE
-          value: LoadBalancer
-        - name: LOADBALANCER_IP
-          value: 10.1.138.103
+          value: ClusterIP
         volumeMounts:
         - mountPath: /tmp/op
           name: opconf

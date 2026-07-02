@@ -6,5 +6,5 @@ metadata:
 spec:
   config: '{"cniVersion": "0.3.1", "name": "cucp-regional-n2", "plugins": [{"type":
     "macvlan", "capabilities": {"ips": true}, "master": "enp7s0", "mode": "bridge",
-    "ipam": {"type": "static", "addresses": [{"address": "10.1.138.127/24", "gateway":
-    "10.1.138.1"}]}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}}]}'
+    "ipam": {"type": "static", "addresses": [{"address": "10.1.139.60/24", "gateway":
+    "10.1.139.1"}]}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}}]}'

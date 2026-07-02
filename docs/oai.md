@@ -2,6 +2,91 @@
 
 OpenAirInterface 5G deployment across three workload clusters: **central** (5GC + UPF), **regional** (CU-CP), **edge** (DU + rfsim RU + CU-UP). All manifests are GitOps via Config Sync ([ip.md](ip.md) for addressing).
 
+## OAI macvlan IP plan (`10.1.139.0/24`)
+
+Untagged **macvlan** on `enp7s0` (Multus NADs). **No host/netplan IP** on `.139` — only OAI pod interfaces. Logical gateway for NAD config: **`10.1.139.1`**. `10.1.138.0/24` stays for MetalLB / OpenSpeedTest only.
+
+**Range `10.1.139.10` – `10.1.139.209`:** four workload clusters × **50 IPs** each (`mgmt` is not on this network). Each cluster assigns macvlan IPs from **`base + 0`** upward. **Deployed today:** 1 CU-CP on **regional**, 1 CU-UP + 1 DU on **edge**, 5GC on **central**.
+
+| Cluster | Base | Range | Deployed |
+|---------|------|-------|----------|
+| central | `.10` | `10.1.139.10` – `10.1.139.59` | 1× AMF, 1× SMF, 1× UPF |
+| regional | `.60` | `10.1.139.60` – `10.1.139.109` | **1× CU-CP** |
+| edge | `.110` | `10.1.139.110` – `10.1.139.159` | **1× CU-UP + 1× DU** |
+| ue | `.160` | `10.1.139.160` – `10.1.139.209` | — (reserved) |
+
+### Deployed RAN (3 NFs)
+
+| NF | Cluster | IPs (macvlan on `10.1.139.0/24`) |
+|----|---------|-------------------------------------|
+| **CU-CP** | regional | N2 `10.1.139.60` · F1-C `10.1.139.61` · E1 `10.1.139.62` |
+| **CU-UP** | edge | E1 `10.1.139.110` · F1-U `10.1.139.111` · N3 `10.1.139.112` |
+| **DU** | edge | F1 `10.1.139.113` |
+
+### Deployed 5GC (central)
+
+One **AMF**, one **SMF**, one **UPF** (`upf-core` — three macvlan interfaces).
+
+| NF | Offset | Interface | IP |
+|----|--------|-----------|-----|
+| AMF | `+0` | N2 | `10.1.139.10` |
+| UPF (`upf-core`) | `+1` | N3 | `10.1.139.11` |
+| SMF | `+2` | N4 | `10.1.139.12` |
+| UPF (`upf-core`) | `+3` | N4 | `10.1.139.13` |
+| UPF (`upf-core`) | `+4` | N6 | `10.1.139.14` |
+
+### Cross-cluster peer pairs
+
+```
+regional CU-CP N2   10.1.139.60   ──SCTP──►  AMF N2      10.1.139.10   (central)
+edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.61   (regional)
+edge CU-UP E1       10.1.139.110  ──SCTP──►  CU-CP E1    10.1.139.62   (regional)
+edge CU-UP N3       10.1.139.112  ──GTP-U──►  UPF N3      10.1.139.11   (central)
+central SMF N4      10.1.139.12   ──PFCP──►  UPF N4      10.1.139.13   (central)
+```
+
+NRF / UDR / SMF SBI stay **ClusterIP** inside `oai-cn` (unchanged). DNN pool behind UPF N6 stays **`10.1.0.0/24`**.
+
+### Slice offsets
+
+**Rule:** `IP = cluster_base + offset`. Offsets always count from **`+0`** within each cluster slice (no gaps, no `+10` block).
+
+**central** (base `10.1.139.10`) — 1× AMF, 1× SMF, 1× UPF (`upf-core`)
+
+| Offset | NF | Interface | IP |
+|--------|-----|-----------|-----|
+| `+0` | AMF | N2 | `10.1.139.10` |
+| `+1` | UPF | N3 | `10.1.139.11` |
+| `+2` | SMF | N4 | `10.1.139.12` |
+| `+3` | UPF | N4 | `10.1.139.13` |
+| `+4` | UPF | N6 | `10.1.139.14` |
+| `+5` – `+49` | — | reserved | |
+
+Offsets `+1`, `+3`, `+4` are on the same **`upf-core`** pod (N3 / N4 / N6). SMF N4 at `+2` is a separate pod.
+
+**regional** (base `10.1.139.60`)
+
+| Offset | NF | Interface | IP |
+|--------|-----|-----------|-----|
+| `+0` | CU-CP | N2 | `10.1.139.60` |
+| `+1` | CU-CP | F1-C | `10.1.139.61` |
+| `+2` | CU-CP | E1 | `10.1.139.62` |
+| `+3` – `+49` | — | reserved | |
+
+**edge** (base `10.1.139.110`)
+
+| Offset | NF | Interface | IP |
+|--------|-----|-----------|-----|
+| `+0` | CU-UP | E1 | `10.1.139.110` |
+| `+1` | CU-UP | F1-U | `10.1.139.111` |
+| `+2` | CU-UP | N3 | `10.1.139.112` |
+| `+3` | DU | F1 | `10.1.139.113` |
+| `+4` – `+49` | — | reserved | |
+
+**ue** (base `10.1.139.160`) — entire slice reserved (`+0` – `+49`).
+
+When a cluster later runs a full RAN trio (1 CU-CP + 1 CU-UP + 1 DU), continue assigning from `+0` in interface order: CU-CP N2/F1-C/E1 (`+0`–`+2`), CU-UP E1/F1-U/N3 (`+3`–`+5`), DU F1 (`+6`).
+
 ## Cluster placement
 
 ```mermaid
@@ -64,17 +149,17 @@ flowchart TB
 ```mermaid
 flowchart LR
   subgraph edge["edge"]
-    DU["DU + rfsim RU<br/>172.5.0.253"]
-    CUUP["CU-UP<br/>E1 172.4.0.253<br/>F1U 172.5.0.251<br/>N3 172.3.0.253"]
+    DU["DU + rfsim RU<br/>F1 10.1.139.113"]
+    CUUP["CU-UP<br/>E1 .110 · F1U .111 · N3 .112"]
   end
 
   subgraph regional["regional"]
-    CUCP["CU-CP<br/>N2 10.1.138.127<br/>F1c 172.5.0.252<br/>E1 172.4.0.252"]
+    CUCP["CU-CP<br/>N2 .60 · F1c .61 · E1 .62"]
   end
 
   subgraph central["central"]
-    AMF["AMF<br/>N2 10.1.138.102"]
-    UPF["UPF<br/>N3 172.3.0.254"]
+    AMF["AMF<br/>N2 10.1.139.10"]
+    UPF["UPF upf-core<br/>N3 .11 · N4 .13 · N6 .14"]
   end
 
   DU -->|"F1 SCTP :38472"| CUCP
@@ -115,30 +200,19 @@ flowchart LR
 
 ## Interface addressing
 
-Multus **macvlan** on `enp7s0` attaches RAN/CN data-plane interfaces. Site L2 (`10.1.138.0/24`) carries N2; private `172.x` subnets carry F1/E1/N3.
+All OAI data-plane interfaces use Multus **macvlan** on `enp7s0` in **`10.1.139.0/24`** (see [IP plan](#oai-macvlan-ip-plan-101139024) above). Gateway in NAD config: **`10.1.139.1`**. No host netplan address on `.139`.
 
 | Link | Protocol | Local | Remote | Cluster(s) |
 |------|----------|-------|--------|------------|
-| **N2** (gNB ↔ AMF) | SCTP :38412 | CU-CP `10.1.138.127` | AMF `10.1.138.102` | regional → central |
-| **F1-C** (DU ↔ CU-CP) | SCTP :38472 | DU `172.5.0.253` | CU-CP `172.5.0.252` | edge → regional |
-| **E1** (CU-UP ↔ CU-CP) | SCTP :38462 | CU-UP `172.4.0.253` | CU-CP `172.4.0.252` | edge → regional |
-| **F1-U** (CU-UP ↔ DU) | GTP-U :2152 | CU-UP `172.5.0.251` | DU (via CU-CP) | edge |
-| **N3** (CU-UP ↔ UPF) | GTP-U :2152 | CU-UP `172.3.0.253` | UPF `172.3.0.254` | edge → central |
-| **N4** (SMF ↔ UPF) | PFCP | UPF `172.1.1.253` | SMF (ClusterIP) | central |
-| **N6** (UPF ↔ data net) | IP | UPF `172.0.1.254` | DNN pool `10.1.0.0/24` | central |
+| **N2** (gNB ↔ AMF) | SCTP :38412 | CU-CP `10.1.139.60` | AMF `10.1.139.10` | regional → central |
+| **F1-C** (DU ↔ CU-CP) | SCTP :38472 | DU `10.1.139.113` | CU-CP `10.1.139.61` | edge → regional |
+| **E1** (CU-UP ↔ CU-CP) | SCTP :38462 | CU-UP `10.1.139.110` | CU-CP `10.1.139.62` | edge → regional |
+| **F1-U** (CU-UP ↔ DU) | GTP-U :2152 | CU-UP `10.1.139.111` | DU (via CU-CP) | edge |
+| **N3** (CU-UP ↔ UPF) | GTP-U :2152 | CU-UP `10.1.139.112` | UPF `10.1.139.11` | edge → central |
+| **N4** (SMF ↔ UPF) | PFCP :8805 | SMF `10.1.139.12` | UPF `10.1.139.13` | central |
+| **N6** (UPF ↔ data net) | IP | UPF `10.1.139.14` | DNN pool `10.1.0.0/24` | central |
 
-Gateways on macvlan subnets use `.1` (e.g. `10.1.138.1`, `172.5.0.1`).
-
-### Site VIPs (`10.1.138.0/24`)
-
-| VIP | Role |
-|-----|------|
-| `10.1.138.101` | OpenSpeedTest (central) |
-| `10.1.138.102` | AMF N2 |
-| `10.1.138.103` | UPF N3 (MetalLB; UPF pod also uses macvlan `172.3.0.254`) |
-| `10.1.138.126` | OpenSpeedTest (regional) |
-| `10.1.138.127` | CU-CP N2 |
-| `10.1.138.151` | OpenSpeedTest (edge) |
+Cross-cluster traffic uses the site L2 fabric (`enp7s0` → vm-sw), not Kubernetes pod networking. SBI between 5GC NFs stays **ClusterIP** inside `oai-cn`. MetalLB / OpenSpeedTest remain on **`10.1.138.0/24`** only ([ip.md](ip.md)).
 
 ## Control vs user plane
 

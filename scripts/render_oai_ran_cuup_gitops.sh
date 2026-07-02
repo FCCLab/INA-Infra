@@ -24,17 +24,14 @@ NEPHIO_CRD_MANIFESTS=(
 CUUP_CLUSTERS=(edge)
 CUCP_CLUSTER="${CUCP_CLUSTER:-regional}"
 UPF_CLUSTER="${UPF_CLUSTER:-central}"
-# Regional CU-CP E1 on vpc-cu-e1.
-CUCP_E1_IP="${CUCP_E1_IP:-172.4.0.252}"
-CUCP_E1_GW="${CUCP_E1_GW:-172.4.0.1}"
-# Central UPF N3 on vpc-ran (172.3.0.0/24 in gitops manifests).
-UPF_N3_IP="${UPF_N3_IP:-172.3.0.254}"
-UPF_N3_GW="${UPF_N3_GW:-172.3.0.1}"
-# CU-UP interfaces at edge.
-declare -A CUUP_E1_IP=([edge]=172.4.0.253)
-declare -A CUUP_F1U_IP=([edge]=172.5.0.251)
-declare -A CUUP_N3_IP=([edge]=172.3.0.253)
-CUUP_F1U_GW="${CUUP_F1U_GW:-172.5.0.1}"
+CUCP_E1_IP="${CUCP_E1_IP:-$(oai_macvlan_ip regional 2)}"
+CUCP_E1_GW="${CUCP_E1_GW:-$OAI_MACVLAN_GW}"
+UPF_N3_IP="${UPF_N3_IP:-$(oai_macvlan_ip central 1)}"
+UPF_N3_GW="${UPF_N3_GW:-$OAI_MACVLAN_GW}"
+declare -A CUUP_E1_IP=([edge]="$(oai_macvlan_ip edge 0)")
+declare -A CUUP_F1U_IP=([edge]="$(oai_macvlan_ip edge 1)")
+declare -A CUUP_N3_IP=([edge]="$(oai_macvlan_ip edge 2)")
+CUUP_F1U_GW="${CUUP_F1U_GW:-$OAI_MACVLAN_GW}"
 
 fetch_operator_manifests() {
   local out_dir f

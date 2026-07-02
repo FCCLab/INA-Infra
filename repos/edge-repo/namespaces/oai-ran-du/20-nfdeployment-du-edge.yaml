@@ -8,8 +8,8 @@ spec:
   interfaces:
   - name: f1
     ipv4:
-      address: 172.5.0.253/24
-      gateway: 172.5.0.1
+      address: 10.1.139.113/24
+      gateway: 10.1.139.1
     vlanID: 5
   networkInstances:
   - name: vpc-cudu-f1

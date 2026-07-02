@@ -11,8 +11,8 @@ spec:
   interfaces:
   - name: n4
     ipv4:
-      address: 172.1.1.254/24
-      gateway: 172.1.1.1
+      address: 10.1.139.12/24
+      gateway: 10.1.139.1
     vlanID: 2
   networkInstances:
   - name: vpc-internal

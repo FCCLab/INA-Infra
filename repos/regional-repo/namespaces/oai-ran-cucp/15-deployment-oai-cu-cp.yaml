@@ -19,11 +19,11 @@ spec:
         app.kubernetes.io/name: oai-cu-cp
       annotations:
         k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"cucp-regional-e1\",\n \
-          \ \"interface\": \"e1\",\n  \"ips\": [\"172.4.0.252/24\"],\n  \"gateways\"\
-          : [\"172.4.0.1\"]\n },\n {\n  \"name\": \"cucp-regional-f1c\",\n  \"interface\"\
-          : \"f1c\",\n  \"ips\": [\"172.5.0.252/24\"],\n  \"gateways\": [\"172.5.0.1\"\
+          \ \"interface\": \"e1\",\n  \"ips\": [\"10.1.139.62/24\"],\n  \"gateways\"\
+          : [\"10.1.139.1\"]\n },\n {\n  \"name\": \"cucp-regional-f1c\",\n  \"interface\"\
+          : \"f1c\",\n  \"ips\": [\"10.1.139.61/24\"],\n  \"gateways\": [\"10.1.139.1\"\
           ]\n },\n {\n  \"name\": \"cucp-regional-n2\",\n  \"interface\": \"n2\",\n\
-          \  \"ips\": [\"10.1.138.127/24\"],\n  \"gateways\": [\"10.1.138.1\"]\n }\n\
+          \  \"ips\": [\"10.1.139.60/24\"],\n  \"gateways\": [\"10.1.139.1\"]\n }\n\
           ]"
     spec:
       serviceAccountName: oai-cu-cp-sa

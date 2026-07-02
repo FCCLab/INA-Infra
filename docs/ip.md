@@ -7,6 +7,7 @@ Two subnets split **operator/mgmt** from **cluster/data** traffic:
 | **10.1.132.0/24** | `enp1s0` | SSH, default route, DNS, mgmt cluster, mgmt MetalLB VIPs |
 | **10.1.137.0/24** | `enp7s0` | Kubernetes API, node traffic, Flannel |
 | **10.1.138.0/24** | `enp7s0` | MetalLB LoadBalancer VIPs (same L2 as `.137`) |
+| **10.1.139.0/24** | `enp7s0` | OAI macvlan only (Multus NADs; no host IP) — see [oai.md](oai.md) |
 
 Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](scripts/setup_ip.sh). Topology: [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md).
 
@@ -20,7 +21,7 @@ Definitions: [scripts/cluster_lib.sh](scripts/cluster_lib.sh). Netplan: [scripts
 | edge | `site-pool` | `10.1.138.150`–`10.1.138.174` | `enp7s0` |
 | ue | `site-pool` | `10.1.138.175`–`10.1.138.199` | `enp7s0` |
 
-Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per cluster on shared site L2). Per slice: **1st** reserved, **2nd** = OpenSpeedTest. On **central** only: **3rd** = OAI AMF N2, **4th** = OAI UPF N3 (OAI operators/core run on central). **Dashboard**, **NRF**, and **UDR** are **cluster-local** (NodePort / ClusterIP).
+Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per cluster on shared site L2). Per slice: **1st** reserved, **2nd** = OpenSpeedTest. **OAI macvlan** uses **`10.1.139.0/24`** ([oai.md](oai.md)). **Dashboard**, **NRF**, and **UDR** are **cluster-local** (NodePort / ClusterIP).
 
 DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole static DNS: [services/etc-dnsmasq.d/99-nephio-static.conf](services/etc-dnsmasq.d/99-nephio-static.conf).
 
@@ -38,16 +39,11 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | VIP | Cluster | Service | Ports | URL | DNS |
 |-----|---------|---------|-------|-----|-----|
 | 10.1.138.101 | central | OpenSpeedTest | 80 | [http://10.1.138.101](http://10.1.138.101) | `openspeedtest-central.nephio.lab` |
-| 10.1.138.102 | central | OAI AMF N2 | 38412/sctp | — | `amf-n2-central.nephio.lab` |
-| 10.1.138.103 | central | OAI UPF N3 | 2152/udp | — | `upf-n3-central.nephio.lab` |
 | 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
-| 10.1.138.127 | regional | OAI CU-CP N2 | 38412/sctp | — | — |
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
-| — | edge | OAI DU F1 (macvlan) | 38472/sctp | `172.5.0.253` → regional CU-CP F1-C `172.5.0.252` | — |
-| — | edge | OAI CU-UP E1 / F1U / N3 (macvlan) | 38462/sctp, 2152/udp | E1 `172.4.0.253` → CU-CP `172.4.0.252`; F1U `172.5.0.251`; N3 `172.3.0.253` → UPF `172.3.0.254` | — |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-OAI 5GC on **central**; OAI **CU-CP** on **regional** (`oai-ran-operators`, `oai-ran-cucp`); OAI **DU + rfsim RU** and **CU-UP** on **edge** (`oai-ran-operators`, `oai-ran-du`, `oai-ran-cuup`). UE site: OpenSpeedTest MetalLB only.
+OAI 5GC on **central**; OAI **CU-CP** on **regional**; OAI **DU + rfsim RU** and **CU-UP** on **edge** — macvlan on **`10.1.139.0/24`** ([oai.md](oai.md)).
 
 ## Cluster-local services (no MetalLB VIP)
 

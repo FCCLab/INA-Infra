@@ -41,7 +41,7 @@ write_ran_gitops() {
   local cluster="$1"
   local src_dir="$2"
   local repo_name dest_ops dest_cucp dest_cluster
-  local cucp_n2 amf_n2 cucp_name
+  local cucp_n2 amf_n2 cucp_name cucp_f1c cucp_e1
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   dest_ops="${REPOS_DIR}/${repo_name}/namespaces/${OAI_RAN_OPERATORS_NS}"
@@ -51,11 +51,14 @@ write_ran_gitops() {
 
   cucp_n2="$(cucp_n2_vip "$cluster")"
   amf_n2="$(amf_n2_vip central)"
+  cucp_f1c="$(oai_macvlan_ip regional 1)"
+  cucp_e1="$(oai_macvlan_ip regional 2)"
   cucp_name="cucp-${cluster}"
 
   python3 - "$src_dir" "$dest_ops" "$dest_cucp" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_CUCP_NS" "$OAI_RAN_OPERATOR_IMAGE" \
-    "$cucp_name" "$cucp_n2" "$amf_n2" "$OAI_GNB_IMAGE" "$SITE_IFACE" <<'PY'
+    "$cucp_name" "$cucp_n2" "$amf_n2" "$cucp_f1c" "$cucp_e1" "$OAI_MACVLAN_GW" \
+    "$OAI_GNB_IMAGE" "$SITE_IFACE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -63,7 +66,7 @@ from pathlib import Path
 import yaml
 
 (src_dir, dest_ops, dest_cucp, dest_cluster, ops_ns, cucp_ns, operator_image,
- cucp_name, cucp_n2, amf_n2, gnb_image, nad_parent) = sys.argv[1:13]
+ cucp_name, cucp_n2, amf_n2, f1c_ip, e1_ip, oai_gw, gnb_image, nad_parent) = sys.argv[1:16]
 
 dest_ops = Path(dest_ops)
 dest_cucp = Path(dest_cucp)
@@ -202,7 +205,7 @@ amf_ref = {
                 "provider": "amf.openairinterface.org",
                 "interfaces": [{
                     "name": "n2",
-                    "ipv4": {"address": f"{amf_n2}/24", "gateway": "10.1.138.1"},
+                    "ipv4": {"address": f"{amf_n2}/24", "gateway": oai_gw},
                     "vlanID": 4,
                 }],
             },
@@ -220,17 +223,17 @@ nfdeploy = {
         "interfaces": [
             {
                 "name": "n2",
-                "ipv4": {"address": f"{cucp_n2}/24", "gateway": "10.1.138.1"},
+                "ipv4": {"address": f"{cucp_n2}/24", "gateway": oai_gw},
                 "vlanID": 4,
             },
             {
                 "name": "f1c",
-                "ipv4": {"address": "172.5.0.252/24", "gateway": "172.5.0.1"},
+                "ipv4": {"address": f"{f1c_ip}/24", "gateway": oai_gw},
                 "vlanID": 5,
             },
             {
                 "name": "e1",
-                "ipv4": {"address": "172.4.0.252/24", "gateway": "172.4.0.1"},
+                "ipv4": {"address": f"{e1_ip}/24", "gateway": oai_gw},
                 "vlanID": 6,
             },
         ],
@@ -256,15 +259,10 @@ nfdeploy = {
 write_doc(nfdeploy, dest_cucp, prefix="20-")
 
 # Executor manifests (Config Sync prunes operator-created resources not in git).
-F1C_IP = "172.5.0.252"
-F1C_GW = "172.5.0.1"
-E1_IP = "172.4.0.252"
-E1_GW = "172.4.0.1"
-N2_GW = "10.1.138.1"
 ifaces = (
-    ("e1", E1_IP, E1_GW),
-    ("f1c", F1C_IP, F1C_GW),
-    ("n2", cucp_n2, N2_GW),
+    ("e1", e1_ip, oai_gw),
+    ("f1c", f1c_ip, oai_gw),
+    ("n2", cucp_n2, oai_gw),
 )
 
 
@@ -316,7 +314,7 @@ gNBs =
 
     nr_cellid = 12345678;
     tr_s_preference = "f1";
-    local_s_address = "{F1C_IP}";
+    local_s_address = "{f1c_ip}";
     remote_s_address = "0.0.0.0";
     local_s_portc   = 501;
     local_s_portd   = 2152;
@@ -335,7 +333,7 @@ gNBs =
     (
       {{
         type = "cp";
-        ipv4_cucp = "{E1_IP}";
+        ipv4_cucp = "{e1_ip}";
         port_cucp = 38462;
         ipv4_cuup = "0.0.0.0";
         port_cuup = 38462;
@@ -497,7 +495,7 @@ main() {
   echo
   echo "Namespaces: ${OAI_RAN_OPERATORS_NS} (operator), ${OAI_RAN_CUCP_NS} (CU-CP executor)"
   echo "Prerequisites on target cluster: Multus (./scripts/render_multus_gitops.sh <cluster>)"
-  echo "Central AMF must be running; CU-CP N2 uses slice 3rd .138 IP, AMF ref → central N2 VIP"
+  echo "Central AMF must be running; CU-CP N2 ${cucp_n2} → AMF N2 $(amf_n2_vip central) on 10.1.139.0/24"
   echo
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
 }

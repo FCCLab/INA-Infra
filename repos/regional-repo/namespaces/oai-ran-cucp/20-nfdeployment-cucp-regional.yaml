@@ -8,18 +8,18 @@ spec:
   interfaces:
   - name: n2
     ipv4:
-      address: 10.1.138.127/24
-      gateway: 10.1.138.1
+      address: 10.1.139.60/24
+      gateway: 10.1.139.1
     vlanID: 4
   - name: f1c
     ipv4:
-      address: 172.5.0.252/24
-      gateway: 172.5.0.1
+      address: 10.1.139.61/24
+      gateway: 10.1.139.1
     vlanID: 5
   - name: e1
     ipv4:
-      address: 172.4.0.252/24
-      gateway: 172.4.0.1
+      address: 10.1.139.62/24
+      gateway: 10.1.139.1
     vlanID: 6
   networkInstances:
   - name: vpc-ran
