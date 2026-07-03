@@ -32,7 +32,7 @@ spec:
       - args:
         - --ip-masq
         - --kube-subnet-mgr
-        - --iface=enp7s0
+        - --iface-regex=^(aerial03|enP2s2f1np1|enp7s0)$
         command:
         - /opt/bin/flanneld
         env:
