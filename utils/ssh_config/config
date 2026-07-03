@@ -57,3 +57,9 @@ Host ue-1
     User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa
+
+Host gh81
+    HostName 10.1.132.11
+    User tuannv
+    Port 22
+    IdentityFile ~/.ssh/id_rsa

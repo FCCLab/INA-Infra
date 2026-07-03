@@ -401,6 +401,60 @@ $(cni_prereqs_remote_script)
 EOF
 }
 
+configure_containerd_for_k8s_remote_script() {
+  cat <<'EOF'
+echo "==> configure containerd CRI for Kubernetes (keep Docker CE)"
+sudo mkdir -p /etc/containerd
+if [[ ! -f /etc/containerd/config.toml ]] || grep -q 'disabled_plugins = \["cri"\]' /etc/containerd/config.toml; then
+  if [[ -f /etc/containerd/config.toml ]]; then
+    sudo cp -a /etc/containerd/config.toml "/etc/containerd/config.toml.bak.$(date +%Y%m%d%H%M%S)"
+  fi
+  containerd config default | sudo tee /etc/containerd/config.toml >/dev/null
+fi
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+sudo sed -i 's/disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml
+sudo systemctl enable --now containerd
+sudo systemctl restart containerd
+EOF
+}
+
+ensure_docker_ce_remote_script() {
+  cat <<'EOF'
+DOCKER_PKGS=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
+
+if command -v docker >/dev/null && dpkg -l docker-ce 2>/dev/null | grep -q '^ii'; then
+  echo "==> Docker CE already installed; keeping current packages"
+  sudo systemctl enable --now docker 2>/dev/null || true
+else
+  echo "==> install Docker CE (containerd.io from docker.com)"
+  # Resolve duplicate docker.com apt sources (docker.gpg vs docker.asc).
+  if [[ -f /etc/apt/sources.list.d/docker.list && -f /etc/apt/sources.list.d/docker.sources ]]; then
+    echo "==> remove conflicting /etc/apt/sources.list.d/docker.list"
+    sudo rm -f /etc/apt/sources.list.d/docker.list
+  fi
+  sudo install -m 0755 -d /etc/apt/keyrings
+  if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+  fi
+  if [[ ! -f /etc/apt/sources.list.d/docker.sources ]]; then
+    sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOA
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOA
+  fi
+  sudo apt-get $APT_OPTS update
+  sudo apt-get $APT_OPTS install -y "${DOCKER_PKGS[@]}"
+  sudo systemctl enable --now docker
+  sudo systemctl enable --now containerd
+fi
+EOF
+}
+
 install_kubernetes() {
   local host="$1"
   run_remote_script "$host" <<EOF
@@ -431,6 +485,47 @@ if [[ ! -f /etc/containerd/config.toml ]]; then
 fi
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo systemctl enable --now containerd
+
+echo "==> install kubelet kubeadm kubectl (${K8S_VERSION}.x)"
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key" \\
+  | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" \\
+  | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get \$APT_OPTS update
+sudo apt-get \$APT_OPTS install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+sudo systemctl enable kubelet
+kubeadm version -o short
+EOF
+}
+
+install_kubernetes_keep_docker() {
+  local host="$1"
+  run_remote_script "$host" <<EOF
+set -euo pipefail
+$(noninteractive_apt_script)
+echo "==> configure DNS (${DNS_SERVER})"
+$(configure_dns_script)
+echo "==> apt-get update"
+sudo apt-get \$APT_OPTS update
+echo "==> install kubeadm preflight packages"
+sudo apt-get \$APT_OPTS install -y \\
+  conntrack ebtables ethtool socat ipset \\
+  apt-transport-https ca-certificates curl gpg
+command -v conntrack >/dev/null
+
+if command -v kubeadm >/dev/null && command -v kubelet >/dev/null && command -v kubectl >/dev/null; then
+  echo "==> kubernetes already installed"
+  kubeadm version -o short || true
+  kubelet --version || true
+  $(ensure_docker_ce_remote_script)
+  $(configure_containerd_for_k8s_remote_script)
+  exit 0
+fi
+
+$(ensure_docker_ce_remote_script)
+$(configure_containerd_for_k8s_remote_script)
 
 echo "==> install kubelet kubeadm kubectl (${K8S_VERSION}.x)"
 sudo install -d -m 0755 /etc/apt/keyrings
@@ -878,6 +973,7 @@ parse_args() {
   done
 }
 
+bringup_cluster_main() {
 parse_args "$@"
 
 if [[ "${BRINGUP_MGMT_CLUSTER:-}" == "1" ]]; then
@@ -959,3 +1055,43 @@ if [[ ${#clusters[@]} -gt 0 ]]; then
 fi
 
 exit "$failed"
+}
+
+join_external_worker() {
+  local cluster="$1" worker_host="$2" node_ip="$3"
+  local cp_host="${CLUSTER_CP_HOST[$cluster]}"
+
+  echo
+  echo "========================================"
+  echo " Join external worker: ${worker_host} -> ${cluster}"
+  echo " Control plane: ${cp_host}  (must be running)"
+  echo " Worker:        ${worker_host}  node-ip ${node_ip}"
+  echo "========================================"
+
+  if ! ssh_cmd "$cp_host" "test -f /etc/kubernetes/admin.conf" 2>/dev/null; then
+    echo "error: control plane not initialized on ${cp_host}" >&2
+    return 1
+  fi
+
+  echo "==> [${cluster}] External worker prep + join"
+  prompt_sudo_password "$worker_host"
+  ensure_passwordless_sudo "$worker_host"
+  host_prep_common "$worker_host" "$worker_host" "$node_ip"
+  install_kubernetes_keep_docker "$worker_host" || return 1
+  kubeadm_join_worker "$worker_host" "$cp_host" "$worker_host" "$node_ip" || return 1
+  wait_node_ready "$cp_host" "$worker_host" || true
+
+  if [[ "$INSTALL_FLANNEL" == "1" ]]; then
+    echo "==> [${cluster}] CNI prerequisites and Flannel on external worker"
+    ensure_cni_prereqs "$cp_host" || return 1
+    ensure_cni_prereqs "$worker_host" || return 1
+    restart_flannel "$cp_host"
+  fi
+
+  remote_kubectl "$cp_host" get nodes -o wide
+  echo "==> [${cluster}] External worker ${worker_host} join done"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  bringup_cluster_main "$@"
+fi
