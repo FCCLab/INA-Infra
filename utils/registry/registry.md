@@ -105,8 +105,8 @@ The Docker Registry in the `mgmt` cluster uses a PersistentVolumeClaim (PVC) bac
 
 ### Capacity Metrics
 * **Requested Claim Capacity**: `10Gi` (defined in `pvc-registry.yaml`)
-* **Host Free Space**: The volume is hosted on `node-0` (the management control plane node). The physical disk space is shared with the host and constrained by the remaining host storage.
-  * **Current Host Disk Available**: `~5.6 GiB` (out of `30.3 GiB` total filesystem capacity).
+* **Host Free Space**: The volume is hosted on a dedicated `2.0 Terabytes` disk partition (`/dev/vdb`) mounted on `node-0` at `/opt/local-path-provisioner`.
+  * **Current Host Disk Available**: `1.9 TiB` (out of `2.0 TiB` total filesystem capacity).
 * **Current Storage Utilized by Images**: `~176 KiB` (clean/fresh state with test images only).
 
 ### Checking Usage
