@@ -69,3 +69,9 @@ Host gh82
     User tuannv
     Port 22
     IdentityFile ~/.ssh/id_rsa
+
+Host usrp
+    HostName 10.1.132.139
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa

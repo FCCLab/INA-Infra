@@ -27,10 +27,10 @@ err() { printf 'error: %s\n' "$*" >&2; }
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-y] <name> <ip> [<name> <ip> ...]
+Usage: $(basename "$0") [-y] <name> <username> <ip> [<name> <username> <ip> ...]
 
 For each workload node:
-  1. Prompt for username and password
+  1. Prompt for password (if not set in environment)
   2. Install local SSH public key (passwordless login) via <ip>
   3. Set hostname to <name>
   4. Enable passwordless sudo
@@ -38,9 +38,9 @@ For each workload node:
   6. Add/update utils/ssh_config/config to use mgmt IP from netplan
 
 Examples:
-  $(basename "$0") gh81 10.1.101.211
-  $(basename "$0") -y gh81 10.1.101.211 gh82 10.1.101.212
-  GH81_USER=fcp GH81_PASS=secret $(basename "$0") -y gh81 10.1.101.211
+  $(basename "$0") gh81 fcp 10.1.101.211
+  $(basename "$0") -y gh81 fcp 10.1.101.211 gh82 fcp 10.1.101.212
+  GH81_USER=fcp GH81_PASS=secret $(basename "$0") -y gh81 fcp 10.1.101.211
 
 Environment (optional, skip prompts; prefix = uppercase <name>):
   GH81_USER GH81_PASS
@@ -134,14 +134,14 @@ read_node_credentials() {
   prefix="$(node_env_prefix "$node")"
   user_var="${prefix}_USER"
   pass_var="${prefix}_PASS"
-  user="${!user_var:-}"
+  user="${NODE_USER[$node]:-${!user_var:-}}"
   pass="${!pass_var:-}"
 
   if [[ -z "$user" ]]; then
     read -rp "${node} username: " user
   fi
   if [[ -z "$pass" ]]; then
-    read -rsp "${node} password: " pass
+    read -rsp "${user} password: " pass
     echo >&2
   fi
 
@@ -393,14 +393,15 @@ main() {
       -y|--yes) assume_yes=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *)
-        if [[ $# -lt 2 ]]; then
-          err "expected <name> <ip> pair, got only: $1"
+        if [[ $# -lt 3 ]]; then
+          err "expected <name> <username> <ip> triplet, got: $*"
           usage >&2
           exit 1
         fi
         NODE_NAMES+=("$1")
-        init_ips+=("$2")
-        shift 2
+        NODE_USER["$1"]="$2"
+        init_ips+=("$3")
+        shift 3
         ;;
     esac
   done
@@ -423,7 +424,7 @@ main() {
 
   log "pubkey: ${pubkey}"
   for i in "${!NODE_NAMES[@]}"; do
-    log "  ${NODE_NAMES[$i]} @ ${init_ips[$i]} -> mgmt from ${NETPLAN_DIR}/${NODE_NAMES[$i]}/${NETPLAN_FILE}"
+    log "  ${NODE_NAMES[$i]} @ ${init_ips[$i]} (${NODE_USER[${NODE_NAMES[$i]}]}) -> mgmt from ${NETPLAN_DIR}/${NODE_NAMES[$i]}/${NETPLAN_FILE}"
   done
 
   if [[ "$assume_yes" != "1" ]]; then
