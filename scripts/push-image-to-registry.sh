@@ -122,12 +122,21 @@ if [[ "$registry_port" == "$registry_host" ]]; then
   registry_port="5000"
 fi
 
-echo "Registry:  http://${registry_host}:${registry_port}"
+# Detect protocol and curl options
+if curl -k -sf --connect-timeout 3 "https://${registry_host}:${registry_port}/v2/" >/dev/null; then
+  protocol="https"
+  CURL_OPTS=(-k)
+else
+  protocol="http"
+  CURL_OPTS=()
+fi
+
+echo "Registry:  ${protocol}://${registry_host}:${registry_port}"
 echo "Local:     ${LOCAL_IMAGE}"
 echo "Remote:    ${remote}"
 
-if ! curl -sf --connect-timeout 5 "http://${registry_host}:${registry_port}/v2/" >/dev/null; then
-  echo "Registry not reachable at http://${registry_host}:${registry_port}/v2/" >&2
+if ! curl -sf "${CURL_OPTS[@]}" --connect-timeout 5 "${protocol}://${registry_host}:${registry_port}/v2/" >/dev/null; then
+  echo "Registry not reachable at ${protocol}://${registry_host}:${registry_port}/v2/" >&2
   exit 1
 fi
 

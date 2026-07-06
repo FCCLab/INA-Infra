@@ -61,11 +61,18 @@ registry_port="${REGISTRY#*:}"
 if [[ "$registry_port" == "$registry_host" ]]; then
   registry_port="5000"
 fi
-base_url="http://${registry_host}:${registry_port}"
-
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl not found in PATH." >&2
   exit 1
+fi
+
+# Detect protocol and curl options
+if curl -k -sf --connect-timeout 3 "https://${registry_host}:${registry_port}/v2/" >/dev/null; then
+  base_url="https://${registry_host}:${registry_port}"
+  CURL_OPTS=(-k)
+else
+  base_url="http://${registry_host}:${registry_port}"
+  CURL_OPTS=()
 fi
 
 parse_json_array() {
@@ -81,7 +88,7 @@ parse_json_array() {
 }
 
 registry_get() {
-  curl -sf --connect-timeout 10 "${base_url}$1"
+  curl -sf "${CURL_OPTS[@]}" --connect-timeout 10 "${base_url}$1"
 }
 
 if ! registry_get /v2/ >/dev/null; then
