@@ -356,6 +356,16 @@ fi
 echo "==> disable swap"
 sudo swapoff -a
 sudo sed -i '/ swap / s/^\(.*\)$/#\1/' /etc/fstab
+echo "==> configure KUBECONFIG in ~/.bashrc and ~/.zshrc"
+for file in "\$HOME/.bashrc" "\$HOME/.zshrc"; do
+  if [[ -f "\$file" ]]; then
+    if ! grep -q "KUBECONFIG" "\$file"; then
+      echo "" >> "\$file"
+      echo 'export KUBECONFIG="\${HOME}/.kube/config:\${HOME}/.kube/config-central:\${HOME}/.kube/config-regional:\${HOME}/.kube/config-edge:\${HOME}/.kube/config-ue"' >> "\$file"
+      echo "    added KUBECONFIG to \$file"
+    fi
+  fi
+done
 $(cni_prereqs_remote_script)
 EOF
 }
@@ -719,6 +729,20 @@ rm -f /tmp/kubeadm-join.yaml
 EOF
 }
 
+ensure_kubeconfig_profile_export() {
+  local kcfg_export='export KUBECONFIG="${HOME}/.kube/config:${HOME}/.kube/config-central:${HOME}/.kube/config-regional:${HOME}/.kube/config-edge:${HOME}/.kube/config-ue"'
+  local file
+  for file in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+    if [[ -f "$file" ]]; then
+      if ! grep -q "KUBECONFIG" "$file"; then
+        echo "" >> "$file"
+        echo "$kcfg_export" >> "$file"
+        echo "==> Auto-added KUBECONFIG export to $file"
+      fi
+    fi
+  done
+}
+
 copy_local_kubeconfig() {
   local host="$1" cluster="$2"
   local local_path
@@ -731,6 +755,7 @@ copy_local_kubeconfig() {
   scp_cmd -q "${host}:.kube/config" "$local_path"
   chmod 600 "$local_path"
   "$RENAME_SH" "$cluster" "$cluster" "$local_path"
+  ensure_kubeconfig_profile_export
 }
 
 bringup_mgmt_cluster() {
@@ -1054,6 +1079,7 @@ if [[ ${#clusters[@]} -gt 0 ]]; then
   fi
 fi
 
+ensure_kubeconfig_profile_export
 exit "$failed"
 }
 

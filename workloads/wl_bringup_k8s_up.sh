@@ -87,6 +87,7 @@ main() {
   if ! join_external_worker "$cluster" "$worker" "$node_ip"; then
     exit 1
   fi
+  ensure_kubeconfig_profile_export
 }
 
 main "$@"

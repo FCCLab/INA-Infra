@@ -332,7 +332,18 @@ ensure_ssh_config() {
   fi
 
   if grep -qE "^Host ${node}$" "$SSH_CONFIG"; then
-    info "SSH config already has Host ${node}"
+    info "SSH config already has Host ${node}; updating HostName to ${mgmt_ip}"
+    python3 -c '
+import sys, re
+path, node, ip = sys.argv[1:4]
+with open(path, "r") as f:
+    content = f.read()
+pattern = r"(Host\s+" + re.escape(node) + r"\s*\n(?:\s+[^\n]*\n)*?\s*HostName\s+)[^\n]+"
+new_content, count = re.subn(pattern, r"\g<1>" + ip, content)
+if count > 0:
+    with open(path, "w") as f:
+        f.write(new_content)
+' "$SSH_CONFIG" "$node" "$mgmt_ip"
     return 0
   fi
 
