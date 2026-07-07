@@ -160,14 +160,14 @@ create_multi_arch_manifest() {
       "${REGISTRY_URL}/v2/${image}/manifests/${arch_tag}")
 
     local digest
-    digest=$(grep -i "docker-content-digest" "$headers_file" | awk '{print $2}' | tr -d '\r\n')
+    digest=$(grep -i "^docker-content-digest:" "$headers_file" | awk '{print $2}' | tr -d '\r\n')
     
     if [[ -z "$digest" ]]; then
       digest=$(echo -n "$body" | sha256sum | awk '{print "sha256:"$1}')
     fi
 
     local media_type
-    media_type=$(grep -i "content-type" "$headers_file" | awk '{print $2}' | cut -d';' -f1 | tr -d '\r\n')
+    media_type=$(grep -i "^content-type:" "$headers_file" | awk '{print $2}' | cut -d';' -f1 | tr -d '\r\n')
     if [[ -z "$media_type" || "$media_type" == "text/plain" ]]; then
       media_type=$(echo "$body" | jq -r '.mediaType // empty')
     fi
