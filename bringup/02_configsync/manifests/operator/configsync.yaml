@@ -1,7 +1,0 @@
-apiVersion: configmanagement.gke.io/v1
-kind: ConfigManagement
-metadata:
-  name: config-management
-  annotations:
-spec:
-  enableMultiRepo: true

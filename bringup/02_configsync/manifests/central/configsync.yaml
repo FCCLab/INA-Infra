@@ -1,0 +1,31 @@
+apiVersion: configmanagement.gke.io/v1
+kind: ConfigManagement
+metadata:
+  name: config-management
+spec:
+  enableMultiRepo: true
+  patches:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: reconciler-manager
+      namespace: config-management-system
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: central-0
+          volumes:
+          - name: configs
+            configMap:
+              name: reconciler-manager-custom-cm
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: otel-collector
+      namespace: config-management-monitoring
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: central-0

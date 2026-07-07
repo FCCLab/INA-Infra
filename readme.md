@@ -133,4 +133,5 @@ On the mgmt node, kubeadm leaves context `kubernetes-admin@kubernetes`. Rename f
 - **kube-rbac-proxy**: use `quay.io/brancz/kube-rbac-proxy:v0.8.0` (not `gcr.io/kubebuilder/...`).
 - **porch**: `bringup/porch` includes `0-functionconfigs.yaml` and flag fixes for current `nephio/*:latest` images.
 - **Porch / function-runner logs** (`localhost:4318 connection refused`): OpenTelemetry has no collector in-cluster; safe to ignore or set `OTEL_SDK_DISABLED=true` on those deployments.
+- **Local Registry**: See [utils/registry/registry.md](file:///home/fcp/nephio-network-slicing/utils/registry/registry.md) for registry configuration and pushing OAI images using [push_oai.sh](file:///home/fcp/nephio-network-slicing/utils/registry/push_oai.sh).
 - **Bare metal provisioning** (Metal3/Ironic) is optional and documented separately; not required for this single-node lab.

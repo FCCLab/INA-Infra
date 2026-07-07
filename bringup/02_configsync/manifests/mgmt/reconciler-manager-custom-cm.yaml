@@ -1,0 +1,268 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reconciler-manager-custom-cm
+  namespace: config-management-system
+data:
+  deployment.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: # this field will be assigned dynamically by the reconciler-manager
+      namespace: config-management-system
+      labels:
+        app: reconciler
+        configmanagement.gke.io/system: "true"
+        configmanagement.gke.io/arch: "csmr"
+    spec:
+      minReadySeconds: 10
+      replicas: 1
+      strategy:
+        type: Recreate
+      selector:
+        matchLabels:
+          app: reconciler
+          configsync.gke.io/deployment-name: "" # this field will be assigned dynamically by the reconciler-manager
+      template:
+        metadata:
+          labels:
+            app: reconciler
+            configsync.gke.io/deployment-name: "" # this field will be assigned dynamically by the reconciler-manager
+            configsync.gke.io/sync-kind: "" # this field will be assigned dynamically by the reconciler-manager
+            configsync.gke.io/sync-name: "" # this field will be assigned dynamically by the reconciler-manager
+            configsync.gke.io/sync-namespace: "" # this field will be assigned dynamically by the reconciler-manager
+            configsync.gke.io/sync-generation: "" # this field will be assigned dynamically by the reconciler-manager
+          annotations:
+            cluster-autoscaler.kubernetes.io/safe-to-evict: "true" # this annotation is needed so that pods doesn't block scale down
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: edge-0
+          serviceAccountName: # this field will be assigned dynamically by the reconciler-manager
+          containers:
+          - name: hydration-controller
+            image: gcr.io/config-management-release/hydration-controller:v1.18.3-rc.4
+            command:
+            - /hydration-controller
+            args:
+            - "--repo-root=/repo"
+            - "--source-root=source"
+            - "--hydrated-root=hydrated"
+            - "--source-link=rev"
+            - "--hydrated-link=rev"
+            volumeMounts:
+            - name: repo
+              mountPath: /repo
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                - ALL
+              runAsUser: 65533
+          - name: reconciler
+            image: gcr.io/config-management-release/reconciler:v1.18.3-rc.4
+            command:
+            - /reconciler
+            args:
+            - "--repo-root=/repo"
+            - "--source-dir=/repo/source/rev"
+            - "--hydrated-root=/repo/hydrated"
+            - "--hydrated-link=rev"
+            env:
+            - name: KUBECACHEDIR
+              value: "/.kube/cache"
+            volumeMounts:
+            - name: repo
+              mountPath: /repo
+              readOnly: true
+            - name: kube
+              mountPath: /.kube
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            imagePullPolicy: IfNotPresent
+          - name: git-sync
+            image: gcr.io/config-management-release/git-sync:v4.2.3-gke.5__linux_amd64
+            args: ["--root=/repo/source", "--link=rev", "--max-failures=30", "--error-file=error.json"]
+            volumeMounts:
+            - name: repo
+              mountPath: /repo
+            - name: git-creds
+              mountPath: /etc/git-secret
+              readOnly: true
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                - ALL
+              runAsUser: 65533
+          - name: gcenode-askpass-sidecar
+            image: gcr.io/config-management-release/gcenode-askpass-sidecar:v1.18.3-rc.4
+            args: ["--port=9102", "--logtostderr"]
+            imagePullPolicy: IfNotPresent
+            terminationMessagePolicy: File
+            terminationMessagePath: /dev/termination-log
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                - ALL
+          - name: oci-sync
+            image: gcr.io/config-management-release/oci-sync:v1.18.3-rc.4
+            args: ["--root=/repo/source", "--dest=rev", "--max-sync-failures=30", "--error-file=error.json"]
+            volumeMounts:
+            - name: repo
+              mountPath: /repo
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                - ALL
+              runAsUser: 65533
+          - name: helm-sync
+            image: gcr.io/config-management-release/helm-sync:v1.18.3-rc.4
+            args: ["--root=/repo/source", "--dest=rev", "--max-sync-failures=30", "--error-file=error.json"]
+            volumeMounts:
+            - name: repo
+              mountPath: /repo
+            - name: helm-creds
+              mountPath: /etc/helm-secret
+              readOnly: true
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                - ALL
+              runAsUser: 65533
+          - name: otel-agent
+            image: gcr.io/config-management-release/otelcontribcol:v0.102.0-gke.6
+            command:
+            - /otelcontribcol
+            args:
+            - "--config=/conf/otel-agent-config.yaml"
+            # The prometheus transformer appends `_ratio` to gauge metrics: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.86.0/pkg/translator/prometheus/normalize_name.go#L149
+            # Add the feature gate to enable metric suffix trimming.
+            - "--feature-gates=-pkg.translator.prometheus.NormalizeName"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            ports:
+            - containerPort: 55678 # Default OpenCensus receiver port.
+              protocol: TCP
+            - containerPort: 8888  # Metrics.
+              protocol: TCP
+            volumeMounts:
+            - name: otel-agent-config-vol
+              mountPath: /conf
+            readinessProbe:
+              httpGet:
+                path: /
+                port: 13133 # Health Check extension default port.
+                scheme: HTTP
+            imagePullPolicy: IfNotPresent
+            # These KUBE env vars help populate OTEL_RESOURCE_ATTRIBUTES which
+            # is used by the otel-agent to populate resource attributes when
+            # emitting metrics to the otel-collector. This is more efficient than
+            # having the otel-collector look them up from the apiserver.
+            #
+            # Unlike the other configsync metric labels,
+            # "configsync.sync.generation" is specified here as a resource
+            # attribute so that it is sent to Prometheus, but not Monarch or
+            # Cloud Monitoring.
+            env:
+            - name: KUBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: KUBE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: KUBE_POD_UID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: KUBE_POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: KUBE_DEPLOYMENT_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['configsync.gke.io/deployment-name']
+            - name: CONFIGSYNC_SYNC_KIND
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['configsync.gke.io/sync-kind']
+            - name: CONFIGSYNC_SYNC_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['configsync.gke.io/sync-name']
+            - name: CONFIGSYNC_SYNC_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['configsync.gke.io/sync-namespace']
+            - name: CONFIGSYNC_SYNC_GENERATION
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['configsync.gke.io/sync-generation']
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "k8s.pod.name=$(KUBE_POD_NAME),\
+                k8s.pod.namespace=$(KUBE_POD_NAMESPACE),\
+                k8s.pod.uid=$(KUBE_POD_UID),\
+                k8s.pod.ip=$(KUBE_POD_IP),\
+                k8s.node.name=$(KUBE_NODE_NAME),\
+                k8s.deployment.name=$(KUBE_DEPLOYMENT_NAME),\
+                configsync.sync.generation=$(CONFIGSYNC_SYNC_GENERATION)"
+          volumes:
+          - name: repo
+            emptyDir: {}
+          - name: kube
+            emptyDir: {}
+          - name: helm-creds
+            secret:
+              secretName: helm-creds
+              defaultMode: 288
+          - name: git-creds
+            secret:
+              secretName: git-creds
+              defaultMode: 288
+          - name: otel-agent-config-vol
+            configMap:
+              name: otel-agent
+              defaultMode: 420
+          securityContext:
+            fsGroup: 65533
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault

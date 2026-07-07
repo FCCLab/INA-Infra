@@ -494,6 +494,67 @@ wait_for_operator() {
     || cluster_kubectl "$cluster" get pods -n config-management-system 2>/dev/null || true
 }
 
+pin_configsync_to_node0() {
+  local cluster="$1"
+  local node0
+  case "$cluster" in
+    mgmt) node0="node-0" ;;
+    central) node0="central-0" ;;
+    regional) node0="regional-0" ;;
+    edge) node0="edge-0" ;;
+    ue) node0="ue-0" ;;
+    *) echo "Unknown cluster: $cluster" >&2; return 1 ;;
+  esac
+
+  echo "==> [${cluster}] Pinning Config Sync operator to ${node0}"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    return 0
+  fi
+  
+  # Patch config-management-operator deployment
+  cluster_kubectl "$cluster" patch deployment config-management-operator -n config-management-system \
+    --type=merge -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${node0}\"}}}}}" || true
+
+  # Wait for reconciler-manager-cm ConfigMap to be created by the operator
+  echo "    Waiting for reconciler-manager-cm ConfigMap..."
+  local i
+  for i in $(seq 1 60); do
+    if cluster_kubectl "$cluster" get configmap reconciler-manager-cm -n config-management-system >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  if ! cluster_kubectl "$cluster" get configmap reconciler-manager-cm -n config-management-system >/dev/null 2>&1; then
+    echo "    Warning: reconciler-manager-cm ConfigMap not found, skipping template patch"
+    return 0
+  fi
+
+  # Run Python one-liner to patch the ConfigMap on the cluster
+  echo "    Patching reconciler-manager-cm template..."
+  local cm_json
+  cm_json="$(cluster_kubectl "$cluster" get configmap reconciler-manager-cm -n config-management-system -o json)"
+  
+  local patched_cm_json
+  patched_cm_json="$(printf '%s' "$cm_json" | python3 -c '
+import sys, json, re
+cm = json.load(sys.stdin)
+yaml_str = cm["data"]["deployment.yaml"]
+pattern = r"(\s+spec:\s+template:\s+spec:)"
+replacement = r"\1\n      nodeSelector:\n        kubernetes.io/hostname: '"$node0"'"
+if "nodeSelector" not in yaml_str:
+    cm["data"]["deployment.yaml"] = re.sub(pattern, replacement, yaml_str, count=1)
+print(json.dumps(cm))
+')"
+
+  printf '%s' "$patched_cm_json" | cluster_kubectl "$cluster" apply -f - >/dev/null
+
+  # Patch the running reconciler-manager deployment directly as well
+  echo "    Patching reconciler-manager deployment..."
+  cluster_kubectl "$cluster" patch deployment reconciler-manager -n config-management-system \
+    --type=merge -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${node0}\"}}}}}" || true
+}
+
 install_on_cluster() {
   local cluster="$1"
   local repo_name op_paths cluster_paths
@@ -521,6 +582,7 @@ install_on_cluster() {
     if [[ "$SKIP_UNTAINT" != "1" ]]; then
       untaint_control_plane "$cluster"
     fi
+    pin_configsync_to_node0 "$cluster"
     wait_for_operator "$cluster"
   fi
 

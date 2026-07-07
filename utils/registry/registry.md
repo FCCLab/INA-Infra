@@ -119,3 +119,30 @@ To check the physical host disk utilization of the mounted volume:
 ```bash
 kubectl exec deployment/registry -n registry -c registry -- df -h /var/lib/registry
 ```
+
+---
+
+## 4. Pushing OAI Images (Multi-Architecture Support)
+
+To tag and push OAI latest images from remote host nodes (such as ARM64 and AMD64 hosts) to the local secure registry, use the `push_oai.sh` utility script. 
+
+When multiple architecture hosts are provided, the script automatically creates a local manifest list and pushes it to the registry. This enables Kubernetes nodes (e.g. `gh81` running ARM64 or `usrp` running AMD64) to autonomously pull the correct image architecture.
+
+### Usage
+
+```bash
+./utils/registry/push_oai.sh --arch <arch1> <host1> [--arch <arch2> <host2> ...] --version <version>
+```
+
+### Examples
+
+* **Pushing both arm64 and amd64 images (creates multi-arch manifests in registry):**
+  ```bash
+  ./utils/registry/push_oai.sh --arch arm64 gh81 --arch amd64 usrp --version nws-v0.2
+  ```
+
+* **Pushing only arm64 architecture:**
+  ```bash
+  ./utils/registry/push_oai.sh --arch arm64 gh81 --version nws-v0.2
+  ```
+

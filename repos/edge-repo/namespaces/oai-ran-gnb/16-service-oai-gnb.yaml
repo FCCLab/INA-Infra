@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-gnb
+  namespace: oai-ran-gnb
+  labels:
+    app.kubernetes.io/name: oai-gnb
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: oai-gnb
+  ports:
+  - name: n2
+    port: 38412
+    protocol: SCTP
+    targetPort: 38412
+  - name: n3
+    port: 2152
+    protocol: UDP
+    targetPort: 2152
+  - name: rfsim
+    port: 4043
+    protocol: TCP
+    targetPort: 4043
