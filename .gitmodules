@@ -1,0 +1,3 @@
+[submodule "network-slicing"]
+	path = network-slicing
+	url = https://github.com/FCCLab/network-slicing.git

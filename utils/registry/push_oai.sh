@@ -262,6 +262,20 @@ if [[ ${#ARCH_NAMES[@]} -gt 1 ]]; then
   done
 fi
 
+# Verify blob payloads (detect empty "Layer already exists" corruption)
+VERIFY_SCRIPT="${SCRIPT_DIR}/verify_registry_image.sh"
+if [[ ! -x "$VERIFY_SCRIPT" ]]; then
+  chmod +x "$VERIFY_SCRIPT"
+fi
+echo ""
+echo "==> Verifying pushed images in registry..."
+for image in "${IMAGES[@]}"; do
+  "$VERIFY_SCRIPT" "${image}:${VERSION}"
+  for arch in "${ARCH_NAMES[@]}"; do
+    "$VERIFY_SCRIPT" "${image}:${VERSION}-${arch}"
+  done
+done
+
 # Print formatted summary table
 echo ""
 echo "Successfully created tags:"

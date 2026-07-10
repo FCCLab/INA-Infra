@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Allow containerd/CRI to pull from the HTTP registry on mgmt (once per node).
+# Allow containerd/CRI to pull from the HTTPS registry on mgmt (once per node).
+# Registry uses a self-signed cert; hosts.toml skips TLS verify.
 #
 #   sudo ./scripts/setup-containerd-insecure-registry.sh
 #   sudo ./scripts/setup-containerd-insecure-registry.sh 10.1.132.30:5000
 #
-# Run on every cluster node that must pull images (e.g. central-0, central-1).
+# Run on every cluster node that must pull images (e.g. edge-0, ue-1).
 set -euo pipefail
 
 REGISTRY="${1:-10.1.132.30:5000}"
@@ -17,9 +18,9 @@ fi
 
 mkdir -p "$CERTS_DIR"
 cat >"${CERTS_DIR}/hosts.toml" <<EOF
-server = "http://${REGISTRY}"
+server = "https://${REGISTRY}"
 
-[host."http://${REGISTRY}"]
+[host."https://${REGISTRY}"]
   capabilities = ["pull", "resolve", "push"]
   skip_verify = true
 EOF

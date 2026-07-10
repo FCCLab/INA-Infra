@@ -29,7 +29,7 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 
 | VIP | Cluster | Service | Ports | URL | DNS |
 |-----|---------|---------|-------|-----|-----|
-| 10.1.132.30 | mgmt | Docker Registry | 5000 | [http://10.1.132.30:5000](http://10.1.132.30:5000) | `registry.nephio.lab` |
+| 10.1.132.30 | mgmt | Docker Registry | 5000 | [https://10.1.132.30:5000](https://10.1.132.30:5000) | `registry.nephio.lab` |
 | 10.1.132.11 | mgmt | OpenSpeedTest | 80 | [http://10.1.132.11](http://10.1.132.11) | `openspeedtest-mgmt.nephio.lab` |
 | 10.1.132.200 | mgmt | Gitea | 80, 3000 | [http://10.1.132.200:3000](http://10.1.132.200:3000) · [http://10.1.132.200](http://10.1.132.200) | `gitea.nephio.lab` |
 | 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.nephio.lab` |

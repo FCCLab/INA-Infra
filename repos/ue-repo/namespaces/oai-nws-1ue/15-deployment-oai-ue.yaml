@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: oai-ue
-  namespace: oai-ue
+  namespace: oai-nws-1ue
   labels:
     app.kubernetes.io/name: oai-ue
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -32,9 +32,9 @@ spec:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr
-            10.1.139.113 --rfsimulator.serverport 4043 -C 3609120000 -r 51 --numerology
-            1 --ssb 234 --band 78 --uicc0.imsi 001010000000100
+          value: -E --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr
+            10.1.139.113 --rfsimulator.serverport 4043 -C 3319680000 -r 106 --numerology
+            1 --band 78 --uicc0.imsi 001010000000001
         - name: TZ
           value: Europe/Paris
         resources:

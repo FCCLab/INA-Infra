@@ -13,7 +13,8 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") <node-name>
 
-Configure the specified remote node to trust the local insecure registry.
+Configure the specified remote node to trust the local HTTPS registry
+(self-signed): Docker insecure-registries + containerd hosts.toml.
 Requires passwordless SSH to be configured for <node-name> in utils/ssh_config/config.
 EOF
 }

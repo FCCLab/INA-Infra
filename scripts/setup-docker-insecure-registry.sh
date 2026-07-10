@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time Docker setup so pushes work against the HTTP registry on mgmt.
+# One-time Docker setup so pushes work against the HTTPS registry on mgmt
+# (self-signed cert). Adds the registry to Docker insecure-registries.
 #
 #   sudo ./scripts/setup-docker-insecure-registry.sh
 #   sudo ./scripts/setup-docker-insecure-registry.sh 10.1.132.30:5000

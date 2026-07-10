@@ -146,3 +146,10 @@ When multiple architecture hosts are provided, the script automatically creates 
   ./utils/registry/push_oai.sh --arch arm64 gh81 --version nws-v0.2
   ```
 
+After push, `push_oai.sh` runs `verify_registry_image.sh` on each tag to confirm blob payloads are present (not just manifests). To check a tag manually:
+
+```bash
+./utils/registry/verify_registry_image.sh oai-nr-ue:nws-v0.2
+./utils/registry/verify_registry_image.sh oai-gnb:nws-v0.2
+```
+

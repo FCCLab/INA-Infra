@@ -13,7 +13,7 @@ REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 OAI_RAN_OPERATORS_NS="${OAI_RAN_OPERATORS_NS:-oai-ran-operators}"
 OAI_RAN_GNB_NS="${OAI_RAN_GNB_NS:-oai-ran-gnb}"
 OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-docker.io/nephio/oai-ran-controller:latest}"
-OAI_GNB_IMAGE="${OAI_GNB_IMAGE:-10.1.132.30:5000/oai-gnb:nws-0.1}"
+OAI_GNB_IMAGE="${OAI_GNB_IMAGE:-10.1.132.30:5000/oai-gnb:nws-v0.2}"
 RAN_CATALOG_BASE="${RAN_CATALOG_BASE:-https://raw.githubusercontent.com/nephio-project/catalog/main/workloads/oai/oai-ran-operator/operator}"
 NEPHIO_CRD_BASE="${NEPHIO_CRD_BASE:-https://raw.githubusercontent.com/nephio-project/api/main/config/crd/bases}"
 NEPHIO_CRD_MANIFESTS=(
@@ -58,10 +58,11 @@ write_gnb_mono_gitops() {
   gnb_ip="${GNB_MONO_IP[$cluster]}"
   gnb_name="gnb-${cluster}"
 
+  # Mono gNB is pinned to usrp; NAD macvlan master must match usrp's site NIC.
   python3 - "$src_dir" "$dest_ops" "$dest_gnb" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_GNB_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$gnb_name" "$gnb_ip" "$AMF_N2_IP" "$OAI_MACVLAN_GW" \
-    "$OAI_GNB_IMAGE" "$SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
+    "$OAI_GNB_IMAGE" "$USRP_SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
     "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
 import sys
 import json
@@ -448,7 +449,7 @@ write_doc({
                     "env": [{
                         "name": "USE_ADDITIONAL_OPTIONS",
                         "value": (
-                            "--sa --rfsim --log_config.global_log_options level,nocolor,time"
+                            "--rfsim --log_config.global_log_options level,nocolor,time"
                         ),
                     }],
                     "ports": [

@@ -3,6 +3,8 @@ ALL_CLUSTERS=(central regional edge ue)
 
 SITE_IFACE="${SITE_IFACE:-enp7s0}"
 MGMT_IFACE="${MGMT_IFACE:-enp1s0}"
+# usrp worker (edge cluster) uses a different NIC name for the site L2
+USRP_SITE_IFACE="${USRP_SITE_IFACE:-enp4s0f0}"
 
 declare -A CLUSTER_CP_HOST=(
   [central]=central-0

@@ -5,11 +5,10 @@
 #   ./scripts/push-image-to-registry.sh 5gc-open5gs-5gc:latest --name open5gs/5gc --tag v1
 #   REGISTRY=10.1.132.30:5000 ./scripts/push-image-to-registry.sh myimage:debug
 #
-# HTTP registry requires Docker insecure-registries (once per node):
-#   sudo tee /etc/docker/daemon.json <<'EOF'
-#   { "insecure-registries": ["10.1.132.30:5000"] }
-#   EOF
-#   sudo systemctl restart docker
+# HTTPS registry (self-signed) requires Docker insecure-registries (once per node):
+#   sudo ./scripts/setup-docker-insecure-registry.sh
+# Kubernetes nodes also need:
+#   sudo ./scripts/setup-containerd-insecure-registry.sh
 set -euo pipefail
 
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
@@ -151,7 +150,7 @@ docker_insecure_configured() {
 
 if ! docker_insecure_configured; then
   cat >&2 <<EOF
-Docker is not configured for HTTP registry ${REGISTRY}.
+Docker is not configured for registry ${REGISTRY} (self-signed HTTPS).
 
 Run once on this node:
 
@@ -181,7 +180,7 @@ echo "Pushing ..."
 if ! docker push "$remote"; then
   cat >&2 <<EOF
 
-Push failed. For an HTTP registry, configure Docker on this node:
+Push failed. For the self-signed HTTPS registry, configure Docker on this node:
 
   sudo tee /etc/docker/daemon.json <<'JSON'
   { "insecure-registries": ["${REGISTRY}"] }

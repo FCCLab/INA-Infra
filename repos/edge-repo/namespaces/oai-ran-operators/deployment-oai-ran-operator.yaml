@@ -16,8 +16,6 @@ spec:
         app.kubernetes.io/name: oai-ran-operator
         app.kubernetes.io/component: controller
     spec:
-      nodeSelector:
-        kubernetes.io/arch: amd64
       serviceAccountName: oai-ran-operator
       containers:
       - name: operator

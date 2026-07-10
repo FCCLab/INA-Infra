@@ -1,0 +1,45 @@
+---
+description: Nephio network-slicing testbed architecture and conventions
+alwaysApply: true
+---
+
+# Nephio Network Slicing Testbed
+
+Multi-cluster Nephio lab for 5G network slicing with GitOps (Config Sync + Gitea).
+
+## Clusters
+
+| Cluster | Context | Kubeconfig | Control plane |
+|---------|---------|------------|---------------|
+| mgmt | `mgmt@mgmt` | `~/.kube/config` | mgmt-0 (10.1.132.200) |
+| central | `central@central` | `~/.kube/config-central` | central-0 |
+| regional | `regional@regional` | `~/.kube/config-regional` | regional-0 |
+| edge | `edge@edge` | `~/.kube/config-edge` | edge-0 |
+| ue | `ue@ue` | `~/.kube/config-ue` | ue-0 |
+
+Combine kubeconfigs: `export KUBECONFIG=~/.kube/config:~/.kube/config-central:...`
+
+IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `docs/ip.md`. SSH aliases: `utils/ssh_config/config`.
+
+## Repo layout
+
+- `bringup/` — staged install: Gitea (`01_gitea`), Config Sync (`02_configsync`), git push (`03_push_to_git_repos`)
+- `repos/` — GitOps source of truth per cluster (`mgmt`, `central-repo`, `regional-repo`, `edge-repo`, `ue-repo`)
+- `scripts/` — render GitOps manifests, cluster bringup, diagnostics (`check-configsync.sh`, `bringup_cluster.sh`)
+- `docs/` — topology, IPs, OAI, Config Sync
+- `utils/` — netplan, registry, SSH config
+
+## GitOps workflow
+
+1. Render manifests: `./scripts/render_*_gitops.sh` (order matters — see `docs/config_sync.md`)
+2. Push to Gitea: `./bringup/03_push_to_git_repos/push_git_repos.sh`
+3. Verify: `./scripts/check-configsync.sh`
+
+OAI: core on **central**, CU-CP on **regional**, DU/CU-UP on **edge**, UE sim on **ue**. Macvlan on `10.1.139.0/24`.
+
+## Conventions
+
+- Bash scripts: `set -euo pipefail`, source `scripts/cluster_lib.sh` for cluster/IP helpers
+- Gitea creds (lab): `nephio` / `secret` at `http://10.1.132.200:3000`
+- Minimize scope; match existing script style; do not commit unless asked
+- Primary docs: `readme.md`, `docs/testbed.md`, `docs/config_sync.md`
