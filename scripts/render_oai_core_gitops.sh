@@ -17,6 +17,7 @@ OAI_UPF_NS="${OAI_UPF_NS:-oai-upf}"
 UPF_NF_NAME="${UPF_NF_NAME:-upf-core}"
 UPF_UPSTREAM_NAME="${UPF_UPSTREAM_NAME:-upf-edge}"
 UPSTREAM_CN_NS="${UPSTREAM_CN_NS:-oaicp}"
+MGMT_CIDR="${MGMT_CIDR:-10.1.132.0/24}"
 OAI_NAD_PARENT="${OAI_NAD_PARENT:-$SITE_IFACE}"
 OAI_AMF_IMAGE="${OAI_AMF_IMAGE:-docker.io/oaisoftwarealliance/oai-amf:v2.0.1}"
 # emptyDir: no StorageClass needed. Set MYSQL_STORAGE=pvc when local-path is deployed.
@@ -75,7 +76,8 @@ write_core_manifests() {
   python3 - "$src_dir" "$mysql_chart" "$dest_cn" "$dest_upf" "$dest_cluster" \
     "$OAI_CN_NS" "$OAI_UPF_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" \
     "$MYSQL_STORAGE" "$MYSQL_STORAGE_CLASS" "$UPF_NF_NAME" "$UPF_UPSTREAM_NAME" \
-    "$amf_n2" "$smf_n4" "$upf_n3" "$upf_n4" "$upf_n6" "$OAI_MACVLAN_GW" "$OAI_AMF_IMAGE" <<'PY'
+    "$amf_n2" "$smf_n4" "$upf_n3" "$upf_n4" "$upf_n6" "$OAI_MACVLAN_GW" \
+    "$OAI_AMF_IMAGE" "$MGMT_CIDR" <<'PY'
 import json
 import subprocess
 import sys
@@ -85,7 +87,8 @@ import yaml
 
 (src_dir, mysql_chart, dest_cn, dest_upf, dest_cluster,
  cn_ns, upf_ns, upstream_cn_ns, nad_parent, mysql_storage, mysql_sc,
- upf_name, upf_upstream, amf_n2, smf_n4, upf_n3, upf_n4, upf_n6, oai_gw, amf_image) = sys.argv[1:21]
+ upf_name, upf_upstream, amf_n2, smf_n4, upf_n3, upf_n4, upf_n6, oai_gw,
+ amf_image, mgmt_cidr) = sys.argv[1:22]
 
 dest_cn = Path(dest_cn)
 dest_upf = Path(dest_upf)
@@ -181,6 +184,11 @@ def patch_nad(doc):
                     "type": "static",
                     "addresses": [{"address": f"{addr}/24", "gateway": oai_gw}],
                 }
+                # N6: reach mgmt OpenSpeedTest (10.1.132.11) and other .132 services
+                if nad_name == f"{upf_name}-n6":
+                    plugin["ipam"]["routes"] = [
+                        {"dst": mgmt_cidr, "gw": oai_gw},
+                    ]
     doc["spec"]["config"] = json.dumps(cfg)
 
 
@@ -440,6 +448,7 @@ Environment:
   UPF_NF_NAME         UPF NFDeployment name (default: upf-core)
   UPF_UPSTREAM_NAME   Upstream name to rewrite (default: upf-edge)
   OAI_NAD_PARENT      Macvlan master NIC (default: ${SITE_IFACE})
+  MGMT_CIDR           Route on UPF N6 toward mgmt (default: 10.1.132.0/24)
   MYSQL_STORAGE       emptyDir (default) or pvc
   MYSQL_STORAGE_CLASS StorageClass when MYSQL_STORAGE=pvc (default: local-path)
   OAI_OPERATORS_REF   Git ref (default: main)

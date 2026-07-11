@@ -1,0 +1,20 @@
+apiVersion: ref.nephio.org/v1alpha1
+kind: Config
+metadata:
+  name: cuup-edge-cucp-regional
+  namespace: oai-ran-nephio-example-split-deploy
+spec:
+  config:
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFDeployment
+    metadata:
+      name: cucp-regional
+      namespace: oai-ran-nephio-example-split-deploy
+    spec:
+      provider: cucp.openairinterface.org
+      interfaces:
+      - name: e1
+        ipv4:
+          address: 10.1.139.62/24
+          gateway: 10.1.139.1
+        vlanID: 6

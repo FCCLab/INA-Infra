@@ -1,40 +1,40 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oai-ue
-  namespace: oai-nws-1ue
+  name: oai-ran-nephio-example-split-deploy
+  namespace: oai-ran-nephio-example-split-deploy
   labels:
-    app.kubernetes.io/name: oai-ue
+    app.kubernetes.io/name: oai-ran-nephio-example-split-deploy
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: oai-ue
+      app.kubernetes.io/name: oai-ran-nephio-example-split-deploy
   template:
     metadata:
       labels:
-        app: oai-ue
-        app.kubernetes.io/name: oai-ue
+        app: oai-ran-nephio-example-split-deploy
+        app.kubernetes.io/name: oai-ran-nephio-example-split-deploy
       annotations:
         k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"ue-sim-rf\",\n  \"interface\"\
-          : \"rf\",\n  \"ips\": [\"10.1.139.161/24\"],\n  \"gateways\": [\"10.1.139.1\"\
+          : \"rf\",\n  \"ips\": [\"10.1.139.160/24\"],\n  \"gateways\": [\"10.1.139.1\"\
           ]\n }\n]"
     spec:
-      serviceAccountName: oai-ue-sa
+      serviceAccountName: oai-ran-nephio-example-split-deploy-sa
       terminationGracePeriodSeconds: 5
       containers:
       - name: ue
-        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.2
+        image: docker.io/oaisoftwarealliance/oai-nr-ue:v2.3.0
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: -E --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr
-            10.1.139.114 --rfsimulator.serverport 4043 -C 3319680000 -r 106 --numerology
-            1 --band 78 --uicc0.imsi 001010000000001
+          value: --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr
+            10.1.139.113 --rfsimulator.serverport 4043 -C 3609120000 -r 51 --numerology
+            1 --ssb 234 --band 78 --uicc0.imsi 001010000000100
         - name: TZ
           value: Europe/Paris
         resources:
@@ -51,4 +51,4 @@ spec:
       volumes:
       - name: configuration
         configMap:
-          name: oai-ue-configmap
+          name: oai-ran-nephio-example-split-deploy-configmap

@@ -54,12 +54,13 @@ write_ran_gitops() {
   cucp_f1c="$(oai_macvlan_ip regional 1)"
   cucp_e1="$(oai_macvlan_ip regional 2)"
   cucp_name="cucp-${cluster}"
+  ran_nodes="${CLUSTER_CP_HOST[$cluster]},${CLUSTER_WORKER_HOST[$cluster]}"
 
   python3 - "$src_dir" "$dest_ops" "$dest_cucp" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_CUCP_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$cucp_name" "$cucp_n2" "$amf_n2" "$cucp_f1c" "$cucp_e1" "$OAI_MACVLAN_GW" \
     "$OAI_GNB_IMAGE" "$SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
-    "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+    "$OAI_DEBUG_SIDECAR_IMAGE" "$ran_nodes" <<'PY'
 import importlib.util
 import json
 import sys
@@ -69,7 +70,8 @@ import yaml
 
 (src_dir, dest_ops, dest_cucp, dest_cluster, ops_ns, cucp_ns, operator_image,
  cucp_name, cucp_n2, amf_n2, f1c_ip, e1_ip, oai_gw, gnb_image, nad_parent,
- debug_lib, debug_image) = sys.argv[1:18]
+ debug_lib, debug_image, ran_nodes) = sys.argv[1:19]
+ran_node_list = [n for n in ran_nodes.split(",") if n]
 spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
 oai_debug = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oai_debug)
@@ -122,8 +124,21 @@ purge(dest_cluster, (
 for path in sorted(src_dir.glob("*.yaml")):
     for doc in load_docs(path):
         if doc["kind"] == "Deployment":
-            containers = doc["spec"]["template"]["spec"]["containers"]
-            containers[0]["image"] = operator_image
+            pod_spec = doc["spec"]["template"]["spec"]
+            pod_spec["containers"][0]["image"] = operator_image
+            pod_spec["affinity"] = {
+                "nodeAffinity": {
+                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                        "nodeSelectorTerms": [{
+                            "matchExpressions": [{
+                                "key": "kubernetes.io/hostname",
+                                "operator": "In",
+                                "values": ran_node_list,
+                            }],
+                        }],
+                    },
+                },
+            }
         if doc["kind"] in cluster_kinds:
             write_doc(doc, dest_cluster)
         else:

@@ -1,0 +1,28 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFConfig
+metadata:
+  name: cuup-edge-config
+  namespace: oai-ran-nephio-example-split-deploy
+spec:
+  configRefs:
+  - apiVersion: workload.nephio.org/v1alpha1
+    kind: PLMN
+    metadata:
+      name: plmn
+      namespace: oai-ran-nephio-example-split-deploy
+    spec:
+      PLMNInfo:
+      - plmnID:
+          mcc: '001'
+          mnc: '01'
+        tac: 1
+        nssai:
+        - sd: ffffff
+          sst: 1
+  - apiVersion: workload.nephio.org/v1alpha1
+    kind: OAIConfig
+    metadata:
+      name: oai-nf-config
+      namespace: oai-ran-nephio-example-split-deploy
+    spec:
+      image: docker.io/oaisoftwarealliance/oai-nr-cuup:v2.3.0

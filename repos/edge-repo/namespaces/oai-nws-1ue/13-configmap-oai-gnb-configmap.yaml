@@ -5,14 +5,14 @@ metadata:
   namespace: oai-nws-1ue
 data:
   gnb.conf: "Active_gNBs = ( \"gnb-rfsim\");\nAsn1_verbosity = \"none\";\ngNBs =\n\
-    (\n {\n    gNB_ID = 0xe00;\n    gNB_name  =  \"gnb-rfsim\";\n    # AMF plmn_support_list\
+    (\n {\n    gNB_ID = 0xe01;\n    gNB_name  =  \"gnb-rfsim\";\n    # AMF plmn_support_list\
     \ tac: 1 (compose Open5GS used 81 \u2014 reject with Unknown PLMN)\n    tracking_area_code\
     \  =  1;\n    plmn_list = ({ mcc = 001; mnc = 01; mnc_length = 2; snssaiList =\
-    \ ({ sst = 1, sd = 0xffffff }) });\n    nr_cellid = 12345678;\n    min_rxtxtime\
+    \ ({ sst = 1, sd = 0xffffff }) });\n    nr_cellid = 12345679;\n    min_rxtxtime\
     \ = 6;\n    servingCellConfigCommon = (\n    {\n      # Match network-slicing/nws/gnb.sa.band78.106prb.rfsim.oai.yaml\n\
     \      # Do NOT set ra_ResponseWindow: OAI auto-selects sl20 (mu=1); sl10 (4)\
     \ is too\n      # short for Msg2 under RFsim/TDD (exceeded RA window / RAR failed).\n\
-    \      physCellId = 0;\n      absoluteFrequencySSB = 621312;\n      dl_frequencyBand\
+    \      physCellId = 1;\n      absoluteFrequencySSB = 621312;\n      dl_frequencyBand\
     \ = 78;\n      dl_absoluteFrequencyPointA = 620040;\n      dl_offstToCarrier =\
     \ 0;\n      dl_subcarrierSpacing = 1;\n      dl_carrierBandwidth = 106;\n    \
     \  initialDLBWPlocationAndBandwidth = 28875;\n      initialDLBWPsubcarrierSpacing\
@@ -35,8 +35,8 @@ data:
     \ = 4;\n      ssPBCH_BlockPower = -25;\n     }\n  );\n    SCTP :\n    {\n    \
     \    SCTP_INSTREAMS  = 2;\n        SCTP_OUTSTREAMS = 2;\n    };\n\n    amf_ip_address\
     \      = ( { ipv4       = \"10.1.139.10\"; } );\n\n    NETWORK_INTERFACES :\n\
-    \    {\n        GNB_IPV4_ADDRESS_FOR_NG_AMF              = \"10.1.139.113\";\n\
-    \        GNB_IPV4_ADDRESS_FOR_NGU                 = \"10.1.139.113\";\n      \
+    \    {\n        GNB_IPV4_ADDRESS_FOR_NG_AMF              = \"10.1.139.114\";\n\
+    \        GNB_IPV4_ADDRESS_FOR_NGU                 = \"10.1.139.114\";\n      \
     \  GNB_PORT_FOR_S1U                         = 2152;\n    };\n  }\n);\n\nMACRLCs\
     \ = (\n  {\n    num_cc = 1;\n    tr_s_preference = \"local_L1\";\n    tr_n_preference\
     \ = \"local_RRC\";\n    pusch_TargetSNRx10 = 200;\n    pucch_TargetSNRx10 = 200;\n\

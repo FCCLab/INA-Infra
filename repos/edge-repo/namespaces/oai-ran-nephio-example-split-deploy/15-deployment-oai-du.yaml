@@ -1,50 +1,55 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oai-gnb
-  namespace: oai-nws-1ue
+  name: oai-du
+  namespace: oai-ran-nephio-example-split-deploy
   labels:
-    app.kubernetes.io/name: oai-gnb
+    app.kubernetes.io/name: oai-du
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: oai-gnb
+      app.kubernetes.io/name: oai-du
   template:
     metadata:
       labels:
-        app: oai-gnb
-        app.kubernetes.io/name: oai-gnb
+        app: oai-du
+        app.kubernetes.io/name: oai-du
       annotations:
-        k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"gnb-n2n3\",\n  \"interface\"\
-          : \"n2\",\n  \"ips\": [\"10.1.139.114/24\"],\n  \"gateways\": [\"10.1.139.1\"\
+        k8s.v1.cni.cncf.io/networks: "[\n {\n  \"name\": \"du-edge-f1\",\n  \"interface\"\
+          : \"f1\",\n  \"ips\": [\"10.1.139.113/24\"],\n  \"gateways\": [\"10.1.139.1\"\
           ]\n }\n]"
     spec:
-      serviceAccountName: oai-gnb-sa
+      serviceAccountName: oai-du-sa
       terminationGracePeriodSeconds: 5
-      nodeSelector:
-        kubernetes.io/hostname: usrp
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - edge-0
+                - edge-1
       containers:
-      - name: gnb
-        image: 10.1.132.30:5000/oai-gnb:nws-v0.2
-        imagePullPolicy: IfNotPresent
+      - name: du
+        image: docker.io/oaisoftwarealliance/oai-gnb:v2.3.0
         securityContext:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: -E --rfsim --log_config.global_log_options level,nocolor,time
+          value: --sa --rfsim --log_config.global_log_options level,nocolor,time --telnetsrv
+            --telnetsrv.shrmod o1 --telnetsrv.listenaddr 192.168.74.2
         ports:
-        - name: n2
-          containerPort: 38412
+        - name: f1c
+          containerPort: 38472
           protocol: SCTP
-        - name: n3
+        - name: f1u
           containerPort: 2152
           protocol: UDP
-        - name: rfsim
-          containerPort: 4043
-          protocol: TCP
         resources:
           requests:
             cpu: 2000m
@@ -76,4 +81,4 @@ spec:
       volumes:
       - name: configuration
         configMap:
-          name: oai-gnb-configmap
+          name: oai-du-configmap

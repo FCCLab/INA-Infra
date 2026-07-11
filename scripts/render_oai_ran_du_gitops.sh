@@ -60,12 +60,14 @@ write_du_gitops() {
   du_f1="${DU_F1_IP[$cluster]}"
   du_name="du-${cluster}"
   cucp_name="cucp-${CUCP_CLUSTER}"
+  # Pin DU to CP/worker only (exclude usrp and any other edge nodes).
+  ran_nodes="${CLUSTER_CP_HOST[$cluster]},${CLUSTER_WORKER_HOST[$cluster]}"
 
   python3 - "$src_dir" "$dest_ops" "$dest_du" "$dest_cluster" \
     "$OAI_RAN_OPERATORS_NS" "$OAI_RAN_DU_NS" "$OAI_RAN_OPERATOR_IMAGE" \
     "$du_name" "$du_f1" "$CUCP_F1C_IP" "$CUCP_F1C_GW" "$cucp_name" \
     "$CUCP_CLUSTER" "$OAI_GNB_IMAGE" "$SITE_IFACE" "$SCRIPT_DIR/oai_debug_sidecar.py" \
-    "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
+    "$OAI_DEBUG_SIDECAR_IMAGE" "$ran_nodes" <<'PY'
 import importlib.util
 import json
 import sys
@@ -75,7 +77,8 @@ import yaml
 
 (src_dir, dest_ops, dest_du, dest_cluster, ops_ns, du_ns, operator_image,
  du_name, du_f1, cucp_f1c, cucp_f1c_gw, cucp_name, cucp_cluster, gnb_image,
- nad_parent, debug_lib, debug_image) = sys.argv[1:18]
+ nad_parent, debug_lib, debug_image, ran_nodes) = sys.argv[1:19]
+ran_node_list = [n for n in ran_nodes.split(",") if n]
 spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
 oai_debug = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oai_debug)
@@ -128,8 +131,21 @@ purge(dest_cluster, (
 for path in sorted(src_dir.glob("*.yaml")):
     for doc in load_docs(path):
         if doc["kind"] == "Deployment":
-            containers = doc["spec"]["template"]["spec"]["containers"]
-            containers[0]["image"] = operator_image
+            pod_spec = doc["spec"]["template"]["spec"]
+            pod_spec["containers"][0]["image"] = operator_image
+            pod_spec["affinity"] = {
+                "nodeAffinity": {
+                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                        "nodeSelectorTerms": [{
+                            "matchExpressions": [{
+                                "key": "kubernetes.io/hostname",
+                                "operator": "In",
+                                "values": ran_node_list,
+                            }],
+                        }],
+                    },
+                },
+            }
         if doc["kind"] in cluster_kinds:
             write_doc(doc, dest_cluster)
         else:
@@ -474,6 +490,19 @@ write_doc({
             "spec": {
                 "serviceAccountName": "oai-du-sa",
                 "terminationGracePeriodSeconds": 5,
+                "affinity": {
+                    "nodeAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": {
+                            "nodeSelectorTerms": [{
+                                "matchExpressions": [{
+                                    "key": "kubernetes.io/hostname",
+                                    "operator": "In",
+                                    "values": ran_node_list,
+                                }],
+                            }],
+                        },
+                    },
+                },
                 "containers": [{
                     "name": "du",
                     "image": gnb_image,

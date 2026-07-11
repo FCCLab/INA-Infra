@@ -4,7 +4,7 @@ OpenAirInterface 5G deployment across four workload clusters: **central** (5GC +
 
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
-Untagged **macvlan** on `enp7s0` (Multus NADs). **No host/netplan IP** on `.139` — only OAI pod interfaces. Logical gateway for NAD config: **`10.1.139.1`**. `10.1.138.0/24` stays for MetalLB / OpenSpeedTest only.
+Untagged **macvlan** on `enp7s0` (Multus NADs). Pods-only by default; for UPF N6 → mgmt (`10.1.132.0/24`, OpenSpeedTest), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on **central** so the host owns gateway **`10.1.139.1`** (macvlan shim + NAT). `10.1.138.0/24` stays for MetalLB / OpenSpeedTest VIPs only.
 
 **Range `10.1.139.10` – `10.1.139.209`:** four workload clusters × **50 IPs** each (`mgmt` is not on this network). Each cluster assigns macvlan IPs from **`base + 0`** upward. **Deployed today:** 5GC on **central**, 1 CU-CP on **regional**, 1 CU-UP + 1 DU on **edge**, 1 nrUE on **ue**.
 

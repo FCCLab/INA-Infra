@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: oai-ran-nephio-example-split-deploy
+  name: oai-ran-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ran-operator
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      name: oai-ran-operator
+      labels:
+        app.kubernetes.io/name: oai-ran-operator
+        app.kubernetes.io/component: controller
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      serviceAccountName: oai-ran-operator
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - regional-0
+                - regional-1
+      containers:
+      - name: operator
+        image: docker.io/nephio/oai-ran-controller:latest
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL

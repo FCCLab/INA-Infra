@@ -95,6 +95,9 @@ for doc in yaml.safe_load_all(Path(src).read_text()):
     if meta.get("annotations") is None:
         meta.pop("annotations", None)
     if kind in cluster_kinds:
+        if kind == "CustomResourceDefinition" and meta.get("name") == "bgppeers.metallb.io":
+            annotations = meta.setdefault("annotations", {})
+            annotations["client.lifecycle.config.k8s.io/mutation"] = "ignore"
         cluster_docs.append(doc)
     else:
         if kind != "Namespace" and "namespace" not in meta:

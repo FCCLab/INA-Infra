@@ -1,0 +1,43 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFDeployment
+metadata:
+  name: cuup-edge
+  namespace: oai-ran-nephio-example-split-deploy
+spec:
+  provider: cuup.openairinterface.org
+  interfaces:
+  - name: e1
+    ipv4:
+      address: 10.1.139.110/24
+      gateway: 10.1.139.1
+    vlanID: 6
+  - name: f1u
+    ipv4:
+      address: 10.1.139.111/24
+      gateway: 10.1.139.1
+    vlanID: 5
+  - name: n3
+    ipv4:
+      address: 10.1.139.112/24
+      gateway: 10.1.139.1
+    vlanID: 4
+  networkInstances:
+  - name: vpc-cu-e1
+    interfaces:
+    - e1
+  - name: vpc-cudu-f1
+    interfaces:
+    - f1u
+  - name: vpc-ran
+    interfaces:
+    - n3
+  parametersRefs:
+  - name: cuup-edge-config
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFConfig
+  - name: cuup-edge-cucp-regional
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+  - name: cuup-edge-upf-central
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
