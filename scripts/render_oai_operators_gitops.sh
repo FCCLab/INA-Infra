@@ -72,6 +72,7 @@ split_operator_manifests() {
     "$OAI_CN_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" "$amf_n2_vip" "$upf_n3_vip" \
     "$OAI_OPERATORS_REF" "$SCRIPT_DIR/oai_debug_sidecar.py" "$OAI_DEBUG_SIDECAR_IMAGE" <<'PY'
 import importlib.util
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -165,32 +166,29 @@ def patch_nf_conf(doc, upf_n3_vip):
     data = doc.get("data")
     if not isinstance(data, dict):
         return
-    upf_iface_block = """interfaceUpfInfoList:
-    {%- for iface in conf['interfaces'] %}
-    {%- if iface['name'] == 'n3' %}
-      - interfaceType: N3
-        ipv4EndpointAddresses:
-          - {{ iface['ipv4']['address'].split('/')[0] }}
-    {%- elif iface['name'] == 'n6' %}
-      - interfaceType: N6
-        ipv4EndpointAddresses:
-          - {{ iface['ipv4']['address'].split('/')[0] }}
-    {%- endif %}
-    {%- endfor %}
-    sNssaiUpfInfoList:"""
+    # NOTE: Do NOT inject interfaceUpfInfoList into UPF upf_info.
+    # OAI UPF (this image) fails to parse that block:
+    #   "Could not parse upf: cannot use operator[] with a string argument with array"
+    # and then NRF-registers SST=1/SD=FFFFFF DNN=default — breaking SMF UPF
+    # selection by S-NSSAI. N3 UL FTEID is fixed via SMF n3_local_ipv4 instead.
     for key, val in list(data.items()):
         if not isinstance(val, str):
             continue
         if name == "oai-smf-nf-conf":
-            val = val.replace("discover_upf: yes", "discover_upf: no")
+            # Prefer NRF UPF discovery by S-NSSAI when multiple slice UPFs are present.
+            val = val.replace("discover_upf: no", "discover_upf: yes")
             val = val.replace(
                 "enable_usage_reporting: no",
                 f"enable_usage_reporting: no\n        n3_local_ipv4: {upf_n3_vip}",
             )
         elif name == "oai-upf-nf-conf":
-            val = val.replace(
+            # Strip any previously injected interfaceUpfInfoList block.
+            val = re.sub(
+                r"upf_info:\n    interfaceUpfInfoList:.*?    sNssaiUpfInfoList:",
                 "upf_info:\n    sNssaiUpfInfoList:",
-                f"upf_info:\n    {upf_iface_block}",
+                val,
+                count=1,
+                flags=re.S,
             )
         data[key] = val
 

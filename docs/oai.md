@@ -1,53 +1,64 @@
 # OAI topology
 
-OpenAirInterface 5G deployment across four workload clusters: **central** (5GC + UPF), **regional** (CU-CP), **edge** (DU + rfsim RU + CU-UP), **ue** (nrUE RFsim client). All manifests are GitOps via Config Sync ([ip.md](ip.md) for addressing).
+OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip.md](ip.md)).
+
+**Primary slice stack (`oai-slice-deployment`):** shared OAI 5GC on **central** with **5 dedicated UPFs**, **CU-CP + 5 CU-UPs** on **regional**, **DU + 5 nrUEs** on **edge `usrp`**. Render: [`scripts/render_oai_slice_deployment_gitops.sh`](../scripts/render_oai_slice_deployment_gitops.sh).
 
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
-Untagged **macvlan** on `enp7s0` (Multus NADs). Pods-only by default; for UPF N6 → mgmt (`10.1.132.0/24`, OpenSpeedTest), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on **central** so the host owns gateway **`10.1.139.1`** (macvlan shim + NAT). `10.1.138.0/24` stays for MetalLB / OpenSpeedTest VIPs only.
+Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). For UPF N6 → mgmt, run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on **central**. Gateway **`10.1.139.1`**.
 
-**Range `10.1.139.10` – `10.1.139.209`:** four workload clusters × **50 IPs** each (`mgmt` is not on this network). Each cluster assigns macvlan IPs from **`base + 0`** upward. **Deployed today:** 5GC on **central**, 1 CU-CP on **regional**, 1 CU-UP + 1 DU on **edge**, 1 nrUE on **ue**.
+**Cluster slices** (50 IPs each):
 
-| Cluster | Base | Range | Deployed |
-|---------|------|-------|----------|
-| central | `.10` | `10.1.139.10` – `10.1.139.59` | 1× AMF, 1× SMF, 1× UPF |
-| regional | `.60` | `10.1.139.60` – `10.1.139.109` | **1× CU-CP** |
-| edge | `.110` | `10.1.139.110` – `10.1.139.159` | **1× CU-UP + 1× DU** |
-| ue | `.160` | `10.1.139.160` – `10.1.139.209` | **1× nrUE** |
+| Cluster | Base | Range | Role |
+|---------|------|-------|------|
+| central | `.10` | `.10`–`.59` | AMF/SMF `.10`–`.19`; **UPF pool `.20`–`.39`** |
+| regional | `.60` | `.60`–`.109` | CU-CP `.60`–`.69`; **CU-UP pool `.70`–`.89`** |
+| edge | `.110` | `.110`–`.159` | DU `.113`; UEs `.115`–`.119` on usrp |
+| ue | `.160` | `.160`–`.209` | (unused by oai-slice-deployment) |
 
-### Deployed RAN (3 NFs + UE)
+### Reserved pools (5 slices)
 
-| NF | Cluster | IPs (macvlan on `10.1.139.0/24`) |
-|----|---------|-------------------------------------|
-| **CU-CP** | regional | N2 `10.1.139.60` · F1-C `10.1.139.61` · E1 `10.1.139.62` |
-| **CU-UP** | edge | E1 `10.1.139.110` · F1-U `10.1.139.111` · N3 `10.1.139.112` |
-| **DU** | edge | F1 `10.1.139.113` |
-| **nrUE** | ue | RF `10.1.139.160` (RFsim client → edge DU `:4043`) |
+| Slice | SST/SD | UPF N3/N4/N6 | CU-UP E1/F1-U/N3 | UE RF / IMSI |
+|-------|--------|--------------|------------------|--------------|
+| 1 | `1`/`000001` | `.20`/`.21`/`.22` | `.70`/`.71`/`.72` | `.115` / `…101` |
+| 2 | `1`/`000002` | `.23`/`.24`/`.25` | `.73`/`.74`/`.75` | `.116` / `…102` |
+| 3 | `1`/`000003` | `.26`/`.27`/`.28` | `.76`/`.77`/`.78` | `.117` / `…103` |
+| 4 | `1`/`000004` | `.29`/`.30`/`.31` | `.79`/`.80`/`.81` | `.118` / `…104` |
+| 5 | `1`/`000005` | `.32`/`.33`/`.34` | `.82`/`.83`/`.84` | `.119` / `…105` |
 
-### Deployed 5GC (central)
+Shared: AMF N2 `.10`, SMF N4 `.12`, CU-CP N2/F1-C/E1 `.60`/`.61`/`.62`, DU F1 `.113`. N3 peer: CU-UPn → UPFn.
 
-One **AMF**, one **SMF**, one **UPF** (`upf-core` — three macvlan interfaces).
+### Shared 5GC CP (central `.10`–`.19`)
 
 | NF | Offset | Interface | IP |
 |----|--------|-----------|-----|
 | AMF | `+0` | N2 | `10.1.139.10` |
-| UPF (`upf-core`) | `+1` | N3 | `10.1.139.11` |
+| UPF (`upf-core`, legacy) | `+1` | N3 | `10.1.139.11` |
 | SMF | `+2` | N4 | `10.1.139.12` |
 | UPF (`upf-core`) | `+3` | N4 | `10.1.139.13` |
 | UPF (`upf-core`) | `+4` | N6 | `10.1.139.14` |
 
-### Cross-cluster peer pairs
+### Cross-cluster peer pairs (`oai-slice-deployment`)
 
 ```
-regional CU-CP N2   10.1.139.60   ──SCTP──►  AMF N2      10.1.139.10   (central)
-edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.61   (regional)
-edge CU-UP E1       10.1.139.110  ──SCTP──►  CU-CP E1    10.1.139.62   (regional)
-edge CU-UP N3       10.1.139.112  ──GTP-U──►  UPF N3      10.1.139.11   (central)
-central SMF N4      10.1.139.12   ──PFCP──►  UPF N4      10.1.139.13   (central)
-ue nrUE RFsim       10.1.139.160  ──RFsim──►  DU rfsim    10.1.139.113:4043 (edge)
+regional CU-CP N2   10.1.139.60   ──SCTP──►  AMF N2      10.1.139.10
+edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.61
+regional CU-UPn E1  .70+3(n-1)    ──SCTP──►  CU-CP E1    10.1.139.62
+regional CU-UPn N3  .72+3(n-1)    ──GTP-U──► UPFn N3     .20+3(n-1)
+central SMF N4      10.1.139.12   ──PFCP──►  UPFn N4     .21+3(n-1)
+edge UEn RFsim      .115+(n-1)    ──RFsim──► DU rfsim    10.1.139.113:4043
 ```
 
-NRF / UDR / SMF SBI stay **ClusterIP** inside `oai-cn` (unchanged). DNN pool behind UPF N6 stays **`10.1.0.0/24`** (UE PDU address, e.g. `10.1.0.2`).
+DNN pools: UPF slice *n* uses **`10.1.n.0/24`**.
+
+Helpers: `upf_slice_n3` / `cuup_slice_e1` / … in [`scripts/cluster_lib.sh`](../scripts/cluster_lib.sh).
+
+---
+
+## Legacy notes (pre-slice-deployment)
+
+The sections below describe the older single-UPF / single-CU-UP layout and operator details that still apply to shared CN plumbing.
 
 ### Slice offsets
 

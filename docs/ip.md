@@ -43,7 +43,7 @@ DHCP leases on mgmt start at `.100` ([services/.env](services/.env)). Pi-hole st
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-OAI 5GC on **central**; OAI **CU-CP** on **regional**; OAI **DU + rfsim RU** and **CU-UP** on **edge**; OAI **nrUE** (RFsim client) on **ue** — macvlan on **`10.1.139.0/24`** ([oai.md](oai.md)).
+OAI 5GC on **central** (shared AMF/SMF + **5 per-slice UPFs** in `.20–.39`); **CU-CP + 5 CU-UPs** on **regional** (CU-UP pool `.70–.89`); **DU + 5 nrUEs** on **edge `usrp`** — namespace `oai-slice-deployment`, macvlan **`10.1.139.0/24`** ([oai.md](oai.md)). Render: `./scripts/render_oai_slice_deployment_gitops.sh`.
 
 ## Cluster-local services (no MetalLB VIP)
 
@@ -117,6 +117,7 @@ Reach workload APIs on `10.1.137.0/24`, MetalLB VIPs on `10.1.138.0/24`, from th
 | OAI RAN CU-CP (GitOps, regional) | [scripts/render_oai_ran_gitops.sh](scripts/render_oai_ran_gitops.sh) |
 | OAI RAN DU + rfsim RU (GitOps, edge) | [scripts/render_oai_ran_du_gitops.sh](scripts/render_oai_ran_du_gitops.sh) |
 | OAI RAN CU-UP (GitOps, edge) | [scripts/render_oai_ran_cuup_gitops.sh](scripts/render_oai_ran_cuup_gitops.sh) |
+| OAI 5-slice split RAN + UPFs | [scripts/render_oai_slice_deployment_gitops.sh](scripts/render_oai_slice_deployment_gitops.sh) |
 | local-path StorageClass (GitOps render) | [scripts/render_local_path_gitops.sh](scripts/render_local_path_gitops.sh) |
 | Push GitOps to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](bringup/03_push_to_git_repos/push_git_repos.sh) |
 | Config Sync status | [scripts/check-configsync.sh](scripts/check-configsync.sh) |

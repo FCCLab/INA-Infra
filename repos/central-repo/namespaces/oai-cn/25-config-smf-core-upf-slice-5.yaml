@@ -1,0 +1,47 @@
+apiVersion: ref.nephio.org/v1alpha1
+kind: Config
+metadata:
+  name: smf-core-upf-slice-5
+  namespace: oai-cn
+spec:
+  config:
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFDeployment
+    metadata:
+      name: upf-slice-5
+      namespace: oai-upf
+    spec:
+      provider: upf.openairinterface.org
+      capacity:
+        maxDownlinkThroughput: 5G
+        maxUplinkThroughput: 5G
+      interfaces:
+      - name: n3
+        ipv4:
+          address: 10.1.139.32/24
+          gateway: 10.1.139.1
+        vlanID: 4
+      - name: n4
+        ipv4:
+          address: 10.1.139.33/24
+          gateway: 10.1.139.1
+        vlanID: 2
+      - name: n6
+        ipv4:
+          address: 10.1.139.34/24
+          gateway: 10.1.139.1
+        vlanID: 3
+      networkInstances:
+      - name: vpc-internal
+        interfaces:
+        - n4
+      - name: vpc-internet
+        dataNetworks:
+        - name: oai5
+          pool:
+          - prefix: 10.1.5.0/24
+        interfaces:
+        - n6
+      - name: vpc-ran
+        interfaces:
+        - n3

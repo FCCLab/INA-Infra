@@ -233,6 +233,42 @@ oai_macvlan_ip() {
   printf '%s.%s' "$OAI_MACVLAN_PREFIX" "$((OAI_MACVLAN_BASE[$cluster] + offset))"
 }
 
+# --- oai-slice-deployment: 5 dedicated UPFs + 5 CU-UPs (docs/oai.md) ---
+# UPF pool  .20–.39 (central offsets 10–29): 3 IPs/slice (N3,N4,N6)
+# CU-UP pool .70–.89 (regional offsets 10–29): 3 IPs/slice (E1,F1-U,N3)
+OAI_SLICE_COUNT="${OAI_SLICE_COUNT:-5}"
+OAI_UPF_SLICE_OFFSET0="${OAI_UPF_SLICE_OFFSET0:-10}"   # central +10 → .20
+OAI_CUUP_SLICE_OFFSET0="${OAI_CUUP_SLICE_OFFSET0:-10}" # regional +10 → .70
+OAI_SLICE_DU_OFFSET="${OAI_SLICE_DU_OFFSET:-3}"        # edge +3 → .113 (F1)
+OAI_SLICE_DU_RF_OFFSET="${OAI_SLICE_DU_RF_OFFSET:-4}"  # edge +4 → .114 (rfsim IQ)
+OAI_SLICE_UE_OFFSET0="${OAI_SLICE_UE_OFFSET0:-5}"      # edge +5 → .115
+# CU-CP on edge (same L2 as DU; low F1 RTT). Uses free edge +0..+2.
+OAI_SLICE_CUCP_N2_OFFSET="${OAI_SLICE_CUCP_N2_OFFSET:-0}"   # .110
+OAI_SLICE_CUCP_F1C_OFFSET="${OAI_SLICE_CUCP_F1C_OFFSET:-1}" # .111
+OAI_SLICE_CUCP_E1_OFFSET="${OAI_SLICE_CUCP_E1_OFFSET:-2}"   # .112
+
+# Slice index 1..N → central UPF N3/N4/N6
+upf_slice_n3() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3)); }
+upf_slice_n4() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3 + 1)); }
+upf_slice_n6() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3 + 2)); }
+
+# Slice index 1..N → regional CU-UP E1/F1-U/N3
+cuup_slice_e1() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3)); }
+cuup_slice_f1u() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3 + 1)); }
+cuup_slice_n3() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3 + 2)); }
+
+oai_slice_du_f1() { oai_macvlan_ip edge "$OAI_SLICE_DU_OFFSET"; }
+oai_slice_du_rf() { oai_macvlan_ip edge "$OAI_SLICE_DU_RF_OFFSET"; }
+oai_slice_ue_rf() { oai_macvlan_ip edge $((OAI_SLICE_UE_OFFSET0 + $1 - 1)); }
+oai_slice_cucp_n2() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_N2_OFFSET"; }
+oai_slice_cucp_f1c() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_F1C_OFFSET"; }
+oai_slice_cucp_e1() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_E1_OFFSET"; }
+
+# NSSAI SD for slice N (hex without 0x): 000001 .. 000005
+oai_slice_sd_hex() { printf '%06x' "$1"; }
+# IMSI for slice UE N (uses pre-provisioned 001010000000101..105)
+oai_slice_imsi() { printf '00101000000010%d' "$1"; }
+
 # Regional/edge CU-CP N2 on site macvlan .139.
 cucp_n2_vip() {
   printf '%s' "${CLUSTER_AMF_N2_VIP[$1]}"

@@ -22,12 +22,18 @@ data:
     \      port: 80\n      api_version: v1\n############## NF-specific configuration\n\
     smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
     \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
-    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
+    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: yes\n  #\
     \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
-    \  {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n        enable_usage_reporting:\
-    \ no\n        n3_local_ipv4: 10.1.139.11\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4:\
-    \ {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns'] }}\n    primary_ipv6:\
-    \ \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
+    \  {% set n3_addrs = ['10.1.139.20', '10.1.139.23', '10.1.139.26', '10.1.139.29',\
+    \ '10.1.139.32'] %}\n    {% set slice_sds = ['000001', '000002', '000003', '000004',\
+    \ '000005'] %}\n    {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n\
+    \        enable_usage_reporting: no\n        n3_local_ipv4: {{ n3_addrs[loop.index0]\
+    \ if loop.index0 < (n3_addrs|length) else n3_addrs[0] }}\n      upf_info:\n  \
+    \      sNssaiUpfInfoList:\n          - sNssai:\n              sst: 1\n       \
+    \       sd: \"{{ slice_sds[loop.index0] if loop.index0 < (slice_sds|length) else\
+    \ slice_sds[0] }}\"\n            dnnUpfInfoList:\n              - dnn: oai{{ loop.index\
+    \ }}\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4: {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns']\
+    \ }}\n    primary_ipv6: \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
     \ }}\n    secondary_ipv6: \"2001:4860:4860::8888\"\n  ims:\n    pcscf_ipv4: \"\
     192.168.70.139\"\n    pcscf_ipv6: \"fe80::7915:f408:1787:db8b\"\n  # the DNN you\
     \ configure here should be configured in \"dnns\"\n  # follows the SmfInfo datatype\

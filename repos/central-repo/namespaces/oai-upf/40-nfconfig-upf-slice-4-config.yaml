@@ -1,0 +1,25 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFConfig
+metadata:
+  name: upf-slice-4-config
+  namespace: oai-upf
+spec:
+  configRefs:
+  - apiVersion: cellular.nephio.org/v1alpha1
+    kind: PLMN
+    metadata:
+      name: oai-plmn
+    spec:
+      plmnInfo:
+      - plmnID:
+          mcc: '001'
+          mnc: '01'
+        tac: 81
+        nssai:
+        - sst: 1
+          sd: '000004'
+          dnnInfo:
+          - name: oai4
+            sessionType: ipv4
+            dns: 1.1.1.1
+            subnet: 10.1.4.0/24

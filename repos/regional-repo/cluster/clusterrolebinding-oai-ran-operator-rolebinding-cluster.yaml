@@ -9,4 +9,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: oai-ran-operator
-  namespace: oai-ran-nephio-example-split-deploy
+  namespace: oai-slice-deployment

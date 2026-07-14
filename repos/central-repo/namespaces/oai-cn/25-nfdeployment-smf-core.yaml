@@ -22,6 +22,18 @@ spec:
   - name: smf-core-config
     apiVersion: workload.nephio.org/v1alpha1
     kind: NFConfig
-  - name: smf-core-upf-core
+  - name: smf-core-upf-slice-1
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+  - name: smf-core-upf-slice-2
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+  - name: smf-core-upf-slice-3
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+  - name: smf-core-upf-slice-4
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+  - name: smf-core-upf-slice-5
     apiVersion: ref.nephio.org/v1alpha1
     kind: Config

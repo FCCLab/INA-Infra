@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-4-configmap
+  namespace: oai-slice-deployment
+data:
+  ue.conf: "uicc0 = {\n  imsi = \"001010000000104\";\n  key = \"fec86ba6eb707ed08905757b1bb44b8f\"\
+    ;\n  opc = \"C42449363BBAD02B66D16BC975D77CC1\";\n  dnn = \"oai4\";\n  nssai_sst\
+    \ = 1;\n  nssai_sd = 0x000004;\n}\n\nthread-pool = \"-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1\"\
+    ;\n\nrfsimulator = {\n  serveraddr = \"10.1.139.114\";\n}\n\nlog_config = {\n\
+    \  global_log_options = \"level,nocolor,time\";\n}\n\nchannelmod = {\n  max_chan\
+    \ = 10;\n  modellist = \"modellist_rfsimu_1\";\n  modellist_rfsimu_1 = (\n   \
+    \ {\n      model_name = \"rfsimu_channel_enB0\";\n      type = \"AWGN\";\n   \
+    \   ploss_dB = 20;\n      noise_power_dB = -4;\n      forgetfact = 0;\n      offset\
+    \ = 0;\n      ds_tdl = 0;\n    },\n    {\n      model_name = \"rfsimu_channel_ue0\"\
+    ;\n      type = \"AWGN\";\n      ploss_dB = 20;\n      noise_power_dB = -2;\n\
+    \      forgetfact = 0;\n      offset = 0;\n      ds_tdl = 0;\n    }\n  );\n}\n"
