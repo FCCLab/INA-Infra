@@ -532,7 +532,7 @@ Environment:
   VERIFY_GW    default: 1
   NEPHIO_VM_PREFIX  default: Nephio-
 
-Docs: docs/mgmt.md
+Docs: nephio/docs/mgmt.md
 EOF
 }
 

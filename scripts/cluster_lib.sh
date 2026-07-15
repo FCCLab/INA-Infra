@@ -57,7 +57,7 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.138.151
   [ue]=10.1.138.176
 )
-# OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md.
+# OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in nephio/docs/ip.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
 OAI_MACVLAN_PREFIX="${OAI_MACVLAN_PREFIX:-10.1.139}"
 declare -A OAI_MACVLAN_BASE=(
@@ -233,7 +233,7 @@ oai_macvlan_ip() {
   printf '%s.%s' "$OAI_MACVLAN_PREFIX" "$((OAI_MACVLAN_BASE[$cluster] + offset))"
 }
 
-# --- oai-slice-deployment: 5 dedicated UPFs + 5 CU-UPs (docs/oai.md) ---
+# --- oai-slice-deployment: 5 dedicated UPFs + 5 CU-UPs (docs/oai.md, nephio/docs/ip.md) ---
 # UPF pool  .20–.39 (central offsets 10–29): 3 IPs/slice (N3,N4,N6)
 # CU-UP pool .70–.89 (regional offsets 10–29): 3 IPs/slice (E1,F1-U,N3)
 OAI_SLICE_COUNT="${OAI_SLICE_COUNT:-5}"
@@ -246,6 +246,13 @@ OAI_SLICE_UE_OFFSET0="${OAI_SLICE_UE_OFFSET0:-5}"      # edge +5 → .115
 OAI_SLICE_CUCP_N2_OFFSET="${OAI_SLICE_CUCP_N2_OFFSET:-0}"   # .110
 OAI_SLICE_CUCP_F1C_OFFSET="${OAI_SLICE_CUCP_F1C_OFFSET:-1}" # .111
 OAI_SLICE_CUCP_E1_OFFSET="${OAI_SLICE_CUCP_E1_OFFSET:-2}"   # .112
+# FlexRIC / xApp on edge macvlan (after UEs .115–.119)
+OAI_SLICE_FLEXRIC_OFFSET="${OAI_SLICE_FLEXRIC_OFFSET:-10}" # .120 nearRT-RIC E2
+OAI_SLICE_XAPP_E2_OFFSET="${OAI_SLICE_XAPP_E2_OFFSET:-11}" # .121 xApp E42
+# Public Swagger on edge mgmt IP (10.1.132.0/24) — reachable from operator LAN.
+# MetalLB .138 is not routed from mgmt; use kube-proxy externalIPs like Gitea.
+OAI_XAPP_SWAGGER_VIP="${OAI_XAPP_SWAGGER_VIP:-${CLUSTER_MGMT_IP[edge]}}"
+OAI_XAPP_API_PORT="${OAI_XAPP_API_PORT:-18080}"
 
 # Slice index 1..N → central UPF N3/N4/N6
 upf_slice_n3() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3)); }
@@ -263,6 +270,8 @@ oai_slice_ue_rf() { oai_macvlan_ip edge $((OAI_SLICE_UE_OFFSET0 + $1 - 1)); }
 oai_slice_cucp_n2() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_N2_OFFSET"; }
 oai_slice_cucp_f1c() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_F1C_OFFSET"; }
 oai_slice_cucp_e1() { oai_macvlan_ip edge "$OAI_SLICE_CUCP_E1_OFFSET"; }
+oai_slice_flexric() { oai_macvlan_ip edge "$OAI_SLICE_FLEXRIC_OFFSET"; }
+oai_slice_xapp_e2() { oai_macvlan_ip edge "$OAI_SLICE_XAPP_E2_OFFSET"; }
 
 # NSSAI SD for slice N (hex without 0x): 000001 .. 000005
 oai_slice_sd_hex() { printf '%06x' "$1"; }

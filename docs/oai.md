@@ -1,6 +1,6 @@
 # OAI topology
 
-OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip.md](ip.md)).
+OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip.md](../nephio/docs/ip.md)).
 
 **Primary slice stack (`oai-slice-deployment`):** shared OAI 5GC on **central** with **5 dedicated UPFs**, **CU-CP + 5 CU-UPs** on **regional**, **DU + 5 nrUEs** on **edge `usrp`**. Render: [`scripts/render_oai_slice_deployment_gitops.sh`](../scripts/render_oai_slice_deployment_gitops.sh).
 
@@ -247,7 +247,7 @@ All OAI data-plane interfaces use Multus **macvlan** on `enp7s0` in **`10.1.139.
 | **N4** (SMF ↔ UPF) | PFCP :8805 | SMF `10.1.139.12` | UPF `10.1.139.13` | central |
 | **N6** (UPF ↔ data net) | IP | UPF `10.1.139.14` | DNN pool `10.1.0.0/24` | central |
 
-Cross-cluster traffic uses the site L2 fabric (`enp7s0` → vm-sw), not Kubernetes pod networking. SBI between 5GC NFs stays **ClusterIP** inside `oai-cn`. MetalLB / OpenSpeedTest remain on **`10.1.138.0/24`** only ([ip.md](ip.md)).
+Cross-cluster traffic uses the site L2 fabric (`enp7s0` → vm-sw), not Kubernetes pod networking. SBI between 5GC NFs stays **ClusterIP** inside `oai-cn`. MetalLB / OpenSpeedTest remain on **`10.1.138.0/24`** only ([ip.md](../nephio/docs/ip.md)).
 
 ## Control vs user plane
 

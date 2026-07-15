@@ -85,6 +85,6 @@ Verify:
 ./scripts/check-configsync.sh
 ```
 
-OAI operators and core NFs run on **central** only (`render_oai_*` scripts reject other clusters). NRF/UDR use `ClusterIP`; AMF/UPF use fixed MetalLB VIPs on central (see [docs/ip.md](../../docs/ip.md)).
+OAI operators and core NFs run on **central** only (`render_oai_*` scripts reject other clusters). NRF/UDR use `ClusterIP`; AMF/UPF use fixed MetalLB VIPs on central (see [ip.md](ip.md)).
 
-IP pools, VIPs, and node addresses: [docs/ip.md](../../docs/ip.md).
+IP pools, VIPs, and node addresses: [ip.md](ip.md).

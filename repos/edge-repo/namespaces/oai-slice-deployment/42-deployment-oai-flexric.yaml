@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-flexric
+  namespace: oai-slice-deployment
+  labels:
+    app.kubernetes.io/name: oai-flexric
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-flexric
+  template:
+    metadata:
+      labels:
+        app: oai-flexric
+        app.kubernetes.io/name: oai-flexric
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "flexric-edge-e2", "interface": "e2",
+          "ips": ["10.1.139.120/24"], "gateways": ["10.1.139.1"]}]'
+    spec:
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/hostname: edge-1
+      containers:
+      - name: flexric
+        image: 10.1.132.30:5000/oai-flexric:nws-v0.5-amd64
+        imagePullPolicy: IfNotPresent
+        workingDir: /tmp
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        command:
+        - stdbuf
+        - -o0
+        - nearRT-RIC
+        env:
+        - name: E2AP_VERSION
+          value: E2AP_V3
+        - name: KPM_VERSION
+          value: KPM_V3_00
+        - name: ASAN_OPTIONS
+          value: detect_leaks=0
+        volumeMounts:
+        - name: configuration
+          mountPath: /usr/local/etc/flexric/flexric.conf
+          subPath: flexric.conf
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-flexric-configmap

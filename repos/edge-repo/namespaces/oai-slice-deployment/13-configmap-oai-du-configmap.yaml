@@ -64,4 +64,5 @@ data:
     \  IQfile = \"/tmp/rfsimulator.iqs\"\n}\n\nlog_config :\n{\n    global_log_level\
     \ = \"info\";\n    hw_log_level = \"info\";\n    phy_log_level = \"info\";\n \
     \   mac_log_level = \"info\";\n    rlc_log_level = \"info\";\n    f1ap_log_level\
-    \ = \"info\";\n};\n"
+    \ = \"info\";\n};\n\ne2_agent = {\n  near_ric_ip_addr = \"10.1.139.120\";\n  sm_dir\
+    \ = \"/usr/local/lib/flexric/\";\n};\n"

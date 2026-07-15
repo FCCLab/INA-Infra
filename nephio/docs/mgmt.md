@@ -2,7 +2,7 @@
 
 Operator and cluster **mgmt** traffic uses **`10.1.132.0/24`** on guest **`enp1s0`**. Workload VMs reach that L2 via host bridge **`br-mgmt`**, with physical **`eno1`** enslaved directly as the uplink port.
 
-Site / Kubernetes traffic stays on **`br-int-*`** via a second virtio NIC (`enp7s0`). See [ip.md](ip.md) and [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md).
+Site / Kubernetes traffic stays on **`br-int-*`** via a second virtio NIC (`enp7s0`). See [ip.md](ip.md) and [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md).
 
 ## Host topology
 
@@ -60,7 +60,7 @@ Each workload VM has **two** libvirt NICs:
 | `enp1s0` | bridge | `br-mgmt` | `10.1.132.210/24` — SSH, default route, DNS, dashboard `:30443` |
 | `enp7s0` | bridge | `br-int-<site>` | `10.1.137.110/24` + `10.1.138.110/24` — K8s API `:6443`, Flannel, MetalLB |
 
-Inside the guest, mgmt is configured by [`utils/netplan/*/55-nephio-mgmt.yaml`](../utils/netplan/central-0/55-nephio-mgmt.yaml) (`enp1s0`, default `via 10.1.132.1`, DNS `10.1.132.200`). Deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
+Inside the guest, mgmt is configured by [`utils/netplan/*/55-nephio-mgmt.yaml`](../../utils/netplan/central-0/55-nephio-mgmt.yaml) (`enp1s0`, default `via 10.1.132.1`, DNS `10.1.132.200`). Deploy with [`scripts/setup_ip.sh`](../../scripts/setup_ip.sh).
 
 ## Direct `eno1` on `br-mgmt`
 
@@ -68,7 +68,7 @@ Physical **`eno1`** is a **bridge port** on **`br-mgmt`** (no macvlan). VM mgmt 
 
 **Requirement:** `eno1` must have **no macvtap/macvlan children**. All Nephio VM mgmt NICs attach to `br-mgmt` via `setup_mgmt_bridge.sh`.
 
-Script: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh).
+Script: [`scripts/setup_mgmt_bridge.sh`](../../scripts/setup_mgmt_bridge.sh).
 
 | Host object | Role |
 |-------------|------|
@@ -126,7 +126,7 @@ Repeat per VM (stable MACs match prior `direct eno1` attachments). Current attac
 | Nephio-UE-0 | `10.1.132.240` | vnet235 | `52:54:00:9b:0e:bc` |
 | Nephio-UE-1 | `10.1.132.241` | vnet237 | `52:54:00:dc:d6:54` |
 
-Site NICs remain on `br-int-*` via [`bringup/00_testbed/attach_vm.sh`](../bringup/00_testbed/attach_vm.sh).
+Site NICs remain on `br-int-*` via [`bringup/00_testbed/attach_vm.sh`](../../bringup/00_testbed/attach_vm.sh).
 
 ## Node addresses (mgmt / `enp1s0`)
 
@@ -145,7 +145,7 @@ Site NICs remain on `br-int-*` via [`bringup/00_testbed/attach_vm.sh`](../bringu
 
 K8s API (`:6443`) uses the **`.137`** address on control-plane nodes. Default route on all nodes: **`via 10.1.132.1`**. DNS: **`10.1.132.200`** (Pi-hole on `mgmt-0`).
 
-Full VIP and pool tables: [ip.md](ip.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config).
+Full VIP and pool tables: [ip.md](ip.md). SSH aliases: [`utils/ssh_config/config`](../../utils/ssh_config/config).
 
 ## Verify
 
@@ -231,13 +231,13 @@ Central / regional / UE site bridges are **host-internal** unless you add anothe
 | **Site (edge)** | `br-int-edge` | **`eno2`** (optional) | `enp7s0` (Edge VMs) | `10.1.137.0/24`, `10.1.138.0/24` |
 | **Site (other)** | `br-int-central` / `regional` / `ue` | none (internal `vnet*` only) | `enp7s0` | `10.1.137.0/24`, `10.1.138.0/24` |
 
-One NIC → one bridge. **`eno1` is for `br-mgmt` only.** Edge wire: [`scripts/br-int-edge_2_eno2.sh`](../scripts/br-int-edge_2_eno2.sh). Mgmt wire: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh).
+One NIC → one bridge. **`eno1` is for `br-mgmt` only.** Edge wire: [`scripts/br-int-edge_2_eno2.sh`](../../scripts/br-int-edge_2_eno2.sh). Mgmt wire: [`scripts/setup_mgmt_bridge.sh`](../../scripts/setup_mgmt_bridge.sh).
 
 **edge-0:** mgmt `10.1.132.230` on `enp1s0` ← `br-mgmt` ← `eno1`; site `10.1.137.130` + `10.1.138.130` on `enp7s0` ← `br-int-edge` ← `eno2` (optional).
 
 **central-0:** same mgmt path; site on `br-int-central` (`10.1.137.10/24`) — internal, no `eno2` by default.
 
-Site interconnect (`br-int-*` → `vm-sw-*` → `br-ext-*`): [testbed readme](../bringup/00_testbed/readme.md).
+Site interconnect (`br-int-*` → `vm-sw-*` → `br-ext-*`): [testbed readme](../../bringup/00_testbed/readme.md).
 
 ## Persistence
 
@@ -254,8 +254,8 @@ Libvirt `--config` attachments survive reboot once the bridges exist.
 
 | Script | Purpose |
 |--------|---------|
-| [scripts/setup_mgmt_bridge.sh](../scripts/setup_mgmt_bridge.sh) | Create `br-mgmt`, enslave `eno1`, attach VMs |
-| [scripts/br-int-edge_2_eno2.sh](../scripts/br-int-edge_2_eno2.sh) | Optional: enslave `eno2` to `br-int-edge` |
-| [scripts/setup_ip.sh](../scripts/setup_ip.sh) | Push mgmt + site netplan to guests |
-| [scripts/bringup_cluster.sh](../scripts/bringup_cluster.sh) | Kubernetes bootstrap (mgmt on `enp1s0`) |
-| [bringup/00_testbed/attach_vm.sh](../bringup/00_testbed/attach_vm.sh) | Attach site NIC to `br-int-*` |
+| [scripts/setup_mgmt_bridge.sh](../../scripts/setup_mgmt_bridge.sh) | Create `br-mgmt`, enslave `eno1`, attach VMs |
+| [scripts/br-int-edge_2_eno2.sh](../../scripts/br-int-edge_2_eno2.sh) | Optional: enslave `eno2` to `br-int-edge` |
+| [scripts/setup_ip.sh](../../scripts/setup_ip.sh) | Push mgmt + site netplan to guests |
+| [scripts/bringup_cluster.sh](../../scripts/bringup_cluster.sh) | Kubernetes bootstrap (mgmt on `enp1s0`) |
+| [bringup/00_testbed/attach_vm.sh](../../bringup/00_testbed/attach_vm.sh) | Attach site NIC to `br-int-*` |
