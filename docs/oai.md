@@ -2,32 +2,34 @@
 
 OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip.md](../nephio/docs/ip.md)).
 
-**Primary slice stack (`oai-slice-deployment`):** shared OAI 5GC on **central** with **5 dedicated UPFs**, **CU-CP + 5 CU-UPs** on **regional**, **DU + 5 nrUEs** on **edge `usrp`**. Render: [`scripts/render_oai_slice_deployment_gitops.sh`](../scripts/render_oai_slice_deployment_gitops.sh).
+**Primary slice stack (`oai-slice-deployment`):** shared OAI 5GC CP on **central**; **co-located UPF + CU-UP** per slice — slice1 **central**, slice2 **regional**, slices 3–5 **edge**; **CU-CP + DU + 5 nrUEs** on **edge `usrp`**. Render: [`scripts/render_oai_slice_deployment_gitops.sh`](../scripts/render_oai_slice_deployment_gitops.sh).
 
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
-Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). For UPF N6 → mgmt, run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on **central**. Gateway **`10.1.139.1`**.
+Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). For UPF N6 → mgmt (`10.1.132.0/24`), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on site CPs (**central-0**, **regional-0**, **edge-0**). Per-site GWs on shared L2: **`.1` / `.2` / `.3`**. Ping/throughput default to mgmt-0 **`10.1.132.200`**.
 
 **Cluster slices** (50 IPs each):
 
 | Cluster | Base | Range | Role |
 |---------|------|-------|------|
-| central | `.10` | `.10`–`.59` | AMF/SMF `.10`–`.19`; **UPF pool `.20`–`.39`** |
-| regional | `.60` | `.60`–`.109` | CU-CP `.60`–`.69`; **CU-UP pool `.70`–`.89`** |
-| edge | `.110` | `.110`–`.159` | DU `.113`; UEs `.115`–`.119` on usrp |
+| central | `.10` | `.10`–`.59` | AMF/SMF `.10`–`.19`; **UPF IP pool `.20`–`.39`** (slice1 pods here) |
+| regional | `.60` | `.60`–`.109` | **CU-UP IP pool `.70`–`.89`** (slice2 pods here) |
+| edge | `.110` | `.110`–`.159` | CU-CP/DU/UE/RIC `.110`–`.121`; slices 3–5 UPF+CU-UP pods |
 | ue | `.160` | `.160`–`.209` | (unused by oai-slice-deployment) |
 
-### Reserved pools (5 slices)
+### Reserved pools (5 slices — old IPs, co-located pods)
 
-| Slice | SST/SD | UPF N3/N4/N6 | CU-UP E1/F1-U/N3 | UE RF / IMSI |
-|-------|--------|--------------|------------------|--------------|
-| 1 | `1`/`000001` | `.20`/`.21`/`.22` | `.70`/`.71`/`.72` | `.115` / `…101` |
-| 2 | `1`/`000002` | `.23`/`.24`/`.25` | `.73`/`.74`/`.75` | `.116` / `…102` |
-| 3 | `1`/`000003` | `.26`/`.27`/`.28` | `.76`/`.77`/`.78` | `.117` / `…103` |
-| 4 | `1`/`000004` | `.29`/`.30`/`.31` | `.79`/`.80`/`.81` | `.118` / `…104` |
-| 5 | `1`/`000005` | `.32`/`.33`/`.34` | `.82`/`.83`/`.84` | `.119` / `…105` |
+IPs stay on the original UPF/CU-UP pools (shared L2); only the **pod site** moves.
 
-Shared: AMF N2 `.10`, SMF N4 `.12`, CU-CP N2/F1-C/E1 `.60`/`.61`/`.62`, DU F1 `.113`. N3 peer: CU-UPn → UPFn.
+| Slice | Site | SST/SD | UPF N3/N4/N6 | CU-UP E1/F1-U/N3 | UE RF / IMSI |
+|-------|------|--------|--------------|------------------|--------------|
+| 1 | central | `1`/`000001` | `.20`/`.21`/`.22` | `.70`/`.71`/`.72` | `.115` / `…101` |
+| 2 | regional | `1`/`000002` | `.23`/`.24`/`.25` | `.73`/`.74`/`.75` | `.116` / `…102` |
+| 3 | edge | `1`/`000003` | `.26`/`.27`/`.28` | `.76`/`.77`/`.78` | `.117` / `…103` |
+| 4 | edge | `1`/`000004` | `.29`/`.30`/`.31` | `.79`/`.80`/`.81` | `.118` / `…104` |
+| 5 | edge | `1`/`000005` | `.32`/`.33`/`.34` | `.82`/`.83`/`.84` | `.119` / `…105` |
+
+Shared: AMF N2 `.10`, SMF N4 `.12`, CU-CP N2/F1-C/E1 `.110`/`.111`/`.112`, DU F1 `.113` / rfsim `.114`. N3 peer: CU-UPn → UPFn (same L2, often same node).
 
 ### Shared 5GC CP (central `.10`–`.19`)
 
@@ -42,17 +44,17 @@ Shared: AMF N2 `.10`, SMF N4 `.12`, CU-CP N2/F1-C/E1 `.60`/`.61`/`.62`, DU F1 `.
 ### Cross-cluster peer pairs (`oai-slice-deployment`)
 
 ```
-regional CU-CP N2   10.1.139.60   ──SCTP──►  AMF N2      10.1.139.10
-edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.61
-regional CU-UPn E1  .70+3(n-1)    ──SCTP──►  CU-CP E1    10.1.139.62
-regional CU-UPn N3  .72+3(n-1)    ──GTP-U──► UPFn N3     .20+3(n-1)
-central SMF N4      10.1.139.12   ──PFCP──►  UPFn N4     .21+3(n-1)
-edge UEn RFsim      .115+(n-1)    ──RFsim──► DU rfsim    10.1.139.113:4043
+edge CU-CP N2       10.1.139.110  ──SCTP──►  AMF N2      10.1.139.10
+edge DU F1          10.1.139.113  ──SCTP──►  CU-CP F1-C  10.1.139.111
+site CU-UPn E1      (per table)   ──SCTP──►  CU-CP E1    10.1.139.112
+site CU-UPn N3      (per table)   ──GTP-U──► UPFn N3     (per table, same site)
+central SMF N4      10.1.139.12   ──PFCP──►  UPFn N4     (per table, any site)
+edge UEn RFsim      .115+(n-1)    ──RFsim──► DU rfsim    10.1.139.114:4043
 ```
 
 DNN pools: UPF slice *n* uses **`10.1.n.0/24`**.
 
-Helpers: `upf_slice_n3` / `cuup_slice_e1` / … in [`scripts/cluster_lib.sh`](../scripts/cluster_lib.sh).
+Helpers: `oai_slice_site` / `upf_slice_n3` / `cuup_slice_e1` / … in [`scripts/cluster_lib.sh`](../scripts/cluster_lib.sh).
 
 ---
 

@@ -44,7 +44,7 @@ DHCP leases on mgmt start at `.100` ([services/.env](../../services/.env)). Pi-h
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
 | 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
-OAI 5GC on **central** (shared AMF/SMF + **5 per-slice UPFs** in `.20–.39`); **CU-CP + 5 CU-UPs** on **regional** (CU-UP pool `.70–.89`); **DU + 5 nrUEs** on **edge `usrp`** — namespace `oai-slice-deployment`, macvlan **`10.1.139.0/24`** ([oai.md](../../docs/oai.md)). Render: `./scripts/render_oai_slice_deployment_gitops.sh`.
+OAI 5GC CP on **central**; **co-located UPF + CU-UP** per slice (1→central, 2→regional, 3–5→edge); **CU-CP + DU + 5 nrUEs** on **edge `usrp`** — namespace `oai-slice-deployment`, macvlan **`10.1.139.0/24`** ([oai.md](../../docs/oai.md)). Render: `./scripts/render_oai_slice_deployment_gitops.sh`.
 
 ## Cluster-local services (no MetalLB VIP)
 

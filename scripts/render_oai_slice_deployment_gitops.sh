@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Render oai-slice-deployment GitOps:
-#   central  — 5 per-slice UPFs (N3/N4/N6 in .20–.39) + SMF/AMF NSSAI + MySQL SD patch
-#   regional — 5 CU-UPs (.70–.89)
-#   edge     — CU-CP (.110/.111/.112) + DU (F1 .113 + rfsim .114) + 5 nrUEs on usrp
+#   Co-located UPF + CU-UP per slice:
+#     slice1 → central, slice2 → regional, slices 3–5 → edge
+#   central  — UPF1 + CU-UP1 + SMF/AMF NSSAI + MySQL SD patch + UPF operator (existing)
+#   regional — UPF2 + CU-UP2 + UPF-only operator
+#   edge     — UPF3–5 + CU-UP3–5 + CU-CP/DU/UEs/FlexRIC + UPF-only operator
 # Retires oai-ran-nephio-example-split-deploy and oai-nws-1ue from repos.
 set -euo pipefail
 
@@ -34,7 +36,7 @@ RETIRE_OLD="${RETIRE_OLD:-1}"
 # Build IP tables for Python
 UPF_N3=() UPF_N4=() UPF_N6=()
 CUUP_E1=() CUUP_F1U=() CUUP_N3=()
-UE_RF=() IMSIS=() SDS=()
+UE_RF=() IMSIS=() SDS=() SITES=()
 for i in $(seq 1 "$SLICE_COUNT"); do
   UPF_N3+=("$(upf_slice_n3 "$i")")
   UPF_N4+=("$(upf_slice_n4 "$i")")
@@ -45,6 +47,7 @@ for i in $(seq 1 "$SLICE_COUNT"); do
   UE_RF+=("$(oai_slice_ue_rf "$i")")
   IMSIS+=("$(oai_slice_imsi "$i")")
   SDS+=("$(oai_slice_sd_hex "$i")")
+  SITES+=("$(oai_slice_site "$i")")
 done
 
 AMF_N2="$(amf_n2_vip central)"
@@ -59,6 +62,10 @@ XAPP_SWAGGER_VIP="${OAI_XAPP_SWAGGER_VIP}"
 XAPP_API_PORT="${OAI_XAPP_API_PORT}"
 SMF_N4="$(oai_macvlan_ip central 2)"
 GW="$OAI_MACVLAN_GW"
+N6_GW_CENTRAL="$(oai_n6_gw_ip central)"
+N6_GW_REGIONAL="$(oai_n6_gw_ip regional)"
+N6_GW_EDGE="$(oai_n6_gw_ip edge)"
+MGMT_CIDR_ARG="${MGMT_CIDR}"
 NAD_PARENT="$SITE_IFACE"
 USRP_IFACE="${USRP_SITE_IFACE:-enp4s0f0}"
 
@@ -72,8 +79,10 @@ python3 - "$REPOS_DIR" "$SLICE_NS" "$UPF_NS" "$CN_NS" "$OPS_NS" \
   "$(join_csv "${UPF_N3[@]}")" "$(join_csv "${UPF_N4[@]}")" "$(join_csv "${UPF_N6[@]}")" \
   "$(join_csv "${CUUP_E1[@]}")" "$(join_csv "${CUUP_F1U[@]}")" "$(join_csv "${CUUP_N3[@]}")" \
   "$(join_csv "${UE_RF[@]}")" "$(join_csv "${IMSIS[@]}")" "$(join_csv "${SDS[@]}")" \
+  "$(join_csv "${SITES[@]}")" \
   "$FLEXRIC_IP" "$XAPP_E2_IP" "$XAPP_SWAGGER_VIP" "$XAPP_API_PORT" \
   "$OAI_FLEXRIC_IMAGE" "$OAI_XAPP_IMAGE" \
+  "$N6_GW_CENTRAL" "$N6_GW_REGIONAL" "$N6_GW_EDGE" "$MGMT_CIDR_ARG" \
   <<'PY'
 import importlib.util
 import json
@@ -93,9 +102,11 @@ import yaml
     upf_n3_csv, upf_n4_csv, upf_n6_csv,
     cuup_e1_csv, cuup_f1u_csv, cuup_n3_csv,
     ue_rf_csv, imsi_csv, sd_csv,
+    sites_csv,
     flexric_ip, xapp_e2_ip, xapp_swagger_vip, xapp_api_port_s,
     flexric_image, xapp_image,
-) = sys.argv[1:41]
+    n6_gw_central, n6_gw_regional, n6_gw_edge, mgmt_cidr,
+) = sys.argv[1:46]
 
 slice_count = int(slice_count_s)
 ue_active = max(0, min(slice_count, int(ue_active_s)))
@@ -109,8 +120,20 @@ cuup_n3 = cuup_n3_csv.split(",")
 ue_rf = ue_rf_csv.split(",")
 imsis = imsi_csv.split(",")
 sds = sd_csv.split(",")
+sites = sites_csv.split(",")
+SITE_N6_GW = {
+    "central": n6_gw_central,
+    "regional": n6_gw_regional,
+    "edge": n6_gw_edge,
+}
 
 repos = Path(repos_dir)
+REPO_NAME = {"central": "central-repo", "regional": "regional-repo", "edge": "edge-repo"}
+SITE_NODES = {
+    "central": ["central-0", "central-1"],
+    "regional": ["regional-0", "regional-1"],
+    "edge": ["edge-0", "edge-1"],
+}
 spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
 oai_debug = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oai_debug)
@@ -122,7 +145,14 @@ def dump(doc, path: Path):
     path.write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False))
 
 
-def nad(name, ns, master, ip):
+def nad(name, ns, master, ip, *, gateway=None, routes=None):
+    g = gw if gateway is None else gateway
+    ipam = {
+        "type": "static",
+        "addresses": [{"address": f"{ip}/24", "gateway": g}],
+    }
+    if routes:
+        ipam["routes"] = routes
     cfg = {
         "cniVersion": "0.3.1",
         "name": name,
@@ -132,10 +162,7 @@ def nad(name, ns, master, ip):
                 "capabilities": {"ips": True},
                 "master": master,
                 "mode": "bridge",
-                "ipam": {
-                    "type": "static",
-                    "addresses": [{"address": f"{ip}/24", "gateway": gw}],
-                },
+                "ipam": ipam,
             },
             {"type": "tuning", "capabilities": {"mac": True}, "ipam": {}},
         ],
@@ -196,22 +223,128 @@ if retire_old == "1":
 
 
 # ---------------------------------------------------------------------------
-# Central: 5 slice UPFs
+# Per-slice UPFs (NFDeployment) on the slice's site cluster
 # ---------------------------------------------------------------------------
-upf_dir = repos / "central-repo" / "namespaces" / upf_ns
-upf_dir.mkdir(parents=True, exist_ok=True)
-# remove prior slice upf artifacts
-for old in upf_dir.glob("*upf-slice-*"):
-    old.unlink()
+def ensure_upf_operator(site: str) -> None:
+    """Copy UPF-only CN operator from central → site (no NRF; SMF uses static upfs)."""
+    if site == "central":
+        return
+    src_ops = repos / "central-repo" / "namespaces" / ops_ns
+    src_cluster = repos / "central-repo" / "cluster"
+    dest_ops = repos / REPO_NAME[site] / "namespaces" / ops_ns
+    dest_cluster = repos / REPO_NAME[site] / "cluster"
+    dest_ops.mkdir(parents=True, exist_ok=True)
+    dest_cluster.mkdir(parents=True, exist_ok=True)
+    write_ns(dest_ops, ops_ns)
+
+    # serviceaccount + controller utils (unchanged)
+    for name in (
+        "serviceaccount-oai-upf-operator.yaml",
+        "configmap-oai-upf-controller-utils.yaml",
+    ):
+        src = src_ops / name
+        if src.is_file():
+            shutil.copy2(src, dest_ops / name)
+
+    # op-conf: point NRF/SMF FQDNs at loopback — ClusterIP names do not resolve off-central.
+    op_src = src_ops / "configmap-oai-upf-op-conf.yaml"
+    if op_src.is_file():
+        doc = yaml.safe_load(op_src.read_text())
+        raw = doc["data"]["upf.yaml"]
+        raw = raw.replace(
+            "nrf: 'oai-nrf.oai-cn.svc.cluster.local'",
+            "nrf: '127.0.0.1'",
+        ).replace(
+            "smf: 'oai-smf.oai-cn.svc.cluster.local'",
+            "smf: '127.0.0.1'",
+        )
+        doc["data"]["upf.yaml"] = raw
+        dump(doc, dest_ops / "configmap-oai-upf-op-conf.yaml")
+
+    # nf-conf: disable NRF registration (SMF already has static UPF Config refs).
+    nf_src = src_ops / "configmap-oai-upf-nf-conf.yaml"
+    if nf_src.is_file():
+        doc = yaml.safe_load(nf_src.read_text())
+        tpl = doc["data"]["upf.yaml"]
+        tpl = tpl.replace("register_nf:\n  upf: 'yes'", "register_nf:\n  upf: 'no'")
+        doc["data"]["upf.yaml"] = tpl
+        dump(doc, dest_ops / "configmap-oai-upf-nf-conf.yaml")
+
+    dep_src = src_ops / "deployment-oai-upf-controller.yaml"
+    if dep_src.is_file():
+        doc = yaml.safe_load(dep_src.read_text())
+        for env in (
+            doc.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [{}])[0]
+            .get("env", [])
+        ):
+            if env.get("name") == "TESTING":
+                env["value"] = "yes"  # skip NRF initContainer off-central
+        # Keep UPF pods off usrp (no enp7s0 for macvlan N3/N4/N6).
+        if site == "edge":
+            spec = doc["spec"]["template"]["spec"]
+            spec["affinity"] = {
+                "nodeAffinity": {
+                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                        "nodeSelectorTerms": [
+                            {
+                                "matchExpressions": [
+                                    {
+                                        "key": "kubernetes.io/hostname",
+                                        "operator": "In",
+                                        "values": ["edge-0", "edge-1"],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        dump(doc, dest_ops / "deployment-oai-upf-controller.yaml")
+    for name in (
+        "clusterrole-oai-upf-operator-cluster-role.yaml",
+        "clusterrolebinding-oai-upf-operator-rolebinding-cluster.yaml",
+    ):
+        src = src_cluster / name
+        if src.is_file():
+            shutil.copy2(src, dest_cluster / name)
+
+
+for site in ("central", "regional", "edge"):
+    upf_dir = repos / REPO_NAME[site] / "namespaces" / upf_ns
+    if site != "central":
+        # central keeps upf-core + ns from core render; others get a fresh oai-upf ns
+        upf_dir.mkdir(parents=True, exist_ok=True)
+        write_ns(upf_dir, upf_ns)
+        ensure_upf_operator(site)
+    else:
+        upf_dir.mkdir(parents=True, exist_ok=True)
+    for old in upf_dir.glob("*upf-slice-*"):
+        old.unlink()
 
 for i in range(slice_count):
     n = i + 1
+    site = sites[i]
     name = f"upf-slice-{n}"
     sd = sds[i]
     n3, n4, n6 = upf_n3[i], upf_n4[i], upf_n6[i]
+    n6_gw = SITE_N6_GW.get(site, gw)
+    upf_dir = repos / REPO_NAME[site] / "namespaces" / upf_ns
     dump(nad(f"{name}-n3", upf_ns, nad_parent, n3), upf_dir / f"40-networkattachmentdefinition-{name}-n3.yaml")
     dump(nad(f"{name}-n4", upf_ns, nad_parent, n4), upf_dir / f"40-networkattachmentdefinition-{name}-n4.yaml")
-    dump(nad(f"{name}-n6", upf_ns, nad_parent, n6), upf_dir / f"40-networkattachmentdefinition-{name}-n6.yaml")
+    dump(
+        nad(
+            f"{name}-n6",
+            upf_ns,
+            nad_parent,
+            n6,
+            gateway=n6_gw,
+            routes=[{"dst": mgmt_cidr, "gw": n6_gw}],
+        ),
+        upf_dir / f"40-networkattachmentdefinition-{name}-n6.yaml",
+    )
     dump(
         {
             "apiVersion": "workload.nephio.org/v1alpha1",
@@ -272,7 +405,7 @@ for i in range(slice_count):
                 "interfaces": [
                     {"name": "n3", "ipv4": {"address": f"{n3}/24", "gateway": gw}, "vlanID": 4},
                     {"name": "n4", "ipv4": {"address": f"{n4}/24", "gateway": gw}, "vlanID": 2},
-                    {"name": "n6", "ipv4": {"address": f"{n6}/24", "gateway": gw}, "vlanID": 3},
+                    {"name": "n6", "ipv4": {"address": f"{n6}/24", "gateway": n6_gw}, "vlanID": 3},
                 ],
                 "networkInstances": [
                     {"name": "vpc-internal", "interfaces": ["n4"]},
@@ -294,6 +427,7 @@ for i in range(slice_count):
 # ---------------------------------------------------------------------------
 # Central: SMF Config refs + NFConfig NSSAI + SMF operator template n3 map
 # ---------------------------------------------------------------------------
+# (UPF CRs live on site clusters; SMF still gets static interface Configs here.)
 cn_dir = repos / "central-repo" / "namespaces" / cn_ns
 for old in cn_dir.glob("25-config-smf-core-upf-slice-*"):
     old.unlink()
@@ -325,6 +459,7 @@ for i in range(slice_count):
     n = i + 1
     name = f"upf-slice-{n}"
     n3, n4, n6 = upf_n3[i], upf_n4[i], upf_n6[i]
+    n6_gw = SITE_N6_GW.get(sites[i], gw)
     sd = sds[i]
     nssai_list.append(
         {
@@ -360,7 +495,7 @@ for i in range(slice_count):
                         "interfaces": [
                             {"name": "n3", "ipv4": {"address": f"{n3}/24", "gateway": gw}, "vlanID": 4},
                             {"name": "n4", "ipv4": {"address": f"{n4}/24", "gateway": gw}, "vlanID": 2},
-                            {"name": "n6", "ipv4": {"address": f"{n6}/24", "gateway": gw}, "vlanID": 3},
+                            {"name": "n6", "ipv4": {"address": f"{n6}/24", "gateway": n6_gw}, "vlanID": 3},
                         ],
                         "networkInstances": [
                             {"name": "vpc-internal", "interfaces": ["n4"]},
@@ -504,8 +639,8 @@ if ops_smf.is_file():
         tpl = tpl2
     else:
         print("WARNING: failed to patch SMF upfs template block")
-    # NRF discovery by S-NSSAI; static upfs carry per-slice upf_info as fallback
-    tpl = tpl.replace("discover_upf: no", "discover_upf: yes")
+    # Static upfs list (co-located multi-cluster); NRF discovery cannot see off-central UPFs.
+    tpl = tpl.replace("discover_upf: yes", "discover_upf: no")
     doc["data"]["smf.yaml"] = tpl
     dump(doc, ops_smf)
 
@@ -537,12 +672,18 @@ if mysql_cm.is_file():
 
 
 # ---------------------------------------------------------------------------
-# Regional: CU-CP + 5 CU-UP
+# Regional: RAN operator + CU-UP for slices sited here (see emit_cuup below)
+# Central:  slice ns for CU-UP1
 # ---------------------------------------------------------------------------
 reg_dir = repos / "regional-repo" / "namespaces" / slice_ns
 purge_dir(reg_dir)
 reg_dir.mkdir(parents=True)
 write_ns(reg_dir, slice_ns)
+
+central_slice_dir = repos / "central-repo" / "namespaces" / slice_ns
+purge_dir(central_slice_dir)
+central_slice_dir.mkdir(parents=True)
+write_ns(central_slice_dir, slice_ns)
 
 dump(
     {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "oai-ran-operator", "namespace": slice_ns}},
@@ -609,8 +750,8 @@ dump(
     reg_dir / "deployment-oai-ran-operator.yaml",
 )
 
-# 5 CU-UPs
-for i in range(slice_count):
+
+def emit_cuup(i: int, out_dir: Path, node_names: list) -> None:
     n = i + 1
     sd = sds[i]
     e1, f1u, n3 = cuup_e1[i], cuup_f1u[i], cuup_n3[i]
@@ -619,7 +760,7 @@ for i in range(slice_count):
     for iface, ip in (("e1", e1), ("f1u", f1u), ("n3", n3)):
         dump(
             nad(f"cuup-slice{n}-{iface}", slice_ns, nad_parent, ip),
-            reg_dir / f"30-networkattachmentdefinition-cuup-slice{n}-{iface}.yaml",
+            out_dir / f"30-networkattachmentdefinition-cuup-slice{n}-{iface}.yaml",
         )
     cuup_conf = f"""Active_gNBs = ( "oai-cu-up-{n}");
 Asn1_verbosity = "none";
@@ -691,7 +832,7 @@ ngap_log_level                        ="info";
             "metadata": {"name": f"oai-cu-up-{n}-configmap", "namespace": slice_ns},
             "data": {"gnb.conf": cuup_conf},
         },
-        reg_dir / f"31-configmap-oai-cu-up-{n}-configmap.yaml",
+        out_dir / f"31-configmap-oai-cu-up-{n}-configmap.yaml",
     )
     dump(
         {
@@ -699,7 +840,7 @@ ngap_log_level                        ="info";
             "kind": "ServiceAccount",
             "metadata": {"name": f"oai-cu-up-{n}-sa", "namespace": slice_ns},
         },
-        reg_dir / f"32-serviceaccount-oai-cu-up-{n}-sa.yaml",
+        out_dir / f"32-serviceaccount-oai-cu-up-{n}-sa.yaml",
     )
     dump(
         {
@@ -730,6 +871,7 @@ ngap_log_level                        ="info";
                                 ]
                             ),
                             "oai.nephio.org/upf-n3": upf_peer,
+                            "oai.nephio.org/site": sites[i],
                         },
                     },
                     "spec": {
@@ -744,7 +886,7 @@ ngap_log_level                        ="info";
                                                 {
                                                     "key": "kubernetes.io/hostname",
                                                     "operator": "In",
-                                                    "values": ["regional-0", "regional-1"],
+                                                    "values": list(node_names),
                                                 }
                                             ]
                                         }
@@ -790,17 +932,27 @@ ngap_log_level                        ="info";
                 },
             },
         },
-        reg_dir / f"33-deployment-oai-cu-up-{n}.yaml",
+        out_dir / f"33-deployment-oai-cu-up-{n}.yaml",
     )
 
 
 # ---------------------------------------------------------------------------
-# Edge: DU + 5 UEs on usrp
+# Edge: CU-CP + DU + UEs + FlexRIC (+ CU-UPs for slices 3–5 via emit_cuup)
 # ---------------------------------------------------------------------------
 edge_dir = repos / "edge-repo" / "namespaces" / slice_ns
 purge_dir(edge_dir)
 edge_dir.mkdir(parents=True)
 write_ns(edge_dir, slice_ns)
+
+# Emit CU-UPs onto the co-located site (central / regional / edge).
+SLICE_DIR = {
+    "central": central_slice_dir,
+    "regional": reg_dir,
+    "edge": edge_dir,
+}
+for i in range(slice_count):
+    site = sites[i]
+    emit_cuup(i, SLICE_DIR[site], SITE_NODES[site])
 
 dump(
     {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "oai-ran-operator", "namespace": slice_ns}},
@@ -1683,8 +1835,12 @@ channelmod = {{
     )
 
 print(f"Rendered {slice_ns}:")
-print(f"  UPFs: {', '.join(f'{upf_n3[i]}/{upf_n4[i]}/{upf_n6[i]}' for i in range(slice_count))}")
-print(f"  CU-UPs: {', '.join(f'{cuup_e1[i]}/{cuup_f1u[i]}/{cuup_n3[i]}' for i in range(slice_count))}")
+for i in range(slice_count):
+    print(
+        f"  slice{i+1} @{sites[i]}: "
+        f"UPF {upf_n3[i]}/{upf_n4[i]}/{upf_n6[i]}  "
+        f"CU-UP {cuup_e1[i]}/{cuup_f1u[i]}/{cuup_n3[i]}"
+    )
 print(f"  DU F1 {du_f1} + rfsim {du_rf} + UEs {', '.join(ue_rf)} on usrp ({usrp_iface})")
 print(f"  UE replicas: first {ue_active}/{slice_count} active (OAI_UE_ACTIVE_COUNT)")
 print(f"  CU-CP (edge) N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
@@ -1693,4 +1849,4 @@ print(f"  xApp Swagger http://{xapp_swagger_vip}:{xapp_api_port}/docs")
 PY
 
 echo "Done. Push with:"
-echo "  ./bringup/03_push_to_git_repos/push_git_repos.sh -m 'oai-slice-deployment: 5 UPF + 5 CU-UP' central regional edge ue"
+echo "  ./bringup/03_push_to_git_repos/push_git_repos.sh -m 'oai-slice: co-located UPF+CUUP' central regional edge"

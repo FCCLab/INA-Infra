@@ -22,7 +22,7 @@ data:
     \      port: 80\n      api_version: v1\n############## NF-specific configuration\n\
     smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
     \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
-    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: yes\n  #\
+    \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
     \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
     \  {% set n3_addrs = ['10.1.139.20', '10.1.139.23', '10.1.139.26', '10.1.139.29',\
     \ '10.1.139.32'] %}\n    {% set slice_sds = ['000001', '000002', '000003', '000004',\

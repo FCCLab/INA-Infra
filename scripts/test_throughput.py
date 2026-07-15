@@ -3,8 +3,8 @@
 iperf3 throughput for the Nephio oai-slice-deployment (K8s).
 
 Clients: oai-ue-{N} pods on edge (usrp), PDU via oaitun_ue*.
-Servers: iperf3 in upf-slice-{N} debug (netshoot) containers on central,
-         bound to the DNN gateway 10.1.{N}.1 (UPF tun0).
+Servers: iperf3 on mgmt-0 bound to 10.1.132.200 (default), one port per UE
+         (5201 + N - 1). Use --dnn for the old UPF DNN-GW server mode.
 
 Default: list UEs with active PDU, start servers, sequential UL then DL.
 
@@ -14,7 +14,7 @@ Examples:
   ./scripts/test_throughput.py --dir both --mode parallel --time 20
   ./scripts/test_throughput.py -u --bitrate 10M
   ./scripts/test_throughput.py --tmux --dir ul
-  ./scripts/test_throughput.py --tmux --dir dl --ue1 --ue2
+  ./scripts/test_throughput.py --dnn --dir ul
   ./scripts/test_throughput.py --list-only
 """
 
@@ -41,6 +41,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SSH_CONFIG = REPO_ROOT / "utils" / "ssh_config" / "config"
 DEFAULT_EDGE_HOST = "edge-0"
 DEFAULT_CENTRAL_HOST = "central-0"
+DEFAULT_REGIONAL_HOST = "regional-0"
+DEFAULT_MGMT_HOST = "mgmt-0"
 DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_UPF_NS = "oai-upf"
 DEFAULT_PORT = 5201
@@ -48,8 +50,24 @@ DEFAULT_TIME = 20
 DEFAULT_TCP_STREAMS = 1
 DEFAULT_UDP_STREAMS = 5
 DEFAULT_UDP_BITRATE = "10M"
+DEFAULT_TARGET_HOST = os.environ.get("OAI_TEST_HOST", "10.1.132.200")  # mgmt-0
 UE_LABEL_FMT = "app.kubernetes.io/name=oai-ue-{n}"
 OAITUN_CANDIDATES = ("oaitun_ue1", "oaitun_ue0")
+# Slice → cluster hosting co-located UPF + CU-UP
+SLICE_SITE = {1: "central", 2: "regional", 3: "edge", 4: "edge", 5: "edge"}
+
+
+def upf_ssh_host(slice_n: int, *, central: str, regional: str, edge: str) -> str:
+    site = SLICE_SITE.get(slice_n, "edge")
+    if site == "central":
+        return central
+    if site == "regional":
+        return regional
+    return edge
+
+
+def dnn_gw(slice_n: int) -> str:
+    return f"10.1.{slice_n}.1"
 
 _MBITS_RE = re.compile(
     r"^\[[\s\d]+\]\s+[\d.]+\s*-\s*([\d.]+)\s+sec\s+.*?([\d.]+)\s*Mbits/sec"
@@ -67,8 +85,11 @@ class UeTarget:
     iface: str
     pdu_ip: str
     server_ip: str
-    upf_pod: str
+    server_host: str  # SSH host running iperf3 -s (mgmt-0 or UPF node)
+    upf_pod: str  # empty when server is on mgmt
+    upf_host: str
     port: int
+    dnn_mode: bool = False
 
 
 def run(argv: list[str], *, timeout: Optional[float] = None) -> subprocess.CompletedProcess[str]:
@@ -234,10 +255,6 @@ def parse_iperf3_text(text: str, *, reverse: bool) -> float:
     raise ValueError("no Mbits/sec summary in iperf3 output")
 
 
-def dnn_gw(slice_n: int) -> str:
-    return f"10.1.{slice_n}.1"
-
-
 def list_ue_pods(
     edge: str,
     ue_ns: str,
@@ -280,9 +297,9 @@ def list_ue_pods(
     return found
 
 
-def find_upf_pod(central: str, upf_ns: str, slice_n: int, *, ssh_config: Path) -> Optional[str]:
+def find_upf_pod(host: str, upf_ns: str, slice_n: int, *, ssh_config: Path) -> Optional[str]:
     r = remote_kubectl(
-        central,
+        host,
         upf_ns,
         ["get", "pods", "-o", "json"],
         ssh_config=ssh_config,
@@ -331,8 +348,8 @@ def detect_oaitun_and_ip(
     return None, None
 
 
-def iperf_listening(
-    central: str,
+def iperf_listening_upf(
+    host: str,
     upf_ns: str,
     upf_pod: str,
     port: int,
@@ -341,7 +358,7 @@ def iperf_listening(
     ssh_config: Path,
 ) -> bool:
     r = k_exec(
-        central,
+        host,
         upf_ns,
         upf_pod,
         ["bash", "-c", f"ss -tlnp 2>/dev/null | grep -q '{bind_addr}:{port}'"],
@@ -349,6 +366,18 @@ def iperf_listening(
         container="debug",
         timeout=15,
     )
+    return r.returncode == 0
+
+
+def iperf_listening_host(
+    host: str,
+    port: int,
+    bind_addr: str,
+    *,
+    ssh_config: Path,
+) -> bool:
+    remote = f"ss -tlnp 2>/dev/null | grep -q '{bind_addr}:{port}'"
+    r = ssh_run(host, remote, ssh_config=ssh_config, timeout=15)
     return r.returncode == 0
 
 
@@ -375,62 +404,142 @@ def clear_iperf_ue(
         print(f"cleared iperf3 clients on {len(targets)} UE pod(s)")
 
 
-def clear_iperf_upf(
-    central: str,
+def clear_iperf_servers(
     upf_ns: str,
     targets: list[UeTarget],
     *,
     ssh_config: Path,
     quiet: bool = False,
 ) -> None:
-    seen: set[str] = set()
-    for t in targets:
-        if t.upf_pod in seen:
-            continue
-        seen.add(t.upf_pod)
-        k_exec(
-            central,
-            upf_ns,
-            t.upf_pod,
-            ["pkill", "-9", "-x", "iperf3"],
-            ssh_config=ssh_config,
-            container="debug",
-            timeout=15,
-        )
+    if not targets:
+        return
+    if targets[0].dnn_mode:
+        seen: set[str] = set()
+        for t in targets:
+            key = f"{t.upf_host}/{t.upf_pod}"
+            if key in seen:
+                continue
+            seen.add(key)
+            k_exec(
+                t.upf_host,
+                upf_ns,
+                t.upf_pod,
+                ["pkill", "-9", "-x", "iperf3"],
+                ssh_config=ssh_config,
+                container="debug",
+                timeout=15,
+            )
+        if not quiet:
+            print(f"cleared iperf3 servers on {len(seen)} UPF pod(s)")
+        return
+
+    host = targets[0].server_host
+    ports = " ".join(str(t.port) for t in targets)
+    remote = (
+        f"for p in {ports}; do "
+        f"pkill -9 -f \"iperf3.*-p \$p\" 2>/dev/null || true; "
+        f"done"
+    )
+    ssh_run(host, remote, ssh_config=ssh_config, timeout=20)
     if not quiet:
-        print(f"cleared iperf3 servers on {len(seen)} UPF pod(s)")
+        print(f"cleared iperf3 servers on {host} ports {[t.port for t in targets]}")
 
 
 def ensure_iperf_servers(
-    central: str,
     upf_ns: str,
     targets: list[UeTarget],
     *,
     ssh_config: Path,
 ) -> bool:
+    if not targets:
+        return False
+
+    if targets[0].dnn_mode:
+        for t in targets:
+            k_exec(
+                t.upf_host,
+                upf_ns,
+                t.upf_pod,
+                ["pkill", "-9", "-x", "iperf3"],
+                ssh_config=ssh_config,
+                container="debug",
+                timeout=15,
+            )
+            r = k_exec(
+                t.upf_host,
+                upf_ns,
+                t.upf_pod,
+                ["iperf3", "-s", "-B", t.server_ip, "-p", str(t.port), "-D"],
+                ssh_config=ssh_config,
+                container="debug",
+                timeout=20,
+            )
+            if r.returncode != 0:
+                print(
+                    f"ERROR: failed to start iperf3 -s on {t.upf_pod} "
+                    f"{t.server_ip}:{t.port}: {(r.stderr or r.stdout or '')[-400:]}",
+                    file=sys.stderr,
+                )
+                return False
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            if all(
+                iperf_listening_upf(
+                    t.upf_host,
+                    upf_ns,
+                    t.upf_pod,
+                    t.port,
+                    t.server_ip,
+                    ssh_config=ssh_config,
+                )
+                for t in targets
+            ):
+                ports = ", ".join(f"{t.server_ip}:{t.port}" for t in targets)
+                print(f"iperf3 servers ready: {ports}")
+                return True
+            time.sleep(0.3)
+        missing = [
+            f"{t.server_ip}:{t.port}"
+            for t in targets
+            if not iperf_listening_upf(
+                t.upf_host,
+                upf_ns,
+                t.upf_pod,
+                t.port,
+                t.server_ip,
+                ssh_config=ssh_config,
+            )
+        ]
+        print(f"ERROR: iperf3 not listening on {missing}", file=sys.stderr)
+        return False
+
+    host = targets[0].server_host
+    # Ensure iperf3 exists on mgmt-0.
+    check = ssh_run(host, "command -v iperf3", ssh_config=ssh_config, timeout=15)
+    if check.returncode != 0:
+        print(
+            f"ERROR: iperf3 not found on {host}; install with: "
+            f"ssh {host} 'sudo apt-get install -y iperf3'",
+            file=sys.stderr,
+        )
+        return False
+
     for t in targets:
-        # Separate kill vs start so pkill cannot match this kubectl exec cmdline.
-        k_exec(
-            central,
-            upf_ns,
-            t.upf_pod,
-            ["pkill", "-9", "-x", "iperf3"],
+        ssh_run(
+            host,
+            f"pkill -9 -f 'iperf3.*-p {t.port}' 2>/dev/null || true",
             ssh_config=ssh_config,
-            container="debug",
             timeout=15,
         )
-        r = k_exec(
-            central,
-            upf_ns,
-            t.upf_pod,
-            ["iperf3", "-s", "-B", t.server_ip, "-p", str(t.port), "-D"],
+        r = ssh_run(
+            host,
+            f"iperf3 -s -B {shlex.quote(t.server_ip)} -p {t.port} -D",
             ssh_config=ssh_config,
-            container="debug",
             timeout=20,
         )
         if r.returncode != 0:
             print(
-                f"ERROR: failed to start iperf3 -s on {t.upf_pod} "
+                f"ERROR: failed to start iperf3 -s on {host} "
                 f"{t.server_ip}:{t.port}: {(r.stderr or r.stdout or '')[-400:]}",
                 file=sys.stderr,
             )
@@ -439,31 +548,21 @@ def ensure_iperf_servers(
     deadline = time.monotonic() + 12.0
     while time.monotonic() < deadline:
         if all(
-            iperf_listening(
-                central,
-                upf_ns,
-                t.upf_pod,
-                t.port,
-                t.server_ip,
-                ssh_config=ssh_config,
+            iperf_listening_host(
+                t.server_host, t.port, t.server_ip, ssh_config=ssh_config
             )
             for t in targets
         ):
             ports = ", ".join(f"{t.server_ip}:{t.port}" for t in targets)
-            print(f"iperf3 servers ready: {ports}")
+            print(f"iperf3 servers ready on {host}: {ports}")
             return True
         time.sleep(0.3)
 
     missing = [
         f"{t.server_ip}:{t.port}"
         for t in targets
-        if not iperf_listening(
-            central,
-            upf_ns,
-            t.upf_pod,
-            t.port,
-            t.server_ip,
-            ssh_config=ssh_config,
+        if not iperf_listening_host(
+            t.server_host, t.port, t.server_ip, ssh_config=ssh_config
         )
     ]
     print(f"ERROR: iperf3 not listening on {missing}", file=sys.stderr)
@@ -688,8 +787,9 @@ def _ssh_kubectl_q(
     cmd: list[str],
     *,
     container: Optional[str] = None,
-    tty: bool = True,
+    tty: bool = False,
 ) -> str:
+    # Default no TTY: tmux panes background ssh; kubectl -it then aborts.
     args = ["kubectl", "-n", ns, "exec"]
     if tty:
         args.append("-it")
@@ -698,19 +798,18 @@ def _ssh_kubectl_q(
         args += ["-c", container]
     args += ["--", *cmd]
     k_remote = " ".join(shlex.quote(a) for a in args)
-    return " ".join(
-        shlex.quote(a)
-        for a in [
-            "ssh",
-            "-F",
-            str(ssh_config),
-            "-t",
-            "-o",
-            "BatchMode=yes",
-            host,
-            k_remote,
-        ]
-    )
+    ssh_argv = [
+        "ssh",
+        "-F",
+        str(ssh_config),
+        "-o",
+        "BatchMode=yes",
+        host,
+        k_remote,
+    ]
+    if tty:
+        ssh_argv.insert(3, "-t")
+    return " ".join(shlex.quote(a) for a in ssh_argv)
 
 
 def forever_iperf_client_cmd(
@@ -782,7 +881,6 @@ def forever_iperf_client_cmd(
 def forever_iperf_server_cmd(
     target: UeTarget,
     *,
-    central: str,
     upf_ns: str,
     ssh_config: Path,
     interval: float,
@@ -800,19 +898,42 @@ def forever_iperf_server_cmd(
         "-i",
         str(interval),
     ]
-    ssh_q = _ssh_kubectl_q(
-        central,
-        ssh_config,
-        upf_ns,
-        target.upf_pod,
-        server_cmd,
-        container="debug",
-    )
-    cleanup = (
-        f"ssh -F {shlex.quote(str(ssh_config))} -o BatchMode=yes {shlex.quote(central)} "
-        f"{shlex.quote(' '.join(shlex.quote(a) for a in ['kubectl', '-n', upf_ns, 'exec', target.upf_pod, '-c', 'debug', '--', 'pkill', '-9', '-x', 'iperf3']))} "
-        f">/dev/null 2>&1 || true"
-    )
+    if target.dnn_mode:
+        ssh_q = _ssh_kubectl_q(
+            target.upf_host,
+            ssh_config,
+            upf_ns,
+            target.upf_pod,
+            server_cmd,
+            container="debug",
+        )
+        cleanup = (
+            f"ssh -F {shlex.quote(str(ssh_config))} -o BatchMode=yes {shlex.quote(target.upf_host)} "
+            f"{shlex.quote(' '.join(shlex.quote(a) for a in ['kubectl', '-n', upf_ns, 'exec', target.upf_pod, '-c', 'debug', '--', 'pkill', '-9', '-x', 'iperf3']))} "
+            f">/dev/null 2>&1 || true"
+        )
+        where = f"{target.upf_pod}@{target.upf_host}"
+    else:
+        remote = " ".join(shlex.quote(a) for a in server_cmd)
+        ssh_q = " ".join(
+            shlex.quote(a)
+            for a in [
+                "ssh",
+                "-F",
+                str(ssh_config),
+                "-o",
+                "BatchMode=yes",
+                target.server_host,
+                remote,
+            ]
+        )
+        cleanup = (
+            f"ssh -F {shlex.quote(str(ssh_config))} -o BatchMode=yes "
+            f"{shlex.quote(target.server_host)} "
+            f"{shlex.quote(f'pkill -9 -f iperf3.*-p {target.port} || true')} "
+            f">/dev/null 2>&1 || true"
+        )
+        where = f"{target.server_host}"
     sess = shlex.quote(session)
     script = (
         f"cleanup() {{ {cleanup}; }}; "
@@ -826,7 +947,8 @@ def forever_iperf_server_cmd(
         f"}}; "
         f"trap stop_all INT TERM; "
         f"trap cleanup EXIT; "
-        f"echo '=== {label} server on {target.upf_pod} {target.server_ip}:{target.port} "
+        f"echo '=== {label} server on {where} "
+        f"{target.server_ip}:{target.port} "
         f"(report every {interval:g}s; Ctrl-C stops all) ==='; "
         f"while true; do "
         f"{ssh_q} & "
@@ -849,7 +971,6 @@ def open_tmux(
     targets: list[UeTarget],
     *,
     edge: str,
-    central: str,
     ue_ns: str,
     upf_ns: str,
     ssh_config: Path,
@@ -869,13 +990,12 @@ def open_tmux(
         print(f"Killing existing tmux session {session}")
         subprocess.run(["tmux", "kill-session", "-t", session], check=False)
         clear_iperf_ue(edge, ue_ns, targets, ssh_config=ssh_config, quiet=True)
-        clear_iperf_upf(central, upf_ns, targets, ssh_config=ssh_config, quiet=True)
+        clear_iperf_servers(upf_ns, targets, ssh_config=ssh_config, quiet=True)
 
     reverse = direction == "DL"
     server_cmds = [
         forever_iperf_server_cmd(
             t,
-            central=central,
             upf_ns=upf_ns,
             ssh_config=ssh_config,
             interval=interval,
@@ -945,7 +1065,7 @@ def open_tmux(
         if _tmux_session_alive(session):
             subprocess.run(["tmux", "kill-session", "-t", session], check=False)
         clear_iperf_ue(edge, ue_ns, targets, ssh_config=ssh_config, quiet=False)
-        clear_iperf_upf(central, upf_ns, targets, ssh_config=ssh_config, quiet=False)
+        clear_iperf_servers(upf_ns, targets, ssh_config=ssh_config, quiet=False)
     return rc
 
 
@@ -970,8 +1090,8 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(
         description=(
-            "iperf3 throughput for oai-ue-* → upf-slice-* DNN GW "
-            "(default: sequential UL, K8s via SSH)"
+            "iperf3 throughput for oai-ue-* → mgmt-0 (10.1.132.200) "
+            "(default: sequential UL; use --dnn for UPF DNN GW)"
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -987,7 +1107,27 @@ def main() -> int:
         default="sequential",
         help="Run UEs one-by-one or all at once",
     )
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="iperf3 port (per UPF)")
+    ap.add_argument(
+        "--host",
+        default=DEFAULT_TARGET_HOST,
+        help="iperf3 server IP (default: mgmt-0)",
+    )
+    ap.add_argument(
+        "--server-host",
+        default=DEFAULT_MGMT_HOST,
+        help="SSH host running iperf3 -s (ignored with --dnn)",
+    )
+    ap.add_argument(
+        "--dnn",
+        action="store_true",
+        help="Server on UPF DNN GW 10.1.N.1 instead of --host",
+    )
+    ap.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help="iperf3 base port (mgmt mode: port+N-1 per UE; dnn: same port per UPF)",
+    )
     ap.add_argument("--time", type=int, default=DEFAULT_TIME, help="iperf3 -t seconds")
     ap.add_argument(
         "--streams",
@@ -1022,11 +1162,11 @@ def main() -> int:
         help=f"UDP -b per stream (default {DEFAULT_UDP_BITRATE} with -u)",
     )
     ap.add_argument("--no-bind-client", action="store_true", help="Do not -B <PDU IP>")
-    ap.add_argument("--skip-server", action="store_true", help="Do not (re)start UPF iperf3 -s")
+    ap.add_argument("--skip-server", action="store_true", help="Do not (re)start iperf3 -s")
     ap.add_argument(
         "--tmux",
         action="store_true",
-        help="Two tmux windows: server (UPF iperf3 -s) then client (UE forever)",
+        help="Two tmux windows: server then client (UE forever)",
     )
     ap.add_argument("--session", default="oai_iperf", help="tmux session name")
     ap.add_argument(
@@ -1052,7 +1192,12 @@ def main() -> int:
     ap.add_argument(
         "--central-host",
         default=DEFAULT_CENTRAL_HOST,
-        help="SSH host for central kubectl",
+        help="SSH host for central kubectl (UPF1)",
+    )
+    ap.add_argument(
+        "--regional-host",
+        default=DEFAULT_REGIONAL_HOST,
+        help="SSH host for regional kubectl (UPF2)",
     )
     ap.add_argument("--ue-ns", default=DEFAULT_UE_NS, help="UE namespace")
     ap.add_argument("--upf-ns", default=DEFAULT_UPF_NS, help="UPF namespace")
@@ -1119,31 +1264,61 @@ def main() -> int:
                 file=sys.stderr,
             )
             continue
-        upf = find_upf_pod(args.central_host, args.upf_ns, idx, ssh_config=ssh_config)
-        if not upf:
-            print(
-                f"  oai-ue-{idx}: ERROR — upf-slice-{idx} pod not found; skipping",
-                file=sys.stderr,
+        upf_host = upf_ssh_host(
+            idx,
+            central=args.central_host,
+            regional=args.regional_host,
+            edge=args.edge_host,
+        )
+        if args.dnn:
+            upf = find_upf_pod(upf_host, args.upf_ns, idx, ssh_config=ssh_config)
+            if not upf:
+                print(
+                    f"  oai-ue-{idx}: ERROR — upf-slice-{idx} pod not found on {upf_host}; skipping",
+                    file=sys.stderr,
+                )
+                continue
+            server_ip = dnn_gw(idx)
+            port = args.port
+            t = UeTarget(
+                index=idx,
+                pod=pod,
+                iface=iface,
+                pdu_ip=pdu,
+                server_ip=server_ip,
+                server_host=upf_host,
+                upf_pod=upf,
+                upf_host=upf_host,
+                port=port,
+                dnn_mode=True,
             )
-            continue
-        server_ip = dnn_gw(idx)
-        t = UeTarget(
-            index=idx,
-            pod=pod,
-            iface=iface,
-            pdu_ip=pdu,
-            server_ip=server_ip,
-            upf_pod=upf,
-            port=args.port,
-        )
+            print(
+                f"  ue{idx}: pod={pod} {iface}={pdu} → {server_ip}:{port} "
+                f"(upf={upf}@{upf_host})"
+            )
+        else:
+            server_ip = args.host
+            port = args.port + idx - 1
+            t = UeTarget(
+                index=idx,
+                pod=pod,
+                iface=iface,
+                pdu_ip=pdu,
+                server_ip=server_ip,
+                server_host=args.server_host,
+                upf_pod="",
+                upf_host=upf_host,
+                port=port,
+                dnn_mode=False,
+            )
+            print(
+                f"  ue{idx}: pod={pod} {iface}={pdu} → {server_ip}:{port} "
+                f"(server={args.server_host})"
+            )
         targets.append(t)
-        print(
-            f"  ue{idx}: pod={pod} {iface}={pdu} → {server_ip}:{args.port} "
-            f"(upf={upf})"
-        )
 
     if not targets:
-        print("ERROR: no UEs with active PDU + UPF; aborting.", file=sys.stderr)
+        print("ERROR: no UEs with active PDU; aborting.", file=sys.stderr)
         return 1
     if args.list_only:
         return 0
@@ -1164,17 +1339,15 @@ def main() -> int:
                 f"({directions[0]}); run UL and DL in separate terminals",
                 file=sys.stderr,
             )
-        clear_iperf_upf(
-            args.central_host, args.upf_ns, targets, ssh_config=ssh_config, quiet=True
-        )
+        clear_iperf_servers(args.upf_ns, targets, ssh_config=ssh_config, quiet=True)
+        where = "UPF debug" if args.dnn else args.server_host
         print(
-            f"tmux: window server = iperf3 -s on UPF debug; "
+            f"tmux: window server = iperf3 -s on {where}; "
             f"window client = UE iperf3 ({directions[0]})"
         )
         return open_tmux(
             targets,
             edge=args.edge_host,
-            central=args.central_host,
             ue_ns=args.ue_ns,
             upf_ns=args.upf_ns,
             ssh_config=ssh_config,
@@ -1189,12 +1362,8 @@ def main() -> int:
         )
 
     if not args.skip_server:
-        clear_iperf_upf(
-            args.central_host, args.upf_ns, targets, ssh_config=ssh_config, quiet=True
-        )
-        if not ensure_iperf_servers(
-            args.central_host, args.upf_ns, targets, ssh_config=ssh_config
-        ):
+        clear_iperf_servers(args.upf_ns, targets, ssh_config=ssh_config, quiet=True)
+        if not ensure_iperf_servers(args.upf_ns, targets, ssh_config=ssh_config):
             return 1
 
     cleaned = {"done": False}
@@ -1207,13 +1376,7 @@ def main() -> int:
             args.edge_host, args.ue_ns, targets, ssh_config=ssh_config, quiet=False
         )
         if not args.skip_server:
-            clear_iperf_upf(
-                args.central_host,
-                args.upf_ns,
-                targets,
-                ssh_config=ssh_config,
-                quiet=False,
-            )
+            clear_iperf_servers(args.upf_ns, targets, ssh_config=ssh_config, quiet=False)
 
     atexit.register(_cleanup)
 

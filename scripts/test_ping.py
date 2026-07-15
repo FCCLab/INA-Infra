@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Ping from oai-ue-{N} pods (K8s oai-slice-deployment) to each slice DNN gateway.
+Ping from oai-ue-{N} pods (K8s oai-slice-deployment) toward mgmt-0.
 
-Default target: 10.1.{N}.1 (UPF tun0 / DNN GW), via oaitun_ue*.
+Default target: 10.1.132.200 (mgmt-0), via oaitun_ue*.
+Use --dnn for per-slice DNN GW 10.1.{N}.1 instead.
 
 Examples:
   ./scripts/test_ping.py
   ./scripts/test_ping.py --ue1 --ue3 --count 10
-  ./scripts/test_ping.py --host 10.1.1.1 --ue1
+  ./scripts/test_ping.py --host 10.1.132.11 --ue1
+  ./scripts/test_ping.py --dnn
   ./scripts/test_ping.py --tmux
   ./scripts/test_ping.py --tmux --ue1 --ue2 --session oai_ping
   ./scripts/test_ping.py --list-only
@@ -32,6 +34,7 @@ DEFAULT_SSH_CONFIG = REPO_ROOT / "utils" / "ssh_config" / "config"
 DEFAULT_EDGE_HOST = "edge-0"
 DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_COUNT = 5
+DEFAULT_HOST = os.environ.get("OAI_TEST_HOST", "10.1.132.200")  # mgmt-0
 UE_LABEL_FMT = "app.kubernetes.io/name=oai-ue-{n}"
 OAITUN_CANDIDATES = ("oaitun_ue1", "oaitun_ue0")
 
@@ -212,6 +215,8 @@ def forever_ping_cmd(
     session: str,
 ) -> list[str]:
     """Pane argv: forever ping via ssh+kubectl, retry on exit; Ctrl-C kills session."""
+    # No -it / ssh -t: tmux panes background the job; a forced TTY makes kubectl
+    # abort ("Unable to use a TTY") and ping never starts.
     k_remote = " ".join(
         shlex.quote(a)
         for a in [
@@ -219,7 +224,6 @@ def forever_ping_cmd(
             "-n",
             ue_ns,
             "exec",
-            "-it",
             pod,
             "--",
             "ping",
@@ -234,7 +238,6 @@ def forever_ping_cmd(
             "ssh",
             "-F",
             str(ssh_config),
-            "-t",
             "-o",
             "BatchMode=yes",
             edge,
@@ -340,13 +343,18 @@ def main() -> int:
         pass
 
     ap = argparse.ArgumentParser(
-        description="Ping DNN GW from oai-ue-* pods (default: 10.1.N.1 via oaitun)",
+        description="Ping mgmt-0 (10.1.132.200) from oai-ue-* pods via oaitun",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument(
         "--host",
-        default=None,
-        help="Ping target for all UEs (default: per-slice 10.1.N.1)",
+        default=DEFAULT_HOST,
+        help="Ping target for all UEs (default: mgmt-0)",
+    )
+    ap.add_argument(
+        "--dnn",
+        action="store_true",
+        help="Ping per-slice DNN GW 10.1.N.1 instead of --host",
     )
     ap.add_argument(
         "--count",
@@ -434,7 +442,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             continue
-        host = args.host or dnn_gw(idx)
+        host = dnn_gw(idx) if args.dnn else args.host
         targets.append((idx, pod, iface, pdu, host))
         print(f"  ue{idx}: pod={pod} {iface}={pdu} -> {host}")
 

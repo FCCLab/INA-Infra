@@ -233,12 +233,14 @@ oai_macvlan_ip() {
   printf '%s.%s' "$OAI_MACVLAN_PREFIX" "$((OAI_MACVLAN_BASE[$cluster] + offset))"
 }
 
-# --- oai-slice-deployment: 5 dedicated UPFs + 5 CU-UPs (docs/oai.md, nephio/docs/ip.md) ---
-# UPF pool  .20–.39 (central offsets 10–29): 3 IPs/slice (N3,N4,N6)
-# CU-UP pool .70–.89 (regional offsets 10–29): 3 IPs/slice (E1,F1-U,N3)
+# --- oai-slice-deployment: co-located UPF + CU-UP per slice ---
+# Placement (pod site): 1→central, 2→regional, 3–5→edge.
+# IPs stay on the original pools (shared L2 10.1.139.0/24 — address ≠ host cluster):
+#   UPF  .20–.34 (central offsets 10–24): N3/N4/N6 per slice
+#   CU-UP .70–.84 (regional offsets 10–24): E1/F1-U/N3 per slice
 OAI_SLICE_COUNT="${OAI_SLICE_COUNT:-5}"
-OAI_UPF_SLICE_OFFSET0="${OAI_UPF_SLICE_OFFSET0:-10}"   # central +10 → .20
-OAI_CUUP_SLICE_OFFSET0="${OAI_CUUP_SLICE_OFFSET0:-10}" # regional +10 → .70
+OAI_UPF_SLICE_OFFSET0="${OAI_UPF_SLICE_OFFSET0:-10}"   # +10 → .20
+OAI_CUUP_SLICE_OFFSET0="${OAI_CUUP_SLICE_OFFSET0:-10}" # +10 → .70
 OAI_SLICE_DU_OFFSET="${OAI_SLICE_DU_OFFSET:-3}"        # edge +3 → .113 (F1)
 OAI_SLICE_DU_RF_OFFSET="${OAI_SLICE_DU_RF_OFFSET:-4}"  # edge +4 → .114 (rfsim IQ)
 OAI_SLICE_UE_OFFSET0="${OAI_SLICE_UE_OFFSET0:-5}"      # edge +5 → .115
@@ -254,12 +256,35 @@ OAI_SLICE_XAPP_E2_OFFSET="${OAI_SLICE_XAPP_E2_OFFSET:-11}" # .121 xApp E42
 OAI_XAPP_SWAGGER_VIP="${OAI_XAPP_SWAGGER_VIP:-${CLUSTER_MGMT_IP[edge]}}"
 OAI_XAPP_API_PORT="${OAI_XAPP_API_PORT:-18080}"
 
-# Slice index 1..N → central UPF N3/N4/N6
+# Mgmt LAN CIDR (SSH / Gitea / OpenSpeedTest). UPF N6 routes this via per-site macvlan GW.
+MGMT_CIDR="${MGMT_CIDR:-10.1.132.0/24}"
+
+# Per-site N6 gateway on shared 10.1.139.0/24 (one shim per site CP — avoid ARP clash).
+#   central → .1, regional → .2, edge → .3
+oai_n6_gw_ip() {
+  case "$1" in
+    central) printf '%s.1' "$OAI_MACVLAN_PREFIX" ;;
+    regional) printf '%s.2' "$OAI_MACVLAN_PREFIX" ;;
+    edge) printf '%s.3' "$OAI_MACVLAN_PREFIX" ;;
+    *) printf '%s' "${OAI_MACVLAN_GW}" ;;
+  esac
+}
+
+# Slice → cluster hosting that slice's UPF + CU-UP pods.
+oai_slice_site() {
+  case "$1" in
+    1) printf 'central' ;;
+    2) printf 'regional' ;;
+    *) printf 'edge' ;;
+  esac
+}
+
+# Slice index 1..N → UPF N3/N4/N6 (legacy central pool .20+)
 upf_slice_n3() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3)); }
 upf_slice_n4() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3 + 1)); }
 upf_slice_n6() { oai_macvlan_ip central $((OAI_UPF_SLICE_OFFSET0 + ($1 - 1) * 3 + 2)); }
 
-# Slice index 1..N → regional CU-UP E1/F1-U/N3
+# Slice index 1..N → CU-UP E1/F1-U/N3 (legacy regional pool .70+)
 cuup_slice_e1() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3)); }
 cuup_slice_f1u() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3 + 1)); }
 cuup_slice_n3() { oai_macvlan_ip regional $((OAI_CUUP_SLICE_OFFSET0 + ($1 - 1) * 3 + 2)); }

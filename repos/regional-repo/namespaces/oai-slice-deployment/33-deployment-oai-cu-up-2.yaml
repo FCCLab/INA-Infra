@@ -26,6 +26,7 @@ spec:
           {"name": "cuup-slice2-n3", "interface": "n3", "ips": ["10.1.139.75/24"],
           "gateways": ["10.1.139.1"]}]'
         oai.nephio.org/upf-n3: 10.1.139.23
+        oai.nephio.org/site: regional
     spec:
       serviceAccountName: oai-cu-up-2-sa
       terminationGracePeriodSeconds: 5

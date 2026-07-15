@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-upf-op-conf
+  namespace: oai-cn-operators
+data:
+  upf.yaml: "nad: \n  parent: 'enp7s0'\n  create: False\nports:\n  - name: 'n3n9'\n\
+    \    port: 2152\n    protocol: UDP\n  - name: 'n4'\n    port: 8805\n    protocol:\
+    \ UDP\n  - name: 'sbi'\n    port: 80\n    protocol: TCP\nnfInterfaces:\n  sbi:\
+    \ 'eth0'\n  n3: 'n3'\n  n4: 'n4'\n  n6: 'n6'\n  n9: 'eth0'\ncompute:\n  req:\n\
+    \    cpu: '100m'\n    memory: '512Mi'\n  limits:\n    cpu: '100m'\n    memory:\
+    \ '512Mi'\nlogLevel: debug\nimage: 'docker.io/oaisoftwarealliance/oai-upf:v2.0.1'\n\
+    fqdn:\n  nrf: '127.0.0.1'\n  smf: '127.0.0.1'\n"

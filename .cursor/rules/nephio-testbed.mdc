@@ -36,7 +36,7 @@ IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `nephio/docs/
 2. Push to Gitea: `./bringup/03_push_to_git_repos/push_git_repos.sh`
 3. Verify: `./scripts/check-configsync.sh`
 
-OAI: core on **central**, CU-CP on **edge**, CU-UPs on **regional**, DU/UEs on **edge `usrp`**. Macvlan on `10.1.139.0/24`.
+OAI: core on **central**, CU-CP on **edge**, DU/UEs on **edge `usrp`**. Per-slice **UPF+CU-UP** co-located (1→central, 2→regional, 3–5→edge). Macvlan on `10.1.139.0/24`.
 
 ## Conventions
 

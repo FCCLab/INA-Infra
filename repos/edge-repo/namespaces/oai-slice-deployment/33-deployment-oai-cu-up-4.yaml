@@ -1,33 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oai-cu-up-5
+  name: oai-cu-up-4
   namespace: oai-slice-deployment
   labels:
-    app.kubernetes.io/name: oai-cu-up-5
-    slice: '5'
+    app.kubernetes.io/name: oai-cu-up-4
+    slice: '4'
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: oai-cu-up-5
+      app.kubernetes.io/name: oai-cu-up-4
   template:
     metadata:
       labels:
-        app: oai-cu-up-5
-        app.kubernetes.io/name: oai-cu-up-5
-        slice: '5'
+        app: oai-cu-up-4
+        app.kubernetes.io/name: oai-cu-up-4
+        slice: '4'
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{"name": "cuup-slice5-e1", "interface": "e1",
-          "ips": ["10.1.139.82/24"], "gateways": ["10.1.139.1"]}, {"name": "cuup-slice5-f1u",
-          "interface": "f1u", "ips": ["10.1.139.83/24"], "gateways": ["10.1.139.1"]},
-          {"name": "cuup-slice5-n3", "interface": "n3", "ips": ["10.1.139.84/24"],
+        k8s.v1.cni.cncf.io/networks: '[{"name": "cuup-slice4-e1", "interface": "e1",
+          "ips": ["10.1.139.79/24"], "gateways": ["10.1.139.1"]}, {"name": "cuup-slice4-f1u",
+          "interface": "f1u", "ips": ["10.1.139.80/24"], "gateways": ["10.1.139.1"]},
+          {"name": "cuup-slice4-n3", "interface": "n3", "ips": ["10.1.139.81/24"],
           "gateways": ["10.1.139.1"]}]'
-        oai.nephio.org/upf-n3: 10.1.139.32
+        oai.nephio.org/upf-n3: 10.1.139.29
+        oai.nephio.org/site: edge
     spec:
-      serviceAccountName: oai-cu-up-5-sa
+      serviceAccountName: oai-cu-up-4-sa
       terminationGracePeriodSeconds: 5
       affinity:
         nodeAffinity:
@@ -37,8 +38,8 @@ spec:
               - key: kubernetes.io/hostname
                 operator: In
                 values:
-                - regional-0
-                - regional-1
+                - edge-0
+                - edge-1
       containers:
       - name: cuup
         image: 10.1.132.30:5000/oai-nr-cuup:nws-v0.5-amd64
@@ -83,4 +84,4 @@ spec:
       volumes:
       - name: configuration
         configMap:
-          name: oai-cu-up-5-configmap
+          name: oai-cu-up-4-configmap

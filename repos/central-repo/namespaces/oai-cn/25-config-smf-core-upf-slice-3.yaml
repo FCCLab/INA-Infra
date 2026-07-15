@@ -29,7 +29,7 @@ spec:
       - name: n6
         ipv4:
           address: 10.1.139.28/24
-          gateway: 10.1.139.1
+          gateway: 10.1.139.3
         vlanID: 3
       networkInstances:
       - name: vpc-internal
