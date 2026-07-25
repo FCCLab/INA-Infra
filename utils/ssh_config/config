@@ -75,3 +75,8 @@ Host usrp
     User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa
+
+Host github-ntt
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/ntt
