@@ -48,6 +48,7 @@ for doc in yaml.safe_load_all(Path(manifest).read_text()):
     clean_metadata(doc.get("metadata"))
     if kind == "StorageClass":
         doc["metadata"]["name"] = sc_name
+        doc["allowVolumeExpansion"] = True
         if set_default == "1":
             doc["metadata"].setdefault("annotations", {})[
                 "storageclass.kubernetes.io/is-default-class"
