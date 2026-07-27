@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-slice-3-ips
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/slice: "3"
+data:
+  slice_id: "3"
+  n: "3"
+  upf_n3: "10.1.140.23"
+  upf_n4: "10.1.140.43"
+  upf_n6: "10.1.140.63"
+  cuup_e1: "10.1.140.83"
+  cuup_f1u: "10.1.140.103"
+  cuup_n3: "10.1.140.123"
+  ue_rf: "10.1.140.143"
+  dnn_cidr: "10.140.3.0/24"
+  site_cu: "Central"
+  site_upf: "Central"
+  site_app: "Central"
+  cluster_cu: "central"
+  cluster_upf: "central"
+  peers: |
+    CU-UP E1 -> CU-CP E1 10.1.140.202
+    CU-UP N3 -> UPF N3 10.1.140.23
+    UPF N4 -> SMF N4 10.1.140.12
+    UE RF -> DU RF 10.1.140.204:4043

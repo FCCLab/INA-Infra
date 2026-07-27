@@ -41,28 +41,27 @@ data:
     \ = \"f1\";\n    local_n_address = \"10.1.139.113\";\n    remote_n_address = \"\
     10.1.139.111\";\n    local_n_portc = 500;\n    local_n_portd = 2152;\n    remote_n_portc\
     \ = 501;\n    remote_n_portd = 2152;\n    pusch_TargetSNRx10 = 150;\n    pucch_TargetSNRx10\
-    \ = 150;\n    stats_max_ue = 17;\n    # Match NWS stable NSUL: DL=PF (0), UL=NS\
-    \ (1). NSBOTH (dl=1) can starve SRB and trigger RLC max RETX.\n    dl_scheduler_type\
-    \ = 0;\n    ul_scheduler_type = 1;\n    pusch_FailureThres = 1000;\n    pucch_FailureThres\
-    \ = 1000;\n    dl_harq_round_max = 8;\n    ul_harq_round_max = 8;\n  }\n);\n\n\
-    Slices = (\n  { slice_id = 0; sst = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0;\
-    \ min_prb_ratio = 0.0; max_prb_ratio = 100.0; },\n  { slice_id = 1; sst = 1; sd\
-    \ = 0x000001; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio =\
-    \ 100.0; },\n  { slice_id = 2; sst = 1; sd = 0x000002; dedicated_prb_ratio = 0.0;\
-    \ min_prb_ratio = 0.0; max_prb_ratio = 100.0; },\n  { slice_id = 3; sst = 1; sd\
-    \ = 0x000003; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio =\
-    \ 50.0; },\n  { slice_id = 4; sst = 1; sd = 0x000004; dedicated_prb_ratio = 0.0;\
-    \ min_prb_ratio = 0.0; max_prb_ratio = 50.0; },\n  { slice_id = 5; sst = 1; sd\
-    \ = 0x000005; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio =\
-    \ 50.0; }\n);\n\nL1s = (\n{\n  num_cc = 1;\n  tr_n_preference = \"local_mac\"\
-    ;\n  prach_dtx_threshold = 200;\n}\n);\n\nRUs = (\n    {\n    local_rf = \"yes\"\
-    \n    nb_tx = 1\n    nb_rx = 1\n    att_tx = 0\n    att_rx = 0;\n    bands = [78];\n\
-    \    max_pdschReferenceSignalPower = -27;\n    max_rxgain = 75;\n    eNB_instances\
-    \ = [0];\n    bf_weights = [0x00007fff, 0x0000, 0x0000, 0x0000];\n    clock_src\
-    \ = \"internal\";\n    }\n);\n\nrfsimulator: {\n    serveraddr = \"server\";\n\
-    \    serverport = \"4043\";\n    options = ();\n    modelname = \"AWGN\";\n  \
-    \  IQfile = \"/tmp/rfsimulator.iqs\"\n}\n\nlog_config :\n{\n    global_log_level\
-    \ = \"info\";\n    hw_log_level = \"info\";\n    phy_log_level = \"info\";\n \
-    \   mac_log_level = \"info\";\n    rlc_log_level = \"info\";\n    f1ap_log_level\
-    \ = \"info\";\n};\n\ne2_agent = {\n  near_ric_ip_addr = \"10.1.139.120\";\n  sm_dir\
-    \ = \"/usr/local/lib/flexric/\";\n};\n"
+    \ = 150;\n    stats_max_ue = 17;\n    # NSBOTH: same NS scheduler for UL and DL\
+    \ (match nws 5slices.nsboth).\n    dl_scheduler_type = 1;\n    ul_scheduler_type\
+    \ = 1;\n    pusch_FailureThres = 1000;\n    pucch_FailureThres = 1000;\n    dl_harq_round_max\
+    \ = 8;\n    ul_harq_round_max = 8;\n  }\n);\n\nSlices = (\n  { slice_id = 0; sst\
+    \ = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 100.0; },\n  { slice_id = 1; sst = 1; sd = 0x000001; dedicated_prb_ratio =\
+    \ 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },\n  { slice_id = 2; sst =\
+    \ 1; sd = 0x000002; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 100.0; },\n  { slice_id = 3; sst = 1; sd = 0x000003; dedicated_prb_ratio =\
+    \ 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; },\n  { slice_id = 4; sst =\
+    \ 1; sd = 0x000004; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 50.0; },\n  { slice_id = 5; sst = 1; sd = 0x000005; dedicated_prb_ratio =\
+    \ 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; }\n);\n\nL1s = (\n{\n  num_cc\
+    \ = 1;\n  tr_n_preference = \"local_mac\";\n  prach_dtx_threshold = 200;\n}\n\
+    );\n\nRUs = (\n    {\n    local_rf = \"yes\"\n    nb_tx = 1\n    nb_rx = 1\n \
+    \   att_tx = 0\n    att_rx = 0;\n    bands = [78];\n    max_pdschReferenceSignalPower\
+    \ = -27;\n    max_rxgain = 75;\n    eNB_instances = [0];\n    bf_weights = [0x00007fff,\
+    \ 0x0000, 0x0000, 0x0000];\n    clock_src = \"internal\";\n    }\n);\n\nrfsimulator:\
+    \ {\n    serveraddr = \"server\";\n    serverport = \"4043\";\n    options = ();\n\
+    \    modelname = \"AWGN\";\n    IQfile = \"/tmp/rfsimulator.iqs\"\n}\n\nlog_config\
+    \ :\n{\n    global_log_level = \"info\";\n    hw_log_level = \"info\";\n    phy_log_level\
+    \ = \"info\";\n    mac_log_level = \"info\";\n    rlc_log_level = \"info\";\n\
+    \    f1ap_log_level = \"info\";\n};\n\ne2_agent = {\n  near_ric_ip_addr = \"10.1.139.120\"\
+    ;\n  sm_dir = \"/usr/local/lib/flexric/\";\n};\n"

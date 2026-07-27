@@ -15,6 +15,7 @@ Environment=REPOS_DIR=/home/fcp/nephio-network-slicing/repos
 Environment=PUSH_SCRIPT=/home/fcp/nephio-network-slicing/bringup/03_push_to_git_repos/push_git_repos.sh
 Environment=GRB_LICENSE_FILE=/home/fcp/gurobi.lic
 Environment=PYTHONPATH=/home/fcp/nephio-network-slicing/ina-infra/backend
+Environment=INA_DB_PATH=/home/fcp/nephio-network-slicing/ina-infra/data/profiles.db
 Environment=GITEA_HOST=10.1.132.200
 Environment=GITEA_PORT=3000
 Environment=GITEA_USER=nephio

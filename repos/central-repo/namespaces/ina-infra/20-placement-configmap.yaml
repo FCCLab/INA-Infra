@@ -1,0 +1,451 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-pl-placement
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: ina-pl-placement
+    app.kubernetes.io/part-of: ina-infra
+data:
+  placement.json: |
+    {
+      "generated_at": "2026-07-27T14:03:06.424469+00:00",
+      "cluster": "central",
+      "profile": {
+        "name": "ina-infra",
+        "subnet": "10.1.140.0/24",
+        "max_slices": 16,
+        "dnn_prefix": "10.140"
+      },
+      "note": "INA-Infra profile Apply: Multus NADs + IP ConfigMaps under namespaces/ina-infra/. Dedicated-core NFDeploy CRs can be added alongside; IP formula host=base[role]+n.",
+      "ok": true,
+      "message": "Optimal placement + IP plan for 5 slice(s)",
+      "slices_input": [
+        {
+          "id": 1,
+          "t_bar": 40.0,
+          "d_bar": 100.0,
+          "h_s": 0,
+          "eta_t0": 2.5,
+          "slice_type": "eMBB"
+        },
+        {
+          "id": 2,
+          "t_bar": 20.0,
+          "d_bar": 50.0,
+          "h_s": 1,
+          "eta_t0": 2.0,
+          "slice_type": "URLLC"
+        },
+        {
+          "id": 3,
+          "t_bar": 10.0,
+          "d_bar": 200.0,
+          "h_s": 0,
+          "eta_t0": 1.5,
+          "slice_type": "mMTC"
+        },
+        {
+          "id": 4,
+          "t_bar": 60.0,
+          "d_bar": 80.0,
+          "h_s": 0,
+          "eta_t0": 2.5,
+          "slice_type": "eMBB"
+        },
+        {
+          "id": 5,
+          "t_bar": 30.0,
+          "d_bar": 40.0,
+          "h_s": 1,
+          "eta_t0": 2.0,
+          "slice_type": "URLLC"
+        }
+      ],
+      "deploy_map": {
+        "1": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "2": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "3": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "4": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "5": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        }
+      },
+      "resources": {
+        "1": {
+          "a_c_cu": 39.21568627450981,
+          "a_r_cu": 10.0,
+          "a_c_upf": 49.382716049382715,
+          "a_r_upf": 10.0,
+          "a_c_app": 80.0,
+          "a_r_app": 5000.0,
+          "a_g_app": 40.0,
+          "b_min": 16.0,
+          "b_ded": null
+        },
+        "2": {
+          "a_c_cu": 19.607843137254903,
+          "a_r_cu": 10.0,
+          "a_c_upf": 24.691358024691358,
+          "a_r_upf": 10.0,
+          "a_c_app": 40.0,
+          "a_r_app": 2500.0,
+          "a_g_app": 20.0,
+          "b_min": 10.0,
+          "b_ded": null
+        },
+        "3": {
+          "a_c_cu": 9.803921568627452,
+          "a_r_cu": 10.0,
+          "a_c_upf": 12.345679012345679,
+          "a_r_upf": 10.0,
+          "a_c_app": 20.0,
+          "a_r_app": 1250.0,
+          "a_g_app": 10.0,
+          "b_min": 7.0,
+          "b_ded": null
+        },
+        "4": {
+          "a_c_cu": 58.8235294117647,
+          "a_r_cu": 10.0,
+          "a_c_upf": 74.07407407407408,
+          "a_r_upf": 10.0,
+          "a_c_app": 120.0,
+          "a_r_app": 7500.0,
+          "a_g_app": 60.0,
+          "b_min": 24.0,
+          "b_ded": null
+        },
+        "5": {
+          "a_c_cu": 29.41176470588235,
+          "a_r_cu": 10.0,
+          "a_c_upf": 37.03703703703704,
+          "a_r_upf": 10.0,
+          "a_c_app": 60.0,
+          "a_r_app": 3750.0,
+          "a_g_app": 30.0,
+          "b_min": 15.0,
+          "b_ded": null
+        }
+      },
+      "slices": [
+        {
+          "id": 1,
+          "slice_type": "eMBB",
+          "t_bar": 40.0,
+          "d_bar": 100.0,
+          "h_s": 0,
+          "eta_t0": 2.5,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 39.21568627450981,
+            "a_r_cu": 10.0,
+            "a_c_upf": 49.382716049382715,
+            "a_r_upf": 10.0,
+            "a_c_app": 80.0,
+            "a_r_app": 5000.0,
+            "a_g_app": 40.0,
+            "b_min": 16.0,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 2,
+          "slice_type": "URLLC",
+          "t_bar": 20.0,
+          "d_bar": 50.0,
+          "h_s": 1,
+          "eta_t0": 2.0,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 19.607843137254903,
+            "a_r_cu": 10.0,
+            "a_c_upf": 24.691358024691358,
+            "a_r_upf": 10.0,
+            "a_c_app": 40.0,
+            "a_r_app": 2500.0,
+            "a_g_app": 20.0,
+            "b_min": 10.0,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 3,
+          "slice_type": "mMTC",
+          "t_bar": 10.0,
+          "d_bar": 200.0,
+          "h_s": 0,
+          "eta_t0": 1.5,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 9.803921568627452,
+            "a_r_cu": 10.0,
+            "a_c_upf": 12.345679012345679,
+            "a_r_upf": 10.0,
+            "a_c_app": 20.0,
+            "a_r_app": 1250.0,
+            "a_g_app": 10.0,
+            "b_min": 7.0,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 4,
+          "slice_type": "eMBB",
+          "t_bar": 60.0,
+          "d_bar": 80.0,
+          "h_s": 0,
+          "eta_t0": 2.5,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 58.8235294117647,
+            "a_r_cu": 10.0,
+            "a_c_upf": 74.07407407407408,
+            "a_r_upf": 10.0,
+            "a_c_app": 120.0,
+            "a_r_app": 7500.0,
+            "a_g_app": 60.0,
+            "b_min": 24.0,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 5,
+          "slice_type": "URLLC",
+          "t_bar": 30.0,
+          "d_bar": 40.0,
+          "h_s": 1,
+          "eta_t0": 2.0,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 29.41176470588235,
+            "a_r_cu": 10.0,
+            "a_c_upf": 37.03703703703704,
+            "a_r_upf": 10.0,
+            "a_c_app": 60.0,
+            "a_r_app": 3750.0,
+            "a_g_app": 30.0,
+            "b_min": 15.0,
+            "b_ded": null
+          }
+        }
+      ],
+      "ip_plan": {
+        "profile": {
+          "name": "ina-infra",
+          "subnet": "10.1.140.0/24",
+          "max_slices": 16,
+          "dnn_prefix": "10.140"
+        },
+        "subnet": "10.1.140.0/24",
+        "n_slices": 5,
+        "shared": {
+          "gw_central": "10.1.140.1",
+          "gw_regional": "10.1.140.2",
+          "gw_edge": "10.1.140.3",
+          "amf_n2": "10.1.140.10",
+          "smf_n4": "10.1.140.12",
+          "cucp_n2": "10.1.140.200",
+          "cucp_f1c": "10.1.140.201",
+          "cucp_e1": "10.1.140.202",
+          "du_f1": "10.1.140.203",
+          "du_rf": "10.1.140.204",
+          "flexric_e2": "10.1.140.205",
+          "xapp_e2": "10.1.140.206",
+          "gateway": "10.1.140.1",
+          "prefix_len": 24
+        },
+        "slices": [
+          {
+            "n": 1,
+            "slice_id": 1,
+            "upf_n3": "10.1.140.21",
+            "upf_n4": "10.1.140.41",
+            "upf_n6": "10.1.140.61",
+            "cuup_e1": "10.1.140.81",
+            "cuup_f1u": "10.1.140.101",
+            "cuup_n3": "10.1.140.121",
+            "ue_rf": "10.1.140.141",
+            "dnn_cidr": "10.140.1.0/24",
+            "site_cu": "Central",
+            "site_upf": "Central",
+            "site_app": "Central",
+            "cluster_cu": "central",
+            "cluster_upf": "central"
+          },
+          {
+            "n": 2,
+            "slice_id": 2,
+            "upf_n3": "10.1.140.22",
+            "upf_n4": "10.1.140.42",
+            "upf_n6": "10.1.140.62",
+            "cuup_e1": "10.1.140.82",
+            "cuup_f1u": "10.1.140.102",
+            "cuup_n3": "10.1.140.122",
+            "ue_rf": "10.1.140.142",
+            "dnn_cidr": "10.140.2.0/24",
+            "site_cu": "Central",
+            "site_upf": "Central",
+            "site_app": "Central",
+            "cluster_cu": "central",
+            "cluster_upf": "central"
+          },
+          {
+            "n": 3,
+            "slice_id": 3,
+            "upf_n3": "10.1.140.23",
+            "upf_n4": "10.1.140.43",
+            "upf_n6": "10.1.140.63",
+            "cuup_e1": "10.1.140.83",
+            "cuup_f1u": "10.1.140.103",
+            "cuup_n3": "10.1.140.123",
+            "ue_rf": "10.1.140.143",
+            "dnn_cidr": "10.140.3.0/24",
+            "site_cu": "Central",
+            "site_upf": "Central",
+            "site_app": "Central",
+            "cluster_cu": "central",
+            "cluster_upf": "central"
+          },
+          {
+            "n": 4,
+            "slice_id": 4,
+            "upf_n3": "10.1.140.24",
+            "upf_n4": "10.1.140.44",
+            "upf_n6": "10.1.140.64",
+            "cuup_e1": "10.1.140.84",
+            "cuup_f1u": "10.1.140.104",
+            "cuup_n3": "10.1.140.124",
+            "ue_rf": "10.1.140.144",
+            "dnn_cidr": "10.140.4.0/24",
+            "site_cu": "Central",
+            "site_upf": "Central",
+            "site_app": "Central",
+            "cluster_cu": "central",
+            "cluster_upf": "central"
+          },
+          {
+            "n": 5,
+            "slice_id": 5,
+            "upf_n3": "10.1.140.25",
+            "upf_n4": "10.1.140.45",
+            "upf_n6": "10.1.140.65",
+            "cuup_e1": "10.1.140.85",
+            "cuup_f1u": "10.1.140.105",
+            "cuup_n3": "10.1.140.125",
+            "ue_rf": "10.1.140.145",
+            "dnn_cidr": "10.140.5.0/24",
+            "site_cu": "Central",
+            "site_upf": "Central",
+            "site_app": "Central",
+            "cluster_cu": "central",
+            "cluster_upf": "central"
+          }
+        ],
+        "bases": {
+          "gw_central": 1,
+          "gw_regional": 2,
+          "gw_edge": 3,
+          "amf_n2": 10,
+          "smf_n4": 12,
+          "cucp_n2": 200,
+          "cucp_f1c": 201,
+          "cucp_e1": 202,
+          "du_f1": 203,
+          "du_rf": 204,
+          "flexric_e2": 205,
+          "xapp_e2": 206,
+          "upf_n3": 20,
+          "upf_n4": 40,
+          "upf_n6": 60,
+          "cuup_e1": 80,
+          "cuup_f1u": 100,
+          "cuup_n3": 120,
+          "ue_rf": 140
+        }
+      }
+    }
+  summary.txt: |
+    # INA-Infra profile=ina-infra subnet=10.1.140.0/24
+    # generated_at=2026-07-27T14:03:06.417899+00:00
+    # N=5  formula: host = base[role] + n
+    #
+    # slice | CU | UPF | APP | UPF_N3 | CUUP_N3 | UE_RF | DNN
+    #     1 | Central  | Central  | Central  | 10.1.140.21 | 10.1.140.121 | 10.1.140.141 | 10.140.1.0/24
+    #     2 | Central  | Central  | Central  | 10.1.140.22 | 10.1.140.122 | 10.1.140.142 | 10.140.2.0/24
+    #     3 | Central  | Central  | Central  | 10.1.140.23 | 10.1.140.123 | 10.1.140.143 | 10.140.3.0/24
+    #     4 | Central  | Central  | Central  | 10.1.140.24 | 10.1.140.124 | 10.1.140.144 | 10.140.4.0/24
+    #     5 | Central  | Central  | Central  | 10.1.140.25 | 10.1.140.125 | 10.1.140.145 | 10.140.5.0/24
+    #
+    # AMF_N2=10.1.140.10 SMF_N4=10.1.140.12
+    # CUCP N2/F1/E1=10.1.140.200/10.1.140.201/10.1.140.202
+    # DU F1/RF=10.1.140.203/10.1.140.204 FlexRIC=10.1.140.205
+

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-slice-{{ n }}-ips
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/slice: "{{ n }}"
+data:
+  slice_id: "{{ slice_id }}"
+  n: "{{ n }}"
+  upf_n3: "{{ upf_n3 }}"
+  upf_n4: "{{ upf_n4 }}"
+  upf_n6: "{{ upf_n6 }}"
+  cuup_e1: "{{ cuup_e1 }}"
+  cuup_f1u: "{{ cuup_f1u }}"
+  cuup_n3: "{{ cuup_n3 }}"
+  ue_rf: "{{ ue_rf }}"
+  dnn_cidr: "{{ dnn_cidr }}"
+  site_cu: "{{ site_cu }}"
+  site_upf: "{{ site_upf }}"
+  site_app: "{{ site_app }}"
+  cluster_cu: "{{ cluster_cu }}"
+  cluster_upf: "{{ cluster_upf }}"
+  peers: |
+    CU-UP E1 -> CU-CP E1 {{ cucp_e1 }}
+    CU-UP N3 -> UPF N3 {{ upf_n3 }}
+    UPF N4 -> SMF N4 {{ smf_n4 }}
+    UE RF -> DU RF {{ du_rf }}:4043

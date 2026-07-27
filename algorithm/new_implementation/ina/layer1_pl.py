@@ -53,6 +53,8 @@ class PlanningLayer:
 
         m = gp.Model("PL_Layer1")
         m.setParam("OutputFlag", net.gurobi_output)
+        # Placement × continuous size terms in cost/capacity are bilinear
+        m.setParam("NonConvex", 2)
 
         # ----- Variables -------------------------------------------------------
         # Placement binaries: x[s,j]=1 ⇒ CU of slice s at site j (same for y/z)
@@ -120,6 +122,15 @@ class PlanningLayer:
             m.addConstr(t_plan[sid] <= net.gamma_r * a_r_app[sid])
             m.addConstr(t_plan[sid] <= net.gamma_g * a_g_app[sid])
 
+            # Hard min size so site capacity actually constrains placement
+            # (otherwise the solver shrinks compute on a cheap/tight site and pays ξ_com).
+            m.addConstr(a_c_cu[sid] >= sl.t_bar / net.alpha_cu)
+            m.addConstr(a_c_upf[sid] >= sl.t_bar / net.alpha_upf)
+            m.addConstr(a_c_app[sid] >= sl.t_bar / net.gamma_c)
+            m.addConstr(a_r_app[sid] >= sl.t_bar / net.gamma_r)
+            m.addConstr(a_g_app[sid] >= sl.t_bar / net.gamma_g)
+            m.addConstr(t_plan[sid] >= sl.t_bar)  # meet throughput SLA in PL
+
             # PRB structure: dedicated ≤ reserved; URLLC (h_s=1) ⇒ all dedicated
             m.addConstr(b_ded[sid] <= b_min[sid])
             m.addConstr(b_min[sid] <= net.b_total)
@@ -141,8 +152,10 @@ class PlanningLayer:
                         m.addConstr(yz[sid, k, loc_app] <= z[sid, loc_app])
 
             # Delay from placement; shortfall if above slice.d_bar
+            # RF: UE→DU; F1: DU@Edge→CU; N3: CU→UPF; N6: UPF→APP
             delay = (
-                gp.quicksum(net.d_f1[j] * x[sid, j] for j in locs)
+                net.d_rf
+                + gp.quicksum(net.d_f1[j] * x[sid, j] for j in locs)
                 + gp.quicksum(net.d_n3[j, k] * xy[sid, j, k] for j in locs for k in locs)
                 + gp.quicksum(
                     net.d_n6[k, loc_app] * yz[sid, k, loc_app]

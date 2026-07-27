@@ -1,0 +1,13 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: {{ nad_name }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/role: {{ role }}
+{% if slice_n is defined %}
+    ina-infra.nephio.lab/slice: "{{ slice_n }}"
+{% endif %}
+spec:
+  config: '{"cniVersion": "0.3.1", "name": "{{ nad_name }}", "plugins": [{"type": "macvlan", "capabilities": {"ips": true}, "master": "{{ master }}", "mode": "bridge", "ipam": {"type": "static", "addresses": [{"address": "{{ address }}/{{ prefix_len }}", "gateway": "{{ gateway }}"}]}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}, "sysctl": {"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}]}'

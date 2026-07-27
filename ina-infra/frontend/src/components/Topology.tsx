@@ -89,11 +89,14 @@ function LegendIcon({ kind }: { kind: "cu" | "upf" | "app" }) {
 }
 
 export default function Topology({ slices }: Props) {
+  // Slice 1 on top, then 2, 3, ... downward
   const sorted = [...slices].sort((a, b) => a.id - b.id);
   const maxId = sorted.length ? Math.max(...sorted.map((s) => s.id)) : 1;
   const minId = sorted.length ? Math.min(...sorted.map((s) => s.id)) : 1;
+  /** Plot y so smaller id is higher on screen (after SVG invert). */
+  const rowY = (id: number) => maxId - id + minId;
 
-  // SVG mapping of matplotlib coords: x in [-0.5, 2.5], y in [0.5, maxId+2]
+  // SVG mapping: x in [-0.5, 2.5], y in [0.5, maxId+2]
   const padL = 90;
   const padR = 24;
   const padT = 48;
@@ -158,21 +161,21 @@ export default function Topology({ slices }: Props) {
           );
         })}
 
-        {/* Horizontal grid + slice labels */}
+        {/* Horizontal grid + slice labels (slice 1 at top) */}
         {sorted.map((s) => (
           <g key={`grid-${s.id}`}>
             <line
               x1={sx(xMin)}
               x2={sx(xMax)}
-              y1={sy(s.id)}
-              y2={sy(s.id)}
+              y1={sy(rowY(s.id))}
+              y2={sy(rowY(s.id))}
               stroke="#ccc"
               strokeDasharray="4 4"
               strokeWidth={1}
             />
             <text
               x={padL - 12}
-              y={sy(s.id) + 4}
+              y={sy(rowY(s.id)) + 4}
               textAnchor="end"
               className="topo-slice-label"
             >
@@ -194,7 +197,7 @@ export default function Topology({ slices }: Props) {
         {/* Links + markers */}
         {sorted.map((s) => {
           const color = sliceColor(s.id);
-          const y = s.id;
+          const y = rowY(s.id);
           const pts = [
             { kind: "cu" as const, x: siteId(s.placement.cu) + OFFSET.cu, y },
             { kind: "upf" as const, x: siteId(s.placement.upf) + OFFSET.upf, y },

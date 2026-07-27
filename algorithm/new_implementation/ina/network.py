@@ -22,34 +22,38 @@ class Network:
     locations: List[int] = field(default_factory=lambda: [0, 1, 2])
 
     # --- NF (CU / UPF) capacity per site ---------------------------------------
-    # c_n = CPU units for network functions; r_n = RAM units
+    # Sized for target demo placement:
+    #   CCTV CU@Edge + UPF@Regional; Physical AI all@Edge;
+    #   OTT CU@Regional + UPF@Central; IoT all@Central.
     c_n_capacity: Dict[int, float] = field(
-        default_factory=lambda: {0: 400, 1: 800, 2: 5000}
+        default_factory=lambda: {0: 55, 1: 52, 2: 61}
     )
     r_n_capacity: Dict[int, float] = field(
-        default_factory=lambda: {0: 5120, 1: 20480, 2: 102400}
+        default_factory=lambda: {0: 64, 1: 64, 2: 64}
     )
 
     # --- APP capacity per site -------------------------------------------------
-    # Application workload: CPU, RAM, GPU
+    # Edge fits Physical AI APP only; regional fits CCTV; central fits OTT+IoT.
+    # RAM sized for T̄/γ_r (PA≈2500, CCTV≈1250, OTT+IoT≈5625).
     c_a_capacity: Dict[int, float] = field(
-        default_factory=lambda: {0: 400, 1: 700, 2: 5000}
+        default_factory=lambda: {0: 41, 1: 25, 2: 90}
     )
-    r_a_capacity: Dict[int, float] = field(default_factory=dict)  # default: 2× r_n
+    r_a_capacity: Dict[int, float] = field(
+        default_factory=lambda: {0: 2600, 1: 1400, 2: 5625}
+    )
     g_a_capacity: Dict[int, float] = field(
-        default_factory=lambda: {0: 150, 1: 300, 2: 1200}
+        default_factory=lambda: {0: 22, 1: 12, 2: 45}
     )
 
-    # --- Cost coefficients (cheaper toward Central) ----------------------------
-    # Used in objectives: cost ≈ amount × p_*[location]
+    # --- Cost coefficients (edge expensive → prefer regional/central when delay OK)
     p_c: Dict[int, float] = field(
-        default_factory=lambda: {0: 0.5, 1: 0.05, 2: 0.001}  # CPU cost
+        default_factory=lambda: {0: 2.5, 1: 0.25, 2: 0.001}  # CPU cost
     )
     p_r: Dict[int, float] = field(
-        default_factory=lambda: {0: 0.1, 1: 0.01, 2: 0.002}  # RAM cost
+        default_factory=lambda: {0: 0.5, 1: 0.05, 2: 0.002}  # RAM cost
     )
     p_g: Dict[int, float] = field(
-        default_factory=lambda: {0: 1.0, 1: 0.5, 2: 0.1}  # GPU cost
+        default_factory=lambda: {0: 2.5, 1: 0.5, 2: 0.1}  # GPU cost
     )
     p_prb_ded: float = 0.5  # cost weight for dedicated PRBs
     p_prb_prio: float = 0.1  # cost weight for shared/priority PRBs
@@ -65,22 +69,29 @@ class Network:
     min_r_upf: float = 10.0  # lower bound on UPF RAM in MILP
 
     # --- Link delays (ms), used only in PL -------------------------------------
-    # End-to-end delay ≈ D_F1[CU] + D_N3[CU,UPF] + D_N6[UPF,APP]
+    # Sites: 0=Edge, 1=Regional, 2=Central.
+    # Hop RTT (ping): Edge↔Regional=20, Regional↔Central=20 → Edge↔Central=40.
+    # (Values are round-trip; one-way would be half.) Same-site diagonal ≈ 2 ms.
+    # E2E ≈ d_rf + d_f1[CU] + d_n3[CU,UPF] + d_n6[UPF,APP].
+    # DU is always at Edge → F1 is a single row keyed by CU-UP site only.
+    d_rf: float = 20.0  # UE → DU (RF / air interface), fixed
     d_f1: Dict[int, float] = field(
-        default_factory=lambda: {0: 1, 1: 15, 2: 30}  # radio↔CU by CU site
+        default_factory=lambda: {0: 2, 1: 20, 2: 40}  # DU@Edge → CU-UP site (RTT)
     )
     d_n3: Dict[Tuple[int, int], float] = field(
         default_factory=lambda: {
-            (0, 0): 1, (0, 1): 10, (0, 2): 20,
-            (1, 0): 10, (1, 1): 1, (1, 2): 10,
-            (2, 0): 20, (2, 1): 10, (2, 2): 1,
+            # rows=CU-UP site, cols=UPF site (RTT)
+            (0, 0): 2, (0, 1): 20, (0, 2): 40,
+            (1, 0): 20, (1, 1): 2, (1, 2): 20,
+            (2, 0): 40, (2, 1): 20, (2, 2): 2,
         }
     )
     d_n6: Dict[Tuple[int, int], float] = field(
         default_factory=lambda: {
-            (0, 0): 5, (0, 1): 15, (0, 2): 30,
-            (1, 0): 15, (1, 1): 5, (1, 2): 15,
-            (2, 0): 30, (2, 1): 15, (2, 2): 5,
+            # Prefer UPF↔APP co-location (cross-site N6 higher than pure hop RTT).
+            (0, 0): 2, (0, 1): 25, (0, 2): 50,
+            (1, 0): 25, (1, 1): 2, (1, 2): 35,
+            (2, 0): 50, (2, 1): 35, (2, 2): 2,
         }
     )
 
@@ -123,8 +134,7 @@ class Network:
                 f"{self.r_n_capacity[j]}; "
                 f"APP CPU/RAM/GPU capacity={self.c_a_capacity[j]}/"
                 f"{self.r_a_capacity[j]}/{self.g_a_capacity[j]}; "
-                f"unit cost CPU/RAM/GPU={self.p_c[j]}/{self.p_r[j]}/{self.p_g[j]}; "
-                f"radio↔CU delay (F1)={self.d_f1[j]} ms"
+                f"unit cost CPU/RAM/GPU={self.p_c[j]}/{self.p_r[j]}/{self.p_g[j]}"
             )
         def _delay_table(title: str, row_label: str, col_label: str, matrix) -> list[str]:
             names = [loc_names[j] for j in self.locations]
@@ -141,14 +151,32 @@ class Network:
                 out.append(row)
             return out
 
+        lines.append(f"  RF delay UE→DU: {self.d_rf} ms")
+        # F1: one row (DU always at Edge)
+        f1_names = [loc_names[j] for j in self.locations]
+        f1_row_label = "DU@Edge"
+        f1_col_w = max(len(n) for n in f1_names + [f1_row_label])
+        f1_cell_w = max(4, max(len(n) for n in f1_names))
+        lines.append("  F1 delay DU→CU-UP (ms; DU fixed at Edge, cols=CU-UP site):")
+        lines.append(
+            f"    {f1_row_label:<{f1_col_w}}"
+            + "".join(f"  {n:>{f1_cell_w}}" for n in f1_names)
+        )
+        lines.append(
+            f"    {'-' * f1_col_w}" + "".join(f"  {'-' * f1_cell_w}" for _ in f1_names)
+        )
+        f1_vals = f"    {f1_row_label:<{f1_col_w}}"
+        for j in self.locations:
+            f1_vals += f"  {self.d_f1[j]:>{f1_cell_w}.0f}"
+        lines.append(f1_vals)
         lines.extend(
             _delay_table(
-                "Midhaul delay CU→UPF (N3)", "CU\\UPF", "UPF site", self.d_n3
+                "N3 delay CU-UP→UPF", "CU\\UPF", "UPF site", self.d_n3
             )
         )
         lines.extend(
             _delay_table(
-                "Backhaul delay UPF→APP (N6)", "UPF\\APP", "APP site", self.d_n6
+                "N6 delay UPF→APP", "UPF\\APP", "APP site", self.d_n6
             )
         )
         return "\n".join(lines)

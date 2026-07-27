@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-core-ips
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/name: ina-core-ips
+    app.kubernetes.io/part-of: ina-infra
+data:
+  subnet: "{{ subnet }}"
+  amf_n2: "{{ shared.amf_n2 }}"
+  smf_n4: "{{ shared.smf_n4 }}"
+  gw_central: "{{ shared.gw_central }}"
+  gw_regional: "{{ shared.gw_regional }}"
+  gw_edge: "{{ shared.gw_edge }}"
+  note: |
+    Dedicated-core Multus IPs for profile {{ namespace }}.
+    Formula: slice-scoped host = base[role] + n.
+    Full OAI NFDeploy/CRs are layered later; NADs + this CM are the IP source of truth.

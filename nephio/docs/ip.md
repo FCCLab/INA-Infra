@@ -8,6 +8,7 @@ Two subnets split **operator/mgmt** from **cluster/data** traffic:
 | **10.1.137.0/24** | `enp7s0` | Kubernetes API, node traffic, Flannel |
 | **10.1.138.0/24** | `enp7s0` | MetalLB LoadBalancer VIPs (same L2 as `.137`) |
 | **10.1.139.0/24** | `enp7s0` | OAI macvlan only (Multus NADs; no host IP) — see [oai.md](../../docs/oai.md) |
+| **10.1.140.0/24** | `enp7s0` | INA-Infra profile Multus (default profile `ina-infra`; host=`base[role]+n`) — see [ina-infra/README.md](../../ina-infra/README.md) |
 
 Definitions: [scripts/cluster_lib.sh](../../scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](../../scripts/setup_ip.sh). Topology: [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md).
 

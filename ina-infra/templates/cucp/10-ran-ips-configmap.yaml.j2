@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-ran-ips
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/name: ina-ran-ips
+    app.kubernetes.io/part-of: ina-infra
+data:
+  cucp_n2: "{{ shared.cucp_n2 }}"
+  cucp_f1c: "{{ shared.cucp_f1c }}"
+  cucp_e1: "{{ shared.cucp_e1 }}"
+  du_f1: "{{ shared.du_f1 }}"
+  du_rf: "{{ shared.du_rf }}"
+  flexric_e2: "{{ shared.flexric_e2 }}"
+  xapp_e2: "{{ shared.xapp_e2 }}"
+  peers: |
+    CU-CP N2 -> AMF N2 {{ shared.amf_n2 }}
+    DU F1 -> CU-CP F1-C {{ shared.cucp_f1c }}
+    UE RFsim -> DU RF {{ shared.du_rf }}:4043
+    E2 -> FlexRIC {{ shared.flexric_e2 }}

@@ -1674,8 +1674,8 @@ MACRLCs = (
     pusch_TargetSNRx10 = 150;
     pucch_TargetSNRx10 = 150;
     stats_max_ue = 17;
-    # Match NWS stable NSUL: DL=PF (0), UL=NS (1). NSBOTH (dl=1) can starve SRB and trigger RLC max RETX.
-    dl_scheduler_type = 0;
+    # NSBOTH: same NS scheduler for UL and DL (match nws 5slices.nsboth).
+    dl_scheduler_type = 1;
     ul_scheduler_type = 1;
     pusch_FailureThres = 1000;
     pucch_FailureThres = 1000;
