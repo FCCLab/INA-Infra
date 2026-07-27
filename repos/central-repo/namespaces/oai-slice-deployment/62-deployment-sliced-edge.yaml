@@ -13,6 +13,8 @@ spec:
     metadata:
       labels: *id001
     spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
       containers:
       - name: edge
         image: 10.1.132.30:5000/sliced-edge:nws-v0.5-amd64
@@ -55,5 +57,3 @@ spec:
             port: 1883
           initialDelaySeconds: 5
           periodSeconds: 10
-      nodeSelector:
-        kubernetes.io/arch: amd64

@@ -363,6 +363,7 @@ def main() -> int:
         help="ping -c N (ignored with --tmux)",
     )
     ap.add_argument(
+        "-t",
         "--tmux",
         action="store_true",
         help="One tmux pane per UE; ping forever (auto-retry)",

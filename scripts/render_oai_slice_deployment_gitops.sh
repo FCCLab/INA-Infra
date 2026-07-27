@@ -107,7 +107,9 @@ FLEXRIC_IP="$(oai_slice_flexric)"
 XAPP_E2_IP="$(oai_slice_xapp_e2)"
 XAPP_SWAGGER_VIP="${OAI_XAPP_SWAGGER_VIP}"
 XAPP_API_PORT="${OAI_XAPP_API_PORT}"
-SMF_N4="$(oai_macvlan_ip central 2)"
+SMF_N4="$(oai_smf_n4_ip)"
+NRF_LB="$(oai_nrf_lb_ip)"
+export OAI_NRF_LB_IP="$NRF_LB"
 GW="$OAI_MACVLAN_GW"
 N6_GW_CENTRAL="$(oai_n6_gw_ip central)"
 N6_GW_REGIONAL="$(oai_n6_gw_ip regional)"
@@ -174,6 +176,48 @@ SITE_N6_GW = {
     "regional": n6_gw_regional,
     "edge": n6_gw_edge,
 }
+# Unified UPF peer endpoints for every site (central / regional / edge).
+# SMF N4 macvlan + NRF MetalLB — never ClusterIP DNS (does not resolve off-central).
+nrf_lb = os.environ.get("OAI_NRF_LB_IP") or os.environ.get("OAI_NRF_LB", "10.1.138.100")
+UPF_PEER_SMF = smf_n4
+UPF_PEER_NRF = nrf_lb
+# SMF uses static upfs (discover_upf: no); same register_nf for all slices.
+UPF_REGISTER_NF = "no"
+
+
+def patch_upf_op_conf_peers(path: Path, *, smf: str = UPF_PEER_SMF, nrf: str = UPF_PEER_NRF) -> None:
+    """Set op-conf fqdn.smf / fqdn.nrf to shared IPs."""
+    if not path.is_file():
+        return
+    doc = yaml.safe_load(path.read_text())
+    raw = doc["data"]["upf.yaml"]
+    raw = re.sub(r"smf: '[^']*'", f"smf: '{smf}'", raw)
+    raw = re.sub(r"nrf: '[^']*'", f"nrf: '{nrf}'", raw)
+    doc["data"]["upf.yaml"] = raw
+    dump(doc, path)
+
+
+def patch_upf_nf_conf_register(path: Path, *, register: str = UPF_REGISTER_NF) -> None:
+    """Unify register_nf.upf in the operator nf-conf jinja template."""
+    if not path.is_file():
+        return
+    doc = yaml.safe_load(path.read_text())
+    tpl = doc["data"]["upf.yaml"]
+    tpl = re.sub(
+        r"register_nf:\n  upf: '[^']*'",
+        f"register_nf:\n  upf: '{register}'",
+        tpl,
+    )
+    doc["data"]["upf.yaml"] = tpl
+    dump(doc, path)
+
+
+def apply_unified_upf_operator_peers(site: str) -> None:
+    """Same SMF/NRF IPs + register_nf on every cluster's UPF operator configs."""
+    ops = repos / REPO_NAME[site] / "namespaces" / ops_ns
+    patch_upf_op_conf_peers(ops / "configmap-oai-upf-op-conf.yaml")
+    patch_upf_nf_conf_register(ops / "configmap-oai-upf-nf-conf.yaml")
+
 
 # Slice A CCTV config (from exported SLICEA_* env vars).
 SLICEA = {
@@ -249,7 +293,18 @@ def nad(name, ns, master, ip, *, gateway=None, routes=None):
                 "mode": "bridge",
                 "ipam": ipam,
             },
-            {"type": "tuning", "capabilities": {"mac": True}, "ipam": {}},
+            # arp_ignore=1 / arp_announce=2: each macvlan only ARPs for its
+            # own IP. Without this, UPF n3/n4/n6 on the same 10.1.139.0/24
+            # cause ARP flux (SMF learned UPF1 .21 → n6 MAC → no PFCP on n4).
+            {
+                "type": "tuning",
+                "capabilities": {"mac": True},
+                "ipam": {},
+                "sysctl": {
+                    "net.ipv4.conf.IFNAME.arp_ignore": "1",
+                    "net.ipv4.conf.IFNAME.arp_announce": "2",
+                },
+            },
         ],
     }
     return {
@@ -566,29 +621,14 @@ def ensure_upf_operator(site: str) -> None:
         if src.is_file():
             shutil.copy2(src, dest_ops / name)
 
-    # op-conf: point NRF/SMF FQDNs at loopback — ClusterIP names do not resolve off-central.
+    # op-conf / nf-conf peers unified later via apply_unified_upf_operator_peers().
     op_src = src_ops / "configmap-oai-upf-op-conf.yaml"
     if op_src.is_file():
-        doc = yaml.safe_load(op_src.read_text())
-        raw = doc["data"]["upf.yaml"]
-        raw = raw.replace(
-            "nrf: 'oai-nrf.oai-cn.svc.cluster.local'",
-            "nrf: '127.0.0.1'",
-        ).replace(
-            "smf: 'oai-smf.oai-cn.svc.cluster.local'",
-            "smf: '127.0.0.1'",
-        )
-        doc["data"]["upf.yaml"] = raw
-        dump(doc, dest_ops / "configmap-oai-upf-op-conf.yaml")
+        shutil.copy2(op_src, dest_ops / "configmap-oai-upf-op-conf.yaml")
 
-    # nf-conf: disable NRF registration (SMF already has static UPF Config refs).
     nf_src = src_ops / "configmap-oai-upf-nf-conf.yaml"
     if nf_src.is_file():
-        doc = yaml.safe_load(nf_src.read_text())
-        tpl = doc["data"]["upf.yaml"]
-        tpl = tpl.replace("register_nf:\n  upf: 'yes'", "register_nf:\n  upf: 'no'")
-        doc["data"]["upf.yaml"] = tpl
-        dump(doc, dest_ops / "configmap-oai-upf-nf-conf.yaml")
+        shutil.copy2(nf_src, dest_ops / "configmap-oai-upf-nf-conf.yaml")
 
     dep_src = src_ops / "deployment-oai-upf-controller.yaml"
     if dep_src.is_file():
@@ -641,6 +681,8 @@ for site in ("central", "regional", "edge"):
         ensure_upf_operator(site)
     else:
         upf_dir.mkdir(parents=True, exist_ok=True)
+    # Same SMF N4 + NRF LB + register_nf on every site (scale-friendly).
+    apply_unified_upf_operator_peers(site)
     for old in upf_dir.glob("*upf-slice-*"):
         old.unlink()
 
@@ -708,7 +750,12 @@ for i in range(slice_count):
         {
             "apiVersion": "workload.nephio.org/v1alpha1",
             "kind": "NFDeployment",
-            "metadata": {"name": name, "namespace": upf_ns},
+            "metadata": {
+                "name": name,
+                "namespace": upf_ns,
+                # Bump so UPF operator re-renders ConfigMap after op-conf fqdn IP change.
+                "annotations": {"force-reconcile": "smf-nrf-ip-20260727"},
+            },
             "spec": {
                 "provider": "upf.openairinterface.org",
                 "capacity": {

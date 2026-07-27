@@ -3,6 +3,8 @@ kind: NFDeployment
 metadata:
   name: upf-slice-4
   namespace: oai-upf
+  annotations:
+    force-reconcile: smf-nrf-ip-20260727
 spec:
   provider: upf.openairinterface.org
   capacity:

@@ -226,6 +226,17 @@ upf_n3_vip() {
   printf '%s' "${CLUSTER_UPF_N3_VIP[$1]}"
 }
 
+# SMF N4 macvlan on central (static peer for every UPF, all sites).
+oai_smf_n4_ip() {
+  oai_macvlan_ip central 2
+}
+
+# NRF MetalLB VIP on central (cross-cluster SBI; avoid ClusterIP DNS in UPF cfg).
+OAI_NRF_LB_IP="${OAI_NRF_LB_IP:-10.1.138.100}"
+oai_nrf_lb_ip() {
+  printf '%s' "${OAI_NRF_LB_IP}"
+}
+
 # OAI macvlan IP: cluster_base + offset on 10.1.139.0/24.
 oai_macvlan_ip() {
   local cluster="$1"
