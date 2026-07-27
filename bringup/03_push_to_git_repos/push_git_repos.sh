@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Push repos/{gitea-repo}/ content to Gitea for Config Sync (unstructured layout).
+# Pull latest from Gitea, overlay repos/{gitea-repo}/, merge (abort on conflict), push.
+# Used for Config Sync unstructured GitOps.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +27,13 @@ Usage: $(basename "$0") [options] [cluster ...]
 
 Push GitOps content from repos/<gitea-repo>/ to Gitea for Config Sync.
 Default (no args): mgmt, central, regional, edge, ue.
+
+Flow per repo:
+  1. Clone/pull latest from Gitea
+  2. Overlay local repos/<name>/ and commit (if changes)
+  3. Fetch again and merge origin/<branch>
+  4. On merge conflict: abort (no push), list conflicted files
+  5. On clean merge: push
 
 Each cluster maps to a Gitea repo (see repos/):
   mgmt      → repos/mgmt              → nephio/mgmt
@@ -86,12 +94,43 @@ git_url_for_repo() {
     "$GITEA_USER" "$GITEA_PASS" "$GITEA_HOST" "$GITEA_PORT" "$GITEA_ORG" "$repo_name"
 }
 
+# Fetch origin/<branch> and merge into HEAD. On conflict: list files, abort, return 1.
+merge_origin_or_abort() {
+  local branch="$1"
+
+  git fetch origin "$branch"
+  if git merge-base --is-ancestor "origin/${branch}" HEAD 2>/dev/null; then
+    # HEAD already contains remote tip (remote unchanged or we are ahead).
+    return 0
+  fi
+
+  # Shallow clone may lack merge-base; deepen once and retry ancestor check.
+  if ! git merge-base HEAD "origin/${branch}" >/dev/null 2>&1; then
+    echo "    deepening clone for merge-base ..."
+    git fetch --deepen 200 origin "$branch" || true
+  fi
+
+  echo "    merging origin/${branch} ..."
+  if git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
+      merge --no-edit "origin/${branch}"; then
+    return 0
+  fi
+
+  echo "error: merge conflict with origin/${branch}; not pushing" >&2
+  echo "    conflicted files:" >&2
+  git diff --name-only --diff-filter=U | sed 's/^/      /' >&2 || true
+  git merge --abort 2>/dev/null || true
+  return 1
+}
+
 push_cluster_repo() {
   local cluster="$1"
   local repo_name src_dir git_url work_dir rc=0
+  local safe_url msg
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   src_dir="$(repo_source_dir "$cluster")"
   git_url="$(git_url_for_repo "$repo_name")"
+  safe_url="http://${GITEA_HOST}:${GITEA_PORT}/${GITEA_ORG}/${repo_name}"
 
   if [[ ! -d "$src_dir" ]]; then
     echo "error: [${cluster}] missing source dir ${src_dir}" >&2
@@ -103,47 +142,57 @@ push_cluster_repo() {
     return 1
   fi
 
-  echo "==> [${cluster}] push ${src_dir} → ${GITEA_ORG}/${repo_name}"
+  echo "==> [${cluster}] pull+push ${src_dir} → ${GITEA_ORG}/${repo_name}"
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "    dry-run: git clone ${git_url}"
-    echo "    dry-run: rsync ${src_dir}/ → workdir/"
-    echo "    dry-run: git commit && git push origin ${GIT_BRANCH}"
+    echo "    dry-run: git clone ${safe_url} (branch ${GIT_BRANCH})"
+    echo "    dry-run: overlay ${src_dir}/ → workdir/"
+    echo "    dry-run: commit if dirty → fetch/merge origin/${GIT_BRANCH}"
+    echo "    dry-run: on conflict abort; else git push origin ${GIT_BRANCH}"
     return 0
   fi
 
   work_dir="$(mktemp -d)"
 
-  if ! git clone --depth 1 --branch "$GIT_BRANCH" "$git_url" "$work_dir" 2>/dev/null; then
-    git clone --depth 1 "$git_url" "$work_dir"
+  # Depth > 1 so a raced remote commit can still merge against a common base.
+  if ! git clone --depth 50 --branch "$GIT_BRANCH" "$git_url" "$work_dir" 2>/dev/null; then
+    git clone --depth 50 "$git_url" "$work_dir"
     (
       cd "$work_dir"
       git checkout -b "$GIT_BRANCH" 2>/dev/null || git checkout "$GIT_BRANCH"
     )
   fi
 
+  echo "    pulled ${safe_url}@$(git -C "$work_dir" rev-parse --short HEAD)"
+
   find "$work_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
   cp -a "$src_dir"/. "$work_dir/"
 
-  local msg
   msg="${COMMIT_MSG:-Update ${repo_name} from repos/ ($(date -u +%Y-%m-%dT%H:%M:%SZ))}"
 
   (
     cd "$work_dir"
     git add -A
     if git diff --staged --quiet; then
-      echo "    no changes for ${GITEA_ORG}/${repo_name}"
-      return 0
+      echo "    no local changes (already matches ${safe_url}@${GIT_BRANCH})"
+      exit 0
     fi
+
     git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
       commit -m "$msg"
+
+    # Re-check remote in case it moved after clone; refuse push on conflict.
+    if ! merge_origin_or_abort "$GIT_BRANCH"; then
+      exit 1
+    fi
+
     git push origin "HEAD:${GIT_BRANCH}"
   ) || rc=$?
 
   rm -rf "$work_dir"
 
   if [[ "$rc" -eq 0 ]]; then
-    echo "    pushed http://${GITEA_HOST}:${GITEA_PORT}/${GITEA_ORG}/${repo_name}"
+    echo "    pushed ${safe_url}"
     echo "    Dashboard:   https://$(dashboard_mgmt_ip "$cluster"):$(dashboard_nodeport)"
     echo "    OpenSpeedTest: http://$(openspeedtest_vip "$cluster")"
   fi
@@ -190,7 +239,7 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Push repos/ → Gitea (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+echo "Pull+merge+push repos/ → Gitea (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
 echo
 
 failed=0
