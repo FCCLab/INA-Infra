@@ -1,0 +1,35 @@
+# Backend is NOT a Deployment — Gurobi Named-User licenses refuse containers.
+# Run API on the host, then point this Service at it:
+#   ./ina-infra/run-backend.sh
+#   # or: sudo ./ina-infra/scripts/install-host-backend.sh
+apiVersion: v1
+kind: Service
+metadata:
+  name: ina-infra-backend
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: ina-infra-backend
+    app.kubernetes.io/part-of: ina-infra
+  annotations:
+    ina-infra.nephio.lab/backend: host-process
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: ina-infra-backend
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: ina-infra-backend
+    app.kubernetes.io/part-of: ina-infra
+subsets:
+  - addresses:
+      - ip: 10.1.132.200
+    ports:
+      - name: http
+        port: 8082

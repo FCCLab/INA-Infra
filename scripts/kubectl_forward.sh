@@ -9,7 +9,8 @@ source "$SCRIPT_DIR/cluster_lib.sh"
 
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
 NAMESPACE="${DASHBOARD_NAMESPACE:-kubernetes-dashboard}"
-SERVICE="${DASHBOARD_SERVICE:-kubernetes-dashboard-kong-proxy}"
+# Autologin proxy injects admin-user token (no browser login key).
+SERVICE="${DASHBOARD_SERVICE:-dashboard-autologin}"
 LOCAL_PORT="${DASHBOARD_FORWARD_PORT:-8443}"
 BIND_ADDRESS="${DASHBOARD_FORWARD_BIND:-}"
 DETACH=0

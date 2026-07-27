@@ -1,0 +1,27 @@
+[Unit]
+Description=INA-Infra PlanningLayer API (host; Gurobi academic license)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fcp
+Group=fcp
+WorkingDirectory=/home/fcp/nephio-network-slicing/ina-infra
+Environment=HOME=/home/fcp
+Environment=INA_SRC=/home/fcp/nephio-network-slicing/algorithm/new_implementation
+Environment=REPO_ROOT=/home/fcp/nephio-network-slicing
+Environment=REPOS_DIR=/home/fcp/nephio-network-slicing/repos
+Environment=PUSH_SCRIPT=/home/fcp/nephio-network-slicing/bringup/03_push_to_git_repos/push_git_repos.sh
+Environment=GRB_LICENSE_FILE=/home/fcp/gurobi.lic
+Environment=PYTHONPATH=/home/fcp/nephio-network-slicing/ina-infra/backend
+Environment=GITEA_HOST=10.1.132.200
+Environment=GITEA_PORT=3000
+Environment=GITEA_USER=nephio
+Environment=GITEA_PASS=secret
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8082
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

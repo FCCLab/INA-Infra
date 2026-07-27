@@ -30,7 +30,7 @@ spec:
         app.kubernetes.io/version: 1.14.0
         app.kubernetes.io/component: api
       annotations:
-        checksum/config: c0491508ba8e29a559c5f7409a4d19ac0e1f4a3228110c66fc2806d2e2f600b8
+        checksum/config: 89ec7f5f840aef954683be2c29db5c90c77dea76f10b210a65e55ef86c934b81
     spec:
       containers:
       - name: kubernetes-dashboard-api

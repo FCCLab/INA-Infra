@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-autologin
+  namespace: kubernetes-dashboard
+  labels:
+    app.kubernetes.io/name: dashboard-autologin
+    app.kubernetes.io/part-of: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard-autologin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dashboard-autologin
+        app.kubernetes.io/part-of: kubernetes-dashboard
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.27
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/config/start.sh"]
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: token
+              mountPath: /var/run/secrets/dashboard
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: config
+          configMap:
+            name: dashboard-autologin
+            defaultMode: 0755
+        - name: token
+          secret:
+            secretName: admin-user-token
+        - name: tmp
+          emptyDir: {}

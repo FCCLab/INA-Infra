@@ -43,6 +43,62 @@ spec:
         - name: configuration
           mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
           subPath: ue.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: slicea-publisher
+        image: 10.1.132.30:5000/slicea-publisher:nws-v0.5-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: VIDEO_SOURCE
+          value: /data/example.mp4
+        - name: RTSP_TARGET_HOST
+          value: 10.1.132.210
+        - name: RTSP_PORT
+          value: '8554'
+        - name: STREAM_PATH
+          value: slicea
+        - name: RTSP_PROTOCOL
+          value: tcp
+        - name: METRICS_PORT
+          value: '9101'
+        - name: METRICS_ADDR
+          value: 0.0.0.0
+        - name: LOG_INTERVAL_S
+          value: '1'
+        - name: PDU_IFACE
+          value: oaitun_ue1
+        - name: PDU_ROUTE_HOSTS
+          value: 10.1.132.210
+        ports:
+        - name: metrics
+          containerPort: 9101
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 1Gi
       volumes:
       - name: configuration
         configMap:

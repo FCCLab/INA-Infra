@@ -1,0 +1,39 @@
+# INA-Infra PL GUI
+#
+# Gurobi academic licenses are host-locked — preferred K8s path is mgmt (see k8s/README.md).
+# Local compose: API on host + UI container, or full stack with profile container-backend.
+
+services:
+  backend:
+    profiles: ["container-backend"]
+    build:
+      context: ..
+      dockerfile: ina-infra/backend/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      INA_SRC: /app/ina_src
+      REPO_ROOT: /repo
+      REPOS_DIR: /repo/repos
+      PUSH_SCRIPT: /repo/bringup/03_push_to_git_repos/push_git_repos.sh
+      GRB_LICENSE_FILE: /opt/gurobi/gurobi.lic
+      GITEA_HOST: ${GITEA_HOST:-10.1.132.200}
+      GITEA_PORT: ${GITEA_PORT:-3000}
+      GITEA_USER: ${GITEA_USER:-nephio}
+      GITEA_PASS: ${GITEA_PASS:-secret}
+      GITEA_ORG: ${GITEA_ORG:-nephio}
+    volumes:
+      - ../algorithm/new_implementation:/app/ina_src:ro
+      - ..:/repo
+      - ${GUROBI_LIC:-${HOME}/gurobi.lic}:/opt/gurobi/gurobi.lic:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5180:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

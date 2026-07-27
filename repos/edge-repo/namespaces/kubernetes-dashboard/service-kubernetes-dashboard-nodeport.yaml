@@ -12,6 +12,4 @@ spec:
       targetPort: 8443
       nodePort: 30443
   selector:
-    app.kubernetes.io/component: app
-    app.kubernetes.io/instance: kubernetes-dashboard
-    app.kubernetes.io/name: kong
+    app.kubernetes.io/name: dashboard-autologin

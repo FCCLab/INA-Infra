@@ -43,6 +43,70 @@ spec:
         - name: configuration
           mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
           subPath: ue.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: sliced-client
+        image: 10.1.132.30:5000/sliced-client:nws-v0.5-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: BROKER_HOST
+          value: 10.1.132.210
+        - name: BROKER_PORT
+          value: '1883'
+        - name: OTA_BIND_IP
+          value: ''
+        - name: METRICS_BIND_IP
+          value: 0.0.0.0
+        - name: METRICS_PORT
+          value: '9104'
+        - name: NUM_DEVICES
+          value: '5'
+        - name: FAST_PERIOD_S
+          value: '60'
+        - name: MED_PERIOD_S
+          value: '1800'
+        - name: SLOW_PERIOD_S
+          value: '3600'
+        - name: MQTT_QOS
+          value: '0'
+        - name: LOG_INTERVAL_S
+          value: '30'
+        - name: LOG_LEVEL
+          value: INFO
+        - name: PDU_IFACE
+          value: oaitun_ue1
+        - name: PDU_ROUTE_HOSTS
+          value: 10.1.132.210
+        ports:
+        - name: metrics
+          containerPort: 9104
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
       volumes:
       - name: configuration
         configMap:

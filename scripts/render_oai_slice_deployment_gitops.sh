@@ -33,6 +33,53 @@ SLICE_COUNT="${OAI_SLICE_COUNT:-5}"
 UE_ACTIVE_COUNT="${OAI_UE_ACTIVE_COUNT:-$SLICE_COUNT}"
 RETIRE_OLD="${RETIRE_OLD:-1}"
 
+# --- Slice A CCTV (analyzer on central, publisher sidecar in edge UE-1) -------
+# Analyzer is reached over the 5G air interface: UE-1 -> DU -> UPF-1 -> N6 ->
+# analyzer externalIP on the central mgmt LAN (UPF N6 routes MGMT_CIDR back).
+SLICEA_PUBLISHER_IMAGE="${SLICEA_PUBLISHER_IMAGE:-${OAI_REGISTRY}/slicea-publisher:${OAI_IMAGE_TAG}}"
+SLICEA_ANALYZER_IMAGE="${SLICEA_ANALYZER_IMAGE:-${OAI_REGISTRY}/slicea-analyzer:${OAI_IMAGE_TAG}}"
+SLICEA_ANALYZER_EXTIP="${SLICEA_ANALYZER_EXTIP:-${CLUSTER_MGMT_IP[central]}}"
+SLICEA_RTSP_PORT="${SLICEA_RTSP_PORT:-8554}"
+SLICEA_STREAM_PATH="${SLICEA_STREAM_PATH:-slicea}"
+SLICEA_RTSP_PROTOCOL="${SLICEA_RTSP_PROTOCOL:-tcp}"
+SLICEA_PUB_METRICS_PORT="${SLICEA_PUB_METRICS_PORT:-9101}"
+SLICEA_ANALYZER_METRICS_PORT="${SLICEA_ANALYZER_METRICS_PORT:-9102}"
+SLICEA_PDU_IFACE="${SLICEA_PDU_IFACE:-oaitun_ue1}"
+SLICEA_YOLO_ENABLED="${SLICEA_YOLO_ENABLED:-true}"
+SLICEA_YOLO_DEVICE="${SLICEA_YOLO_DEVICE:-cpu}"
+SLICEA_YOLO_MODEL="${SLICEA_YOLO_MODEL:-yolov8n.pt}"
+SLICEA_FRAME_SKIP="${SLICEA_FRAME_SKIP:-1}"
+SLICEA_UE_SLICE="${SLICEA_UE_SLICE:-1}"
+# Optional: pin the analyzer to a specific central node (e.g. central-0) — the
+# central workers are disk-constrained, so keep it off the full one. Empty = any.
+SLICEA_ANALYZER_NODE="${SLICEA_ANALYZER_NODE:-central-0}"
+export SLICEA_PUBLISHER_IMAGE SLICEA_ANALYZER_IMAGE SLICEA_ANALYZER_EXTIP \
+  SLICEA_RTSP_PORT SLICEA_STREAM_PATH SLICEA_RTSP_PROTOCOL SLICEA_PUB_METRICS_PORT \
+  SLICEA_ANALYZER_METRICS_PORT SLICEA_PDU_IFACE SLICEA_YOLO_ENABLED SLICEA_YOLO_DEVICE \
+  SLICEA_YOLO_MODEL SLICEA_FRAME_SKIP SLICEA_UE_SLICE SLICEA_ANALYZER_NODE
+
+# --- Slice D IoT (broker+controller on central, client sidecar in edge UE-4) ---
+# Broker is reached over the 5G air interface: UE-4 -> DU -> UPF-4 -> N6 ->
+# broker externalIP on the central mgmt LAN (UPF N6 routes MGMT_CIDR back).
+SLICED_CLIENT_IMAGE="${SLICED_CLIENT_IMAGE:-${OAI_REGISTRY}/sliced-client:${OAI_IMAGE_TAG}}"
+SLICED_EDGE_IMAGE="${SLICED_EDGE_IMAGE:-${OAI_REGISTRY}/sliced-edge:${OAI_IMAGE_TAG}}"
+SLICED_BROKER_EXTIP="${SLICED_BROKER_EXTIP:-${CLUSTER_MGMT_IP[central]}}"
+SLICED_BROKER_PORT="${SLICED_BROKER_PORT:-1883}"
+SLICED_CLIENT_METRICS_PORT="${SLICED_CLIENT_METRICS_PORT:-9104}"
+SLICED_EDGE_METRICS_PORT="${SLICED_EDGE_METRICS_PORT:-9105}"
+SLICED_PDU_IFACE="${SLICED_PDU_IFACE:-oaitun_ue1}"
+SLICED_UE_SLICE="${SLICED_UE_SLICE:-4}"
+SLICED_NUM_DEVICES="${SLICED_NUM_DEVICES:-5}"
+SLICED_FAST_PERIOD_S="${SLICED_FAST_PERIOD_S:-60}"
+SLICED_MED_PERIOD_S="${SLICED_MED_PERIOD_S:-1800}"
+SLICED_SLOW_PERIOD_S="${SLICED_SLOW_PERIOD_S:-3600}"
+SLICED_DL_FAST_PERIOD_S="${SLICED_DL_FAST_PERIOD_S:-300}"
+SLICED_DL_SLOW_PERIOD_S="${SLICED_DL_SLOW_PERIOD_S:-3600}"
+export SLICED_CLIENT_IMAGE SLICED_EDGE_IMAGE SLICED_BROKER_EXTIP SLICED_BROKER_PORT \
+  SLICED_CLIENT_METRICS_PORT SLICED_EDGE_METRICS_PORT SLICED_PDU_IFACE SLICED_UE_SLICE \
+  SLICED_NUM_DEVICES SLICED_FAST_PERIOD_S SLICED_MED_PERIOD_S SLICED_SLOW_PERIOD_S \
+  SLICED_DL_FAST_PERIOD_S SLICED_DL_SLOW_PERIOD_S
+
 # Build IP tables for Python
 UPF_N3=() UPF_N4=() UPF_N6=()
 CUUP_E1=() CUUP_F1U=() CUUP_N3=()
@@ -86,6 +133,7 @@ python3 - "$REPOS_DIR" "$SLICE_NS" "$UPF_NS" "$CN_NS" "$OPS_NS" \
   <<'PY'
 import importlib.util
 import json
+import os
 import re
 import shutil
 import sys
@@ -125,6 +173,43 @@ SITE_N6_GW = {
     "central": n6_gw_central,
     "regional": n6_gw_regional,
     "edge": n6_gw_edge,
+}
+
+# Slice A CCTV config (from exported SLICEA_* env vars).
+SLICEA = {
+    "pub_image": os.environ["SLICEA_PUBLISHER_IMAGE"],
+    "analyzer_image": os.environ["SLICEA_ANALYZER_IMAGE"],
+    "ext_ip": os.environ["SLICEA_ANALYZER_EXTIP"],
+    "rtsp_port": int(os.environ.get("SLICEA_RTSP_PORT", "8554")),
+    "stream_path": os.environ.get("SLICEA_STREAM_PATH", "slicea"),
+    "protocol": os.environ.get("SLICEA_RTSP_PROTOCOL", "tcp"),
+    "pub_metrics_port": int(os.environ.get("SLICEA_PUB_METRICS_PORT", "9101")),
+    "analyzer_metrics_port": int(os.environ.get("SLICEA_ANALYZER_METRICS_PORT", "9102")),
+    "pdu_iface": os.environ.get("SLICEA_PDU_IFACE", "oaitun_ue1"),
+    "yolo_enabled": os.environ.get("SLICEA_YOLO_ENABLED", "true"),
+    "yolo_device": os.environ.get("SLICEA_YOLO_DEVICE", "cpu"),
+    "yolo_model": os.environ.get("SLICEA_YOLO_MODEL", "yolov8n.pt"),
+    "frame_skip": os.environ.get("SLICEA_FRAME_SKIP", "1"),
+    "ue_slice": int(os.environ.get("SLICEA_UE_SLICE", "1")),
+    "analyzer_node": os.environ.get("SLICEA_ANALYZER_NODE", ""),
+}
+
+# Slice D IoT config (from exported SLICED_* env vars).
+SLICED = {
+    "client_image": os.environ["SLICED_CLIENT_IMAGE"],
+    "edge_image": os.environ["SLICED_EDGE_IMAGE"],
+    "ext_ip": os.environ["SLICED_BROKER_EXTIP"],
+    "broker_port": int(os.environ.get("SLICED_BROKER_PORT", "1883")),
+    "client_metrics_port": int(os.environ.get("SLICED_CLIENT_METRICS_PORT", "9104")),
+    "edge_metrics_port": int(os.environ.get("SLICED_EDGE_METRICS_PORT", "9105")),
+    "pdu_iface": os.environ.get("SLICED_PDU_IFACE", "oaitun_ue1"),
+    "ue_slice": int(os.environ.get("SLICED_UE_SLICE", "4")),
+    "num_devices": os.environ.get("SLICED_NUM_DEVICES", "5"),
+    "fast_period_s": os.environ.get("SLICED_FAST_PERIOD_S", "60"),
+    "med_period_s": os.environ.get("SLICED_MED_PERIOD_S", "1800"),
+    "slow_period_s": os.environ.get("SLICED_SLOW_PERIOD_S", "3600"),
+    "dl_fast_period_s": os.environ.get("SLICED_DL_FAST_PERIOD_S", "300"),
+    "dl_slow_period_s": os.environ.get("SLICED_DL_SLOW_PERIOD_S", "3600"),
 }
 
 repos = Path(repos_dir)
@@ -188,6 +273,239 @@ def networks_annot(entries):
             }
         )
     return json.dumps(parts)
+
+
+def slicea_publisher_container():
+    """Slice A publisher sidecar for the UE pod (shares oaitun_ue1)."""
+    return {
+        "name": "slicea-publisher",
+        "image": SLICEA["pub_image"],
+        "imagePullPolicy": "IfNotPresent",
+        # NET_ADMIN to pin the analyzer route through the PDU tunnel (over-the-air).
+        "securityContext": {"capabilities": {"add": ["NET_ADMIN", "NET_RAW"]}},
+        "env": [
+            {"name": "VIDEO_SOURCE", "value": "/data/example.mp4"},
+            {"name": "RTSP_TARGET_HOST", "value": SLICEA["ext_ip"]},
+            {"name": "RTSP_PORT", "value": str(SLICEA["rtsp_port"])},
+            {"name": "STREAM_PATH", "value": SLICEA["stream_path"]},
+            {"name": "RTSP_PROTOCOL", "value": SLICEA["protocol"]},
+            {"name": "METRICS_PORT", "value": str(SLICEA["pub_metrics_port"])},
+            {"name": "METRICS_ADDR", "value": "0.0.0.0"},
+            {"name": "LOG_INTERVAL_S", "value": "1"},
+            # Pin the analyzer via the PDU tunnel so the stream goes over the air.
+            {"name": "PDU_IFACE", "value": SLICEA["pdu_iface"]},
+            {"name": "PDU_ROUTE_HOSTS", "value": SLICEA["ext_ip"]},
+        ],
+        "ports": [{"name": "metrics", "containerPort": SLICEA["pub_metrics_port"]}],
+        "resources": {
+            "requests": {"cpu": "200m", "memory": "256Mi"},
+            "limits": {"cpu": "2", "memory": "1Gi"},
+        },
+    }
+
+
+def emit_slicea_analyzer(out_dir: Path):
+    """Slice A analyzer (RTSP RECORD server) on central, reachable over N6."""
+    labels = {"app.kubernetes.io/name": "slicea-analyzer"}
+    pod_spec = {
+        "containers": [
+            {
+                "name": "analyzer",
+                "image": SLICEA["analyzer_image"],
+                "imagePullPolicy": "IfNotPresent",
+                "env": [
+                    {"name": "BIND_ADDRESS", "value": "0.0.0.0"},
+                    {"name": "RTSP_PORT", "value": str(SLICEA["rtsp_port"])},
+                    {"name": "STREAM_PATH", "value": SLICEA["stream_path"]},
+                    {"name": "RTSP_LATENCY_MS", "value": "0"},
+                    {"name": "YOLO_ENABLED", "value": SLICEA["yolo_enabled"]},
+                    {"name": "YOLO_MODEL", "value": SLICEA["yolo_model"]},
+                    {"name": "YOLO_DEVICE", "value": SLICEA["yolo_device"]},
+                    {"name": "FRAME_SKIP", "value": SLICEA["frame_skip"]},
+                    {"name": "METRICS_PORT", "value": str(SLICEA["analyzer_metrics_port"])},
+                    {"name": "METRICS_ADDR", "value": "0.0.0.0"},
+                    {"name": "LOG_INTERVAL_S", "value": "1"},
+                ],
+                "ports": [
+                    {"name": "rtsp", "containerPort": SLICEA["rtsp_port"]},
+                    {"name": "metrics", "containerPort": SLICEA["analyzer_metrics_port"]},
+                ],
+                "resources": {
+                    "requests": {"cpu": "1", "memory": "2Gi"},
+                    "limits": {"cpu": "6", "memory": "6Gi"},
+                },
+            }
+        ],
+    }
+    # Central workers are disk-constrained; optionally pin to a healthy node.
+    if SLICEA["analyzer_node"]:
+        pod_spec["nodeSelector"] = {"kubernetes.io/hostname": SLICEA["analyzer_node"]}
+    dump(
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "slicea-analyzer", "namespace": slice_ns, "labels": labels},
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": labels},
+                "template": {"metadata": {"labels": labels}, "spec": pod_spec},
+            },
+        },
+        out_dir / "60-deployment-slicea-analyzer.yaml",
+    )
+    dump(
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": "slicea-analyzer", "namespace": slice_ns, "labels": labels},
+            "spec": {
+                # externalIP on the central mgmt LAN so the UE reaches it over N6.
+                "type": "ClusterIP",
+                "externalIPs": [SLICEA["ext_ip"]],
+                "selector": labels,
+                "ports": [
+                    {
+                        "name": "rtsp",
+                        "port": SLICEA["rtsp_port"],
+                        "targetPort": SLICEA["rtsp_port"],
+                        "protocol": "TCP",
+                    }
+                ],
+            },
+        },
+        out_dir / "61-service-slicea-analyzer.yaml",
+    )
+
+
+def sliced_client_container():
+    """Slice D IoT client sidecar for the UE pod (shares oaitun_ue1)."""
+    return {
+        "name": "sliced-client",
+        "image": SLICED["client_image"],
+        "imagePullPolicy": "IfNotPresent",
+        # NET_ADMIN to pin the broker route through the PDU tunnel (over-the-air).
+        "securityContext": {"capabilities": {"add": ["NET_ADMIN", "NET_RAW"]}},
+        "env": [
+            {"name": "BROKER_HOST", "value": SLICED["ext_ip"]},
+            {"name": "BROKER_PORT", "value": str(SLICED["broker_port"])},
+            # Empty bind: after PDU route pin, MQTT egresses via oaitun_ue1.
+            {"name": "OTA_BIND_IP", "value": ""},
+            {"name": "METRICS_BIND_IP", "value": "0.0.0.0"},
+            {"name": "METRICS_PORT", "value": str(SLICED["client_metrics_port"])},
+            {"name": "NUM_DEVICES", "value": SLICED["num_devices"]},
+            {"name": "FAST_PERIOD_S", "value": SLICED["fast_period_s"]},
+            {"name": "MED_PERIOD_S", "value": SLICED["med_period_s"]},
+            {"name": "SLOW_PERIOD_S", "value": SLICED["slow_period_s"]},
+            {"name": "MQTT_QOS", "value": "0"},
+            {"name": "LOG_INTERVAL_S", "value": "30"},
+            {"name": "LOG_LEVEL", "value": "INFO"},
+            # Pin the broker via the PDU tunnel so MQTT goes over the air.
+            {"name": "PDU_IFACE", "value": SLICED["pdu_iface"]},
+            {"name": "PDU_ROUTE_HOSTS", "value": SLICED["ext_ip"]},
+        ],
+        "ports": [{"name": "metrics", "containerPort": SLICED["client_metrics_port"]}],
+        "resources": {
+            "requests": {"cpu": "100m", "memory": "128Mi"},
+            "limits": {"cpu": "1", "memory": "512Mi"},
+        },
+    }
+
+
+def emit_sliced_edge(out_dir: Path):
+    """Slice D IoT edge (mosquitto + controller) on central, reachable over N6."""
+    labels = {"app.kubernetes.io/name": "sliced-edge"}
+    dump(
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "sliced-edge", "namespace": slice_ns, "labels": labels},
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": labels},
+                "template": {
+                    "metadata": {"labels": labels},
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "edge",
+                                "image": SLICED["edge_image"],
+                                "imagePullPolicy": "IfNotPresent",
+                                "env": [
+                                    {"name": "OTA_BIND_IP", "value": "0.0.0.0"},
+                                    {"name": "METRICS_BIND_IP", "value": "0.0.0.0"},
+                                    {
+                                        "name": "METRICS_PORT",
+                                        "value": str(SLICED["edge_metrics_port"]),
+                                    },
+                                    {
+                                        "name": "DL_FAST_PERIOD_S",
+                                        "value": SLICED["dl_fast_period_s"],
+                                    },
+                                    {
+                                        "name": "DL_SLOW_PERIOD_S",
+                                        "value": SLICED["dl_slow_period_s"],
+                                    },
+                                    {"name": "DL_PAYLOAD_BYTES", "value": "256"},
+                                    {"name": "DEVICE_TTL_S", "value": "7200"},
+                                    {"name": "MQTT_QOS", "value": "0"},
+                                    {"name": "LOG_INTERVAL_S", "value": "30"},
+                                    {"name": "LOG_LEVEL", "value": "INFO"},
+                                ],
+                                "ports": [
+                                    {
+                                        "name": "mqtt",
+                                        "containerPort": SLICED["broker_port"],
+                                    },
+                                    {
+                                        "name": "metrics",
+                                        "containerPort": SLICED["edge_metrics_port"],
+                                    },
+                                ],
+                                "resources": {
+                                    "requests": {"cpu": "200m", "memory": "256Mi"},
+                                    "limits": {"cpu": "2", "memory": "1Gi"},
+                                },
+                                "readinessProbe": {
+                                    "tcpSocket": {"port": SLICED["broker_port"]},
+                                    "initialDelaySeconds": 5,
+                                    "periodSeconds": 10,
+                                },
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+        out_dir / "62-deployment-sliced-edge.yaml",
+    )
+    dump(
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": "sliced-edge", "namespace": slice_ns, "labels": labels},
+            "spec": {
+                # externalIP on the central mgmt LAN so the UE reaches MQTT over N6.
+                "type": "ClusterIP",
+                "externalIPs": [SLICED["ext_ip"]],
+                "selector": labels,
+                "ports": [
+                    {
+                        "name": "mqtt",
+                        "port": SLICED["broker_port"],
+                        "targetPort": SLICED["broker_port"],
+                        "protocol": "TCP",
+                    },
+                    {
+                        "name": "metrics",
+                        "port": SLICED["edge_metrics_port"],
+                        "targetPort": SLICED["edge_metrics_port"],
+                        "protocol": "TCP",
+                    },
+                ],
+            },
+        },
+        out_dir / "63-service-sliced-edge.yaml",
+    )
 
 
 def purge_dir(directory: Path):
@@ -1819,7 +2137,15 @@ channelmod = {{
                                         "subPath": "ue.conf",
                                     }
                                 ],
-                            }
+                            },
+                            # Shares oaitun_ue1 with ue — ping/traffic over the PDU tunnel
+                            debug_ctr,
+                            # Slice A CCTV publisher sidecar (only the chosen slice's UE):
+                            # pushes over the air to the central analyzer.
+                            *([slicea_publisher_container()] if n == SLICEA["ue_slice"] else []),
+                            # Slice D IoT client sidecar (only the chosen slice's UE):
+                            # MQTT over the air to the central sliced-edge broker.
+                            *([sliced_client_container()] if n == SLICED["ue_slice"] else []),
                         ],
                         "volumes": [
                             {
@@ -1834,6 +2160,11 @@ channelmod = {{
         edge_dir / f"55-deployment-oai-ue-{n}.yaml",
     )
 
+# --- Slice A CCTV analyzer (server) on central ---
+emit_slicea_analyzer(central_slice_dir)
+# --- Slice D IoT edge (broker + controller) on central ---
+emit_sliced_edge(central_slice_dir)
+
 print(f"Rendered {slice_ns}:")
 for i in range(slice_count):
     print(
@@ -1846,6 +2177,18 @@ print(f"  UE replicas: first {ue_active}/{slice_count} active (OAI_UE_ACTIVE_COU
 print(f"  CU-CP (edge) N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
 print(f"  FlexRIC {flexric_ip} + xApp E2 {xapp_e2_ip}")
 print(f"  xApp Swagger http://{xapp_swagger_vip}:{xapp_api_port}/docs")
+print(
+    f"  Slice A CCTV: analyzer @central "
+    f"rtsp://{SLICEA['ext_ip']}:{SLICEA['rtsp_port']}/{SLICEA['stream_path']} "
+    f"({SLICEA['protocol']}, YOLO={SLICEA['yolo_device']}); "
+    f"publisher sidecar in oai-ue-{SLICEA['ue_slice']} over {SLICEA['pdu_iface']}"
+)
+print(
+    f"  Slice D IoT: broker @central "
+    f"mqtt://{SLICED['ext_ip']}:{SLICED['broker_port']} "
+    f"(devices={SLICED['num_devices']}); "
+    f"client sidecar in oai-ue-{SLICED['ue_slice']} over {SLICED['pdu_iface']}"
+)
 PY
 
 echo "Done. Push with:"

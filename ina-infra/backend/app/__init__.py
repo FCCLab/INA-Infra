@@ -1,0 +1,1 @@
+"""INA-Infra FastAPI backend."""

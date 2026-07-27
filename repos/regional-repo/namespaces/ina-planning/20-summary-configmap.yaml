@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-pl-summary
+  namespace: ina-planning
+data:
+  summary.txt: '# INA-Infra PL placement intent for cluster=regional
+
+    # generated_at=2026-07-27T05:04:51.860178+00:00
+
+    #
+
+    # slice_id | CU | UPF | APP | b_min | type
+
+    #---------|----|-----|-----|-------|-----
+
+    #       1 | Central  | Central  | Central  |  10.0 | mMTC
+
+
+    '

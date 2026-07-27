@@ -30,7 +30,7 @@ spec:
         app.kubernetes.io/version: 1.4.0
         app.kubernetes.io/component: auth
       annotations:
-        checksum/config: 6a45dfdaabb8c7518d4e184fae4c92926ccd18ffd9340b7d72ddb550df2ba5e8
+        checksum/config: 9ef0e5adf796ef05943a6a6641d453567a3fc1057a36b778307fc16e1e97e291
     spec:
       containers:
       - name: kubernetes-dashboard-auth

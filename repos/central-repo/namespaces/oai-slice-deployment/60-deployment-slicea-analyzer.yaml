@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slicea-analyzer
+  namespace: oai-slice-deployment
+  labels: &id001
+    app.kubernetes.io/name: slicea-analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels: *id001
+  template:
+    metadata:
+      labels: *id001
+    spec:
+      containers:
+      - name: analyzer
+        image: 10.1.132.30:5000/slicea-analyzer:nws-v0.5-amd64
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: BIND_ADDRESS
+          value: 0.0.0.0
+        - name: RTSP_PORT
+          value: '8554'
+        - name: STREAM_PATH
+          value: slicea
+        - name: RTSP_LATENCY_MS
+          value: '0'
+        - name: YOLO_ENABLED
+          value: 'true'
+        - name: YOLO_MODEL
+          value: yolov8n.pt
+        - name: YOLO_DEVICE
+          value: cpu
+        - name: FRAME_SKIP
+          value: '1'
+        - name: METRICS_PORT
+          value: '9102'
+        - name: METRICS_ADDR
+          value: 0.0.0.0
+        - name: LOG_INTERVAL_S
+          value: '1'
+        ports:
+        - name: rtsp
+          containerPort: 8554
+        - name: metrics
+          containerPort: 9102
+        resources:
+          requests:
+            cpu: '1'
+            memory: 2Gi
+          limits:
+            cpu: '6'
+            memory: 6Gi
+      nodeSelector:
+        kubernetes.io/hostname: central-0
