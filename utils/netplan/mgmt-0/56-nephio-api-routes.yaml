@@ -1,0 +1,14 @@
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp1s0:
+      routes:
+        - to: 10.1.137.110/32
+          via: 10.1.132.210
+        - to: 10.1.137.120/32
+          via: 10.1.132.220
+        - to: 10.1.137.130/32
+          via: 10.1.132.230
+        - to: 10.1.137.140/32
+          via: 10.1.132.240

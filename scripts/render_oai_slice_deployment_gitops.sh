@@ -425,6 +425,8 @@ def emit_sliced_edge(out_dir: Path):
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": {
+                        # amd64 image; do not schedule on arm64 GPU workers (e.g. gh82)
+                        "nodeSelector": {"kubernetes.io/arch": "amd64"},
                         "containers": [
                             {
                                 "name": "edge",
