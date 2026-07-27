@@ -25,6 +25,12 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 ./scripts/install_k9s.sh
 # or specific hosts:
 ./scripts/install_k9s.sh central-0 regional-0
+
+# From mgmt: multi-context k9s (SSH-tunnels workload APIs on .137):
+./scripts/k9s_mgmt.sh              # start tunnels + k9s; ':' then 'ctx' to switch
+./scripts/k9s_mgmt.sh status
+
+# On a control-plane node (native API), or when .137 is routed:
 export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge:~/.kube/config-ue
 k9s --context central@central
 ```

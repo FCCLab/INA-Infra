@@ -39,6 +39,9 @@ Examples:
 On control-plane nodes after bringup:
   k9s --context central@central
 
+From mgmt (all contexts; tunnels .137 APIs):
+  ./scripts/k9s_mgmt.sh
+
 Environment:
   SSH_CONFIG    SSH config (default: utils/ssh_config/config)
   K9S_VERSION   Release tag (default: v0.51.0)
