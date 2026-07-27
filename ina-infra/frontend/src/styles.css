@@ -76,7 +76,8 @@ body {
 
 .tabs button,
 .actions button,
-.panel-head button {
+.panel-head button,
+table button {
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
@@ -84,6 +85,11 @@ body {
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
+}
+
+table button {
+  padding: 6px 10px;
+  white-space: nowrap;
 }
 
 .tabs button.active,
@@ -172,8 +178,14 @@ select {
 }
 
 button.danger {
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel));
+  color: #ffb4b4;
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
+  background: color-mix(in srgb, var(--danger) 22%, var(--panel));
 }
 
 .muted {
