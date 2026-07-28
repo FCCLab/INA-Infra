@@ -38,7 +38,7 @@ spec:
                 - edge-1
       containers:
       - name: cucp
-        image: 10.1.132.30:5000/oai-cucp:nws-v0.5-amd64
+        image: 10.1.132.30:5000/oai-cucp:nws-v0.8-amd64
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true

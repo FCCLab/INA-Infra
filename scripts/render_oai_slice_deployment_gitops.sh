@@ -20,13 +20,15 @@ CN_NS="${OAI_CN_NS:-oai-cn}"
 OPS_NS="${OAI_CN_OPERATORS_NS:-oai-cn-operators}"
 OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-docker.io/nephio/oai-ran-controller:latest}"
 OAI_REGISTRY="${OAI_REGISTRY:-10.1.132.30:5000}"
-OAI_IMAGE_TAG="${OAI_IMAGE_TAG:-nws-v0.5-amd64}"
+OAI_IMAGE_TAG="${OAI_IMAGE_TAG:-nws-v0.8-amd64}"
+# Sidecars / xApp may lag the softmodem tag.
+OAI_SIDECAR_IMAGE_TAG="${OAI_SIDECAR_IMAGE_TAG:-nws-v0.5-amd64}"
 OAI_CUCP_IMAGE="${OAI_CUCP_IMAGE:-${OAI_REGISTRY}/oai-cucp:${OAI_IMAGE_TAG}}"
 OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
 OAI_FLEXRIC_IMAGE="${OAI_FLEXRIC_IMAGE:-${OAI_REGISTRY}/oai-flexric:${OAI_IMAGE_TAG}}"
-OAI_XAPP_IMAGE="${OAI_XAPP_IMAGE:-${OAI_REGISTRY}/nws-xapp:${OAI_IMAGE_TAG}}"
+OAI_XAPP_IMAGE="${OAI_XAPP_IMAGE:-${OAI_REGISTRY}/nws-xapp:${OAI_SIDECAR_IMAGE_TAG}}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 SLICE_COUNT="${OAI_SLICE_COUNT:-5}"
 # Only first N UE deployments get replicas=1 (rest stay 0). Default: all slices.
@@ -36,8 +38,8 @@ RETIRE_OLD="${RETIRE_OLD:-1}"
 # --- Slice A CCTV (analyzer on central, publisher sidecar in edge UE-1) -------
 # Analyzer is reached over the 5G air interface: UE-1 -> DU -> UPF-1 -> N6 ->
 # analyzer externalIP on the central mgmt LAN (UPF N6 routes MGMT_CIDR back).
-SLICEA_PUBLISHER_IMAGE="${SLICEA_PUBLISHER_IMAGE:-${OAI_REGISTRY}/slicea-publisher:${OAI_IMAGE_TAG}}"
-SLICEA_ANALYZER_IMAGE="${SLICEA_ANALYZER_IMAGE:-${OAI_REGISTRY}/slicea-analyzer:${OAI_IMAGE_TAG}}"
+SLICEA_PUBLISHER_IMAGE="${SLICEA_PUBLISHER_IMAGE:-${OAI_REGISTRY}/slicea-publisher:${OAI_SIDECAR_IMAGE_TAG}}"
+SLICEA_ANALYZER_IMAGE="${SLICEA_ANALYZER_IMAGE:-${OAI_REGISTRY}/slicea-analyzer:${OAI_SIDECAR_IMAGE_TAG}}"
 SLICEA_ANALYZER_EXTIP="${SLICEA_ANALYZER_EXTIP:-${CLUSTER_MGMT_IP[central]}}"
 SLICEA_RTSP_PORT="${SLICEA_RTSP_PORT:-8554}"
 SLICEA_STREAM_PATH="${SLICEA_STREAM_PATH:-slicea}"
@@ -61,8 +63,8 @@ export SLICEA_PUBLISHER_IMAGE SLICEA_ANALYZER_IMAGE SLICEA_ANALYZER_EXTIP \
 # --- Slice D IoT (broker+controller on central, client sidecar in edge UE-4) ---
 # Broker is reached over the 5G air interface: UE-4 -> DU -> UPF-4 -> N6 ->
 # broker externalIP on the central mgmt LAN (UPF N6 routes MGMT_CIDR back).
-SLICED_CLIENT_IMAGE="${SLICED_CLIENT_IMAGE:-${OAI_REGISTRY}/sliced-client:${OAI_IMAGE_TAG}}"
-SLICED_EDGE_IMAGE="${SLICED_EDGE_IMAGE:-${OAI_REGISTRY}/sliced-edge:${OAI_IMAGE_TAG}}"
+SLICED_CLIENT_IMAGE="${SLICED_CLIENT_IMAGE:-${OAI_REGISTRY}/sliced-client:${OAI_SIDECAR_IMAGE_TAG}}"
+SLICED_EDGE_IMAGE="${SLICED_EDGE_IMAGE:-${OAI_REGISTRY}/sliced-edge:${OAI_SIDECAR_IMAGE_TAG}}"
 SLICED_BROKER_EXTIP="${SLICED_BROKER_EXTIP:-${CLUSTER_MGMT_IP[central]}}"
 SLICED_BROKER_PORT="${SLICED_BROKER_PORT:-1883}"
 SLICED_CLIENT_METRICS_PORT="${SLICED_CLIENT_METRICS_PORT:-9104}"

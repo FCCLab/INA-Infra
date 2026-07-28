@@ -29,7 +29,7 @@ spec:
         kubernetes.io/hostname: usrp
       containers:
       - name: ue
-        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.5-amd64
+        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.8-amd64
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true

@@ -16,7 +16,7 @@ SITE_NODES: Dict[str, List[str]] = {
     "edge": ["edge-0", "edge-1"],
 }
 
-# OAI nws-v0.5-amd64 images — keep off arm64 GPU workers (gh81/gh82).
+# OAI nws-v0.8-amd64 images — keep off arm64 GPU workers (gh81/gh82).
 ARCH_AMD64 = {"kubernetes.io/arch": "amd64"}
 
 
@@ -39,11 +39,11 @@ def _hostname_affinity(node_names: Sequence[str]) -> dict:
         }
     }
 
-IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.5-amd64"
-IMAGE_CUUP = "10.1.132.30:5000/oai-nr-cuup:nws-v0.5-amd64"
-IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.5-amd64"
-IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.5-amd64"
-IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.5-amd64"
+IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.8-amd64"
+IMAGE_CUUP = "10.1.132.30:5000/oai-nr-cuup:nws-v0.8-amd64"
+IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.8-amd64"
+IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.8-amd64"
+IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.8-amd64"
 IMAGE_DEBUG = "docker.io/nicolaka/netshoot"
 
 UE_KEY = "fec86ba6eb707ed08905757b1bb44b8f"
