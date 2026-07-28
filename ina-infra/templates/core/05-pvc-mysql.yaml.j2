@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql
+  namespace: {{ namespace }}
+  labels:
+    app: mysql
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ mysql_storage | default("8Gi") }}
+  storageClassName: {{ mysql_storage_class | default("local-path") }}

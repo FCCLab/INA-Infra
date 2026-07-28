@@ -212,11 +212,50 @@ def patch_upf_nf_conf_register(path: Path, *, register: str = UPF_REGISTER_NF) -
     dump(doc, path)
 
 
+def patch_upf_controller_utils_exclude_usrp(path: Path) -> None:
+    """Keep operator-created UPF pods off usrp (no enp7s0 for N3/N4/N6 macvlan)."""
+    if not path.is_file():
+        return
+    doc = yaml.safe_load(path.read_text())
+    utils = doc.get("data", {}).get("utils.py", "")
+    if not utils or ('"operator": "NotIn"' in utils and '"usrp"' in utils):
+        return
+    old = '                      "spec": {\n                        "securityContext": {'
+    new = (
+        '                      "spec": {\n'
+        '                        "affinity": {\n'
+        '                          "nodeAffinity": {\n'
+        '                            "requiredDuringSchedulingIgnoredDuringExecution": {\n'
+        '                              "nodeSelectorTerms": [\n'
+        '                                {\n'
+        '                                  "matchExpressions": [\n'
+        '                                    {\n'
+        '                                      "key": "kubernetes.io/hostname",\n'
+        '                                      "operator": "NotIn",\n'
+        '                                      "values": ["usrp"]\n'
+        '                                    }\n'
+        '                                  ]\n'
+        '                                }\n'
+        '                              ]\n'
+        '                            }\n'
+        '                          }\n'
+        '                        },\n'
+        '                        "securityContext": {'
+    )
+    if old not in utils:
+        return
+    doc["data"]["utils.py"] = utils.replace(old, new, 1)
+    dump(doc, path)
+
+
 def apply_unified_upf_operator_peers(site: str) -> None:
     """Same SMF/NRF IPs + register_nf on every cluster's UPF operator configs."""
     ops = repos / REPO_NAME[site] / "namespaces" / ops_ns
     patch_upf_op_conf_peers(ops / "configmap-oai-upf-op-conf.yaml")
     patch_upf_nf_conf_register(ops / "configmap-oai-upf-nf-conf.yaml")
+    patch_upf_controller_utils_exclude_usrp(
+        ops / "configmap-oai-upf-controller-utils.yaml"
+    )
 
 
 # Slice A CCTV config (from exported SLICEA_* env vars).
@@ -642,9 +681,12 @@ def ensure_upf_operator(site: str) -> None:
         ):
             if env.get("name") == "TESTING":
                 env["value"] = "yes"  # skip NRF initContainer off-central
-        # Keep UPF pods off usrp (no enp7s0 for macvlan N3/N4/N6).
+        # Controller images are amd64-only; keep off arm64 GPU workers (gh81/gh82).
+        # On edge also pin off usrp (no enp7s0 for macvlan N3/N4/N6).
+        spec = doc["spec"]["template"]["spec"]
+        node_selector = spec.setdefault("nodeSelector", {})
+        node_selector["kubernetes.io/arch"] = "amd64"
         if site == "edge":
-            spec = doc["spec"]["template"]["spec"]
             spec["affinity"] = {
                 "nodeAffinity": {
                     "requiredDuringSchedulingIgnoredDuringExecution": {

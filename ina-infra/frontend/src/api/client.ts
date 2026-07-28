@@ -3,6 +3,10 @@ export type Profile = {
   subnet: string;
   max_slices: number;
   dnn_prefix: string;
+  /** Edge worker for OAI DU (usrp | edge-0 | edge-1). */
+  du_node: string;
+  /** Edge worker for OAI UEs (usrp | edge-0 | edge-1). */
+  ue_node: string;
 };
 
 export type SliceIn = {
@@ -131,16 +135,6 @@ export type NetworkOut = {
   locations: string[];
 };
 
-export type PlApplyResponse = {
-  ok: boolean;
-  dry_run: boolean;
-  message: string;
-  written_files: string[];
-  push_stdout: string;
-  push_stderr: string;
-  exit_code: number | null;
-};
-
 export type ProfileDefaultsOut = {
   profile: Profile;
   slices: SliceIn[];
@@ -153,7 +147,128 @@ export type ProfileRecord = {
   network: NetworkIn;
   pl_result?: PlSolveResponse | null;
   pl_result_file?: string | null;
+  deployed?: boolean;
+  deployed_at?: string | null;
+  deploy_files?: string[];
+  deploy_clusters?: string[];
   updated_at: string;
+};
+
+export type PlApplyResponse = {
+  ok: boolean;
+  dry_run: boolean;
+  message: string;
+  written_files: string[];
+  push_stdout: string;
+  push_stderr: string;
+  exit_code: number | null;
+  deployed?: boolean;
+  profile?: ProfileRecord | null;
+};
+
+export type PlUndeployResponse = {
+  ok: boolean;
+  dry_run: boolean;
+  message: string;
+  removed_paths: string[];
+  push_stdout: string;
+  push_stderr: string;
+  exit_code: number | null;
+  deployed?: boolean;
+  profile?: ProfileRecord | null;
+};
+
+export type ProfileRolloutRequest = {
+  skip_ues?: boolean;
+  skip_ran?: boolean;
+  only_ues?: boolean;
+  slice_count?: number | null;
+};
+
+export type ProfileRolloutResponse = {
+  ok: boolean;
+  profile: string;
+  message: string;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+};
+
+export type ProfileRolloutStopResponse = {
+  ok: boolean;
+  profile: string;
+  stopped: boolean;
+  message: string;
+};
+
+export type DeployStatusItem = {
+  name: string;
+  exists: boolean;
+  ready: number;
+  desired: number;
+  available: number;
+  up_to_date: number;
+  ready_text: string;
+  status: string;
+  ok: boolean;
+};
+
+export type ConfigSyncStatus = {
+  name: string;
+  namespace: string;
+  exists: boolean;
+  overall: string; // synced | syncing | error | missing | unknown
+  summary: string;
+  source_commit?: string;
+  render_commit?: string;
+  sync_commit?: string;
+  last_synced_commit?: string;
+  syncing?: boolean;
+  stalled?: boolean;
+  reconciling?: boolean;
+  error_count?: number;
+  message?: string;
+  updated_at?: string | null;
+  error?: string | null;
+  repo?: string;
+  branch?: string;
+};
+
+export type ClusterDeployStatus = {
+  cluster: string;
+  context: string;
+  namespace: string;
+  namespace_exists: boolean;
+  namespace_phase?: string | null;
+  overall: string;
+  summary: string;
+  error?: string | null;
+  deployments: DeployStatusItem[];
+  expected: string[];
+  config_sync?: ConfigSyncStatus | null;
+};
+
+export type ClusterConfigSyncOut = {
+  cluster: string;
+  context: string;
+  config_sync: ConfigSyncStatus;
+};
+
+export type ProfileClusterStatusOut = {
+  namespace: string;
+  cluster: string;
+  context: string;
+  namespace_exists: boolean;
+  namespace_phase?: string | null;
+  overall: string;
+  summary: string;
+  error?: string | null;
+  deployments: DeployStatusItem[];
+  expected: string[];
+  clusters?: ClusterDeployStatus[];
+  config_syncs?: ClusterConfigSyncOut[];
+  config_sync_overall?: string;
+  config_sync_summary?: string;
 };
 
 export type ProfileListOut = {
@@ -166,7 +281,12 @@ export const DEFAULT_PROFILE: Profile = {
   subnet: "10.1.140.0/24",
   max_slices: 16,
   dnn_prefix: "10.140",
+  du_node: "usrp",
+  ue_node: "usrp",
 };
+
+/** Edge nodes that can host rfsim DU / UEs. */
+export const EDGE_RF_NODES = ["usrp", "edge-0", "edge-1"] as const;
 
 /** Default 4-slice SLAs (see ina-infra/sla.md). */
 export const DEFAULT_SLICES: SliceIn[] = [
@@ -176,22 +296,155 @@ export const DEFAULT_SLICES: SliceIn[] = [
   { id: 4, t_bar: 5, d_bar: 150, h_s: 0, eta_t0: 1.5, slice_type: "IoT" },
 ];
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    ...init,
-  });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body.detail || JSON.stringify(body);
-    } catch {
-      /* ignore */
+async function request<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const { timeoutMs, ...fetchInit } = init || {};
+  const ctrl = timeoutMs != null ? new AbortController() : null;
+  const timer =
+    ctrl && timeoutMs != null
+      ? window.setTimeout(() => ctrl.abort(), timeoutMs)
+      : null;
+  try {
+    const res = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(fetchInit.headers || {}),
+      },
+      ...fetchInit,
+      signal: ctrl?.signal ?? fetchInit.signal,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail || JSON.stringify(body);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        typeof detail === "string" ? detail : JSON.stringify(detail),
+      );
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    return res.json() as Promise<T>;
+  } finally {
+    if (timer != null) window.clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
+}
+
+export type StreamHandlers = {
+  onLog?: (stream: "stdout" | "stderr" | string, line: string) => void;
+  onStatus?: (message: string, extra?: Record<string, unknown>) => void;
+  onError?: (message: string) => void;
+};
+
+/** Consume a POST SSE stream; resolves with the final `result` event payload. */
+export async function streamRequest<T>(
+  path: string,
+  body: unknown,
+  handlers: StreamHandlers = {},
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<T> {
+  const ctrl = new AbortController();
+  const timeoutMs = opts?.timeoutMs;
+  const timer =
+    timeoutMs != null
+      ? window.setTimeout(() => ctrl.abort(), timeoutMs)
+      : null;
+  const onOuterAbort = () => ctrl.abort();
+  if (opts?.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener("abort", onOuterAbort, { once: true });
+  }
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errBody = await res.json();
+        detail = errBody.detail || JSON.stringify(errBody);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        typeof detail === "string" ? detail : JSON.stringify(detail),
+      );
+    }
+    if (!res.body) {
+      throw new Error("SSE response missing body");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let result: T | undefined;
+    let eventName = "message";
+
+    const flushBlock = (block: string) => {
+      const lines = block.split("\n");
+      let dataLines: string[] = [];
+      let ev = eventName;
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          ev = line.slice(6).trim() || "message";
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).replace(/^ /, ""));
+        }
+      }
+      if (!dataLines.length) return;
+      const raw = dataLines.join("\n");
+      let parsed: unknown = raw;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        /* keep raw string */
+      }
+      if (ev === "log" && parsed && typeof parsed === "object") {
+        const p = parsed as { stream?: string; line?: string };
+        handlers.onLog?.(p.stream || "stdout", p.line ?? "");
+      } else if (ev === "status" && parsed && typeof parsed === "object") {
+        const p = parsed as { message?: string } & Record<string, unknown>;
+        handlers.onStatus?.(p.message || "", p);
+      } else if (ev === "error" && parsed && typeof parsed === "object") {
+        const p = parsed as { message?: string };
+        handlers.onError?.(p.message || "error");
+      } else if (ev === "result") {
+        result = parsed as T;
+      }
+      eventName = "message";
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      buf = buf.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (block.trim()) flushBlock(block);
+      }
+    }
+    if (buf.trim()) flushBlock(buf);
+
+    if (result === undefined) {
+      throw new Error("SSE stream ended without a result event");
+    }
+    return result;
+  } finally {
+    if (timer != null) window.clearTimeout(timer);
+    if (opts?.signal) opts.signal.removeEventListener("abort", onOuterAbort);
+  }
 }
 
 export const api = {
@@ -243,4 +496,76 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  applyStream: (
+    body: {
+      result: PlSolveResponse;
+      slices: SliceIn[];
+      profile: Profile;
+      commit_message: string;
+      dry_run: boolean;
+    },
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<PlApplyResponse>(
+      "/api/v1/pl/apply/stream",
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
+    ),
+  undeploy: (body: {
+    profile: Profile;
+    commit_message?: string;
+    dry_run?: boolean;
+  }) =>
+    request<PlUndeployResponse>("/api/v1/pl/undeploy", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  undeployStream: (
+    body: {
+      profile: Profile;
+      commit_message?: string;
+      dry_run?: boolean;
+    },
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<PlUndeployResponse>(
+      "/api/v1/pl/undeploy/stream",
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
+    ),
+  clusterStatus: (name: string) =>
+    request<ProfileClusterStatusOut>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/cluster-status`,
+    ),
+  profileRollout: (name: string, body: ProfileRolloutRequest = {}) =>
+    request<ProfileRolloutResponse>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/rollout`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        // Staged rollout can take several minutes.
+        timeoutMs: 920_000,
+      },
+    ),
+  profileRolloutStream: (
+    name: string,
+    body: ProfileRolloutRequest = {},
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<ProfileRolloutResponse>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/rollout/stream`,
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
+    ),
+  profileRolloutStop: (name: string) =>
+    request<ProfileRolloutStopResponse>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/rollout/stop`,
+      { method: "POST", body: "{}" },
+    ),
 };

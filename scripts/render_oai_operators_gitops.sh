@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # Render OpenAirInterface 5G CN operators into repos/ for Config Sync GitOps push.
 # Upstream: https://github.com/openairinterface/oai-operators
+#
+# DEPRECATED for this lab: profile controllers live in ina-infra only.
+# Prefer: ./scripts/render_ina_cn_operators_gitops.sh [profile_ns]
+# Set FORCE_OAI_CN_OPERATORS=1 to run this legacy path anyway.
 set -euo pipefail
+
+if [[ "${FORCE_OAI_CN_OPERATORS:-}" != "1" ]]; then
+  echo "error: oai-cn-operators is retired; use ./scripts/render_ina_cn_operators_gitops.sh" >&2
+  echo "       (override with FORCE_OAI_CN_OPERATORS=1 if you really need this script)" >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -134,6 +144,15 @@ def patch_operator_controller_debug(doc, name):
     containers[0]["volumeMounts"] = mounts
 
 
+def patch_operator_arch(doc):
+    """OAI CN controller images are amd64-only; keep off arm64 GPU workers (gh81/gh82)."""
+    if doc.get("kind") != "Deployment":
+        return
+    spec = doc.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    node_selector = spec.setdefault("nodeSelector", {})
+    node_selector["kubernetes.io/arch"] = "amd64"
+
+
 def patch_operator_svc(doc):
     if doc.get("kind") != "Deployment":
         return
@@ -221,6 +240,7 @@ for path in sorted(src.glob("*.yaml")):
         patch_op_conf(doc)
         patch_nf_conf(doc, upf_n3_vip)
         patch_operator_svc(doc)
+        patch_operator_arch(doc)
         clean_metadata(doc.get("metadata"))
         if doc["kind"] == "Deployment":
             template = doc.get("spec", {}).get("template", {})

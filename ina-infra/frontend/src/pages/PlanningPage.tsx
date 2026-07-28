@@ -1,18 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   DEFAULT_PROFILE,
   DEFAULT_SLICES,
+  EDGE_RF_NODES,
   IpPlan,
   NetworkIn,
-  PlApplyResponse,
   PlSolveResponse,
   Profile,
+  ProfileRecord,
   SliceIn,
+  StreamHandlers,
 } from "../api/client";
 import Topology from "../components/Topology";
 import NetworkSettingsForm from "../components/NetworkSettingsForm";
 import FieldHelp from "../components/FieldHelp";
+import StatusRail from "../components/StatusRail";
+import type { ProfileClusterStatusOut } from "../api/client";
 
 const emptySlice = (id: number): SliceIn => ({
   id,
@@ -89,11 +93,28 @@ export default function PlanningPage() {
   const [savedAt, setSavedAt] = useState<string>("");
   const [showNet, setShowNet] = useState(false);
   const [result, setResult] = useState<PlSolveResponse | null>(null);
-  const [applyLog, setApplyLog] = useState<PlApplyResponse | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleTitle, setConsoleTitle] = useState("Console");
+  const [consoleText, setConsoleText] = useState("");
+  const [consoleMessage, setConsoleMessage] = useState("");
+  const [consoleOk, setConsoleOk] = useState<boolean | null>(null);
+  const [consoleFiles, setConsoleFiles] = useState<string[]>([]);
+  const [consoleFilesLabel, setConsoleFilesLabel] = useState("Files");
+  const consoleRef = useRef<HTMLPreElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const [rolloutBusy, setRolloutBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [commitMsg, setCommitMsg] = useState("ina-pl: apply profile manifests");
+  const [commitMsg, setCommitMsg] = useState("ina-pl: deploy profile manifests");
+  const [deployed, setDeployed] = useState(false);
+  const [deployedAt, setDeployedAt] = useState<string>("");
+  const [deployFiles, setDeployFiles] = useState<string[]>([]);
+  const [clusterStatus, setClusterStatus] = useState<ProfileClusterStatusOut | null>(
+    null,
+  );
+  const [clusterError, setClusterError] = useState<string | null>(null);
+  const [clusterBusy, setClusterBusy] = useState(false);
 
   async function refreshNames() {
     const list = await api.listProfiles();
@@ -103,18 +124,43 @@ export default function PlanningPage() {
 
   function clearSolve() {
     setResult(null);
-    setApplyLog(null);
   }
 
-  function applyRecord(rec: {
-    profile: Profile;
-    slices: SliceIn[];
-    network?: NetworkIn;
-    pl_result?: PlSolveResponse | null;
-    pl_result_file?: string | null;
-    updated_at: string;
-  }) {
-    setProfile(rec.profile);
+  function resetConsole(title: string) {
+    setConsoleOpen(true);
+    setConsoleTitle(title);
+    setConsoleText("");
+    setConsoleMessage("");
+    setConsoleOk(null);
+    setConsoleFiles([]);
+    setConsoleFilesLabel("Files");
+  }
+
+  function appendConsole(line: string) {
+    setConsoleText((prev) => (prev ? `${prev}\n${line}` : line));
+  }
+
+  function streamHandlers(): StreamHandlers {
+    return {
+      onLog: (stream, line) => {
+        appendConsole(stream === "stderr" ? `[err] ${line}` : line);
+      },
+      onStatus: (message) => {
+        if (message) appendConsole(`# ${message}`);
+      },
+      onError: (message) => {
+        if (message) appendConsole(`! ${message}`);
+      },
+    };
+  }
+
+  function applyRecord(rec: ProfileRecord) {
+    setProfile({
+      ...DEFAULT_PROFILE,
+      ...rec.profile,
+      du_node: rec.profile.du_node || "usrp",
+      ue_node: rec.profile.ue_node || "usrp",
+    });
     setSlices(rec.slices);
     const net =
       rec.network && Object.keys(rec.network).length
@@ -123,12 +169,13 @@ export default function PlanningPage() {
     setNetworkIn(net);
     setSelectedName(rec.profile.name);
     setSavedAt(rec.updated_at);
+    setDeployed(Boolean(rec.deployed));
+    setDeployedAt(rec.deployed_at || "");
+    setDeployFiles(rec.deploy_files || []);
     if (rec.pl_result?.ok) {
       setResult(rec.pl_result);
-      setApplyLog(null);
     } else {
       setResult(null);
-      setApplyLog(null);
     }
   }
 
@@ -152,7 +199,7 @@ export default function PlanningPage() {
           applyRecord(first);
         } else {
           const defs = await api.profileDefaults();
-          applyRecord({ ...defs, updated_at: "" });
+          applyRecord({ ...defs, updated_at: "" } as ProfileRecord);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -168,6 +215,37 @@ export default function PlanningPage() {
   const profileOk = NS_RE.test(profile.name);
   const isExisting = selectedName !== "" && profileNames.includes(selectedName);
   const dirtyName = selectedName !== "" && profile.name !== selectedName;
+
+  async function refreshClusterStatus() {
+    if (!NS_RE.test(profile.name)) {
+      setClusterStatus(null);
+      setClusterError(null);
+      return;
+    }
+    setClusterBusy(true);
+    try {
+      const st = await api.clusterStatus(profile.name);
+      setClusterStatus(st);
+      setClusterError(null);
+    } catch (e) {
+      setClusterError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClusterBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!profileOk) {
+      setClusterStatus(null);
+      return;
+    }
+    void refreshClusterStatus();
+    const id = window.setInterval(() => {
+      void refreshClusterStatus();
+    }, 10000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.name, profileOk]);
 
   function updateProfile(patch: Partial<Profile>) {
     setProfile((p) => ({ ...p, ...patch }));
@@ -307,7 +385,6 @@ export default function PlanningPage() {
     }
     setBusy(true);
     setError(null);
-    setApplyLog(null);
     setStatus(null);
     try {
       const res = await api.solve(slices, profile, networkIn);
@@ -326,41 +403,205 @@ export default function PlanningPage() {
     }
   }
 
+  useEffect(() => {
+    if (consoleRef.current) {
+      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+    }
+  }, [consoleText]);
+
   async function onApply(dryRun: boolean) {
     if (!result?.ok) return;
     if (
       !dryRun &&
       !window.confirm(
-        `Push profile "${profile.name}" manifests to Gitea?\n\n` +
-          `Writes namespaces/${profile.name}/ (Multus NADs + IP ConfigMaps) ` +
-          `on central/regional/edge for N=${slices.length} slice(s) on ${profile.subnet}.`,
+        `Deploy profile "${profile.name}" to the clusters?\n\n` +
+          `Writes namespaces/${profile.name}/ then pushes to Gitea ` +
+          `(Config Sync) for N=${slices.length} slice(s) on ${profile.subnet}.`,
       )
     ) {
       return;
     }
     setBusy(true);
     setError(null);
+    resetConsole(dryRun ? "Dry deploy" : "Deploy");
     try {
-      const res = await api.apply({
-        result,
-        slices,
-        profile,
-        commit_message: commitMsg,
-        dry_run: dryRun,
-      });
-      setApplyLog(res);
+      const res = await api.applyStream(
+        {
+          result,
+          slices,
+          profile,
+          commit_message: dryRun
+            ? commitMsg.replace("deploy", "dry-deploy")
+            : commitMsg,
+          dry_run: dryRun,
+        },
+        streamHandlers(),
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage(
+        (res.dry_run ? "[dry deploy] " : "") + (res.message || ""),
+      );
+      setConsoleFiles(res.written_files || []);
+      setConsoleFilesLabel("Written files");
+      if (res.profile) {
+        setDeployed(Boolean(res.profile.deployed));
+        setDeployedAt(res.profile.deployed_at || "");
+        setDeployFiles(res.profile.deploy_files || res.written_files || []);
+        setSavedAt(res.profile.updated_at || savedAt);
+      } else {
+        setDeployFiles(res.written_files || []);
+        if (!dryRun && res.ok) {
+          setDeployed(true);
+          setDeployedAt(new Date().toISOString());
+        }
+      }
       if (!res.ok) setError(res.message);
+      else {
+        setStatus(
+          dryRun
+            ? `Dry deploy: ${res.written_files.length} file(s) saved on profile`
+            : `Deployed: ${res.written_files.length} file(s)`,
+        );
+        void refreshClusterStatus();
+      }
     } catch (e) {
+      setConsoleOk(false);
+      setConsoleMessage(e instanceof Error ? e.message : String(e));
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
 
+  async function onUndeploy() {
+    if (!deployed) return;
+    if (
+      !window.confirm(
+        `Undeploy profile "${profile.name}"?\n\n` +
+          `Deletes namespaces/${profile.name}/ from GitOps repos and pushes to Gitea ` +
+          `(Config Sync will prune the workloads).`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    resetConsole("Undeploy");
+    try {
+      const res = await api.undeployStream(
+        {
+          profile,
+          commit_message: "ina-pl: undeploy profile manifests",
+          dry_run: false,
+        },
+        streamHandlers(),
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage(res.message || "");
+      setConsoleFiles(res.removed_paths || []);
+      setConsoleFilesLabel("Removed paths");
+      if (res.profile) {
+        setDeployed(Boolean(res.profile.deployed));
+        setDeployedAt(res.profile.deployed_at || "");
+        setDeployFiles(res.profile.deploy_files || []);
+        setSavedAt(res.profile.updated_at || savedAt);
+      } else if (res.ok) {
+        setDeployed(false);
+        setDeployedAt("");
+        setDeployFiles([]);
+      }
+      if (!res.ok) setError(res.message);
+      else {
+        setStatus(`Undeployed “${profile.name}”`);
+        void refreshClusterStatus();
+      }
+    } catch (e) {
+      setConsoleOk(false);
+      setConsoleMessage(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onProfileRollout(opts?: {
+    skip_ues?: boolean;
+    skip_ran?: boolean;
+    only_ues?: boolean;
+  }) {
+    if (!profileOk) return;
+    if (
+      !window.confirm(
+        `Staged rollout for profile "${profile.name}"?\n\n` +
+          `Order: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs\n` +
+          `(same bring-up order as oai-slice-deployment; may take several minutes)`,
+      )
+    ) {
+      return;
+    }
+    const ctrl = new AbortController();
+    streamAbortRef.current = ctrl;
+    setRolloutBusy(true);
+    setBusy(true);
+    setError(null);
+    resetConsole("Profile rollout");
+    try {
+      const res = await api.profileRolloutStream(
+        profile.name,
+        {
+          slice_count: slices.length,
+          ...opts,
+        },
+        streamHandlers(),
+        { signal: ctrl.signal },
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage(
+        (res.message || "") +
+          (res.exit_code != null ? ` (exit ${res.exit_code})` : ""),
+      );
+      if (!res.ok && res.exit_code !== 130) setError(res.message);
+      else if (res.exit_code === 130) setStatus("Rollout stopped");
+      void refreshClusterStatus();
+    } catch (e) {
+      const aborted =
+        ctrl.signal.aborted ||
+        (e instanceof DOMException && e.name === "AbortError") ||
+        (e instanceof Error && /abort/i.test(e.message));
+      if (aborted) {
+        setConsoleOk(false);
+        setConsoleMessage("Rollout stopped");
+        setStatus("Rollout stopped");
+      } else {
+        setConsoleOk(false);
+        setConsoleMessage(e instanceof Error ? e.message : String(e));
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      if (streamAbortRef.current === ctrl) streamAbortRef.current = null;
+      setRolloutBusy(false);
+      setBusy(false);
+    }
+  }
+
+  async function onStopRollout() {
+    streamAbortRef.current?.abort();
+    try {
+      const res = await api.profileRolloutStop(profile.name);
+      appendConsole(`# ${res.message}`);
+      setStatus(res.message);
+    } catch (e) {
+      appendConsole(
+        `! stop failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   const ipPlan: IpPlan | null | undefined = result?.ok ? result.ip_plan : null;
 
   return (
-    <div className="page">
+    <div className="page-layout">
+      <div className="page">
       <section className="panel">
         <div className="panel-head">
           <h2>Profile</h2>
@@ -438,6 +679,38 @@ export default function PlanningPage() {
               value={profile.dnn_prefix}
               onChange={(e) => updateProfile({ dnn_prefix: e.target.value.trim() })}
             />
+          </FieldHelp>
+          <FieldHelp
+            label="DU node (edge)"
+            help="kubernetes.io/hostname for OAI DU. usrp uses Multus parent enp4s0f0; edge-0/1 use enp7s0. Prefer usrp for rfsim; only one DU stack per node."
+          >
+            <select
+              value={profile.du_node || "usrp"}
+              disabled={busy}
+              onChange={(e) => updateProfile({ du_node: e.target.value })}
+            >
+              {EDGE_RF_NODES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </FieldHelp>
+          <FieldHelp
+            label="UE node (edge)"
+            help="kubernetes.io/hostname for OAI UEs. Must reach the DU rfsim server (usually same node as DU)."
+          >
+            <select
+              value={profile.ue_node || "usrp"}
+              disabled={busy}
+              onChange={(e) => updateProfile({ ue_node: e.target.value })}
+            >
+              {EDGE_RF_NODES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
           </FieldHelp>
         </div>
         {!profileOk && <p className="hint error">Invalid K8s namespace name.</p>}
@@ -730,6 +1003,17 @@ export default function PlanningPage() {
           )}
 
           <div className="apply-box">
+            <div className="actions" style={{ marginBottom: 8 }}>
+              <span
+                className={
+                  deployed ? "status-pill ok" : "status-pill muted"
+                }
+              >
+                {deployed
+                  ? `Deployed${deployedAt ? ` · ${deployedAt.replace("T", " ").slice(0, 19)}` : ""}`
+                  : "Not deployed"}
+              </span>
+            </div>
             <label>
               Commit message
               <input
@@ -740,7 +1024,7 @@ export default function PlanningPage() {
             </label>
             <div className="actions" style={{ marginTop: 12 }}>
               <button type="button" disabled={busy} onClick={() => onApply(true)}>
-                Dry-run write
+                Dry deploy
               </button>
               <button
                 type="button"
@@ -748,41 +1032,151 @@ export default function PlanningPage() {
                 disabled={busy}
                 onClick={() => onApply(false)}
               >
-                Push to Gitea
+                Deploy
               </button>
+              {deployed && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onUndeploy()}
+                  title="Remove profile namespace from GitOps and push"
+                >
+                  Undeploy
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy || !profileOk || rolloutBusy}
+                onClick={() => void onProfileRollout()}
+                title="Staged restart: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs"
+              >
+                {rolloutBusy ? "Rolling out…" : "Profile rollout"}
+              </button>
+              {rolloutBusy && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => void onStopRollout()}
+                  title="Stop the staged rollout script"
+                >
+                  Stop rollout
+                </button>
+              )}
             </div>
             <p className="hint">
-              Writes <code>namespaces/{profile.name}/</code> Multus NADs + IP ConfigMaps into
-              GitOps repos (purge+rewrite), then pushes to Gitea.
+              <strong>Deploy</strong> writes <code>namespaces/{profile.name}/</code> and
+              pushes to Gitea. <strong>Dry deploy</strong> writes locally and saves the
+              file list on the profile without pushing.{" "}
+              {deployed && (
+                <>
+                  <strong>Undeploy</strong> removes the namespace from GitOps.
+                </>
+              )}{" "}
+              Live command output streams into the Console below.
             </p>
           </div>
         </section>
       )}
 
-      {applyLog && (
-        <section className="panel">
-          <h2>Apply log</h2>
-          <p className={applyLog.ok ? "ok" : "error"}>
-            {applyLog.dry_run ? "[dry-run] " : ""}
-            {applyLog.message}
-          </p>
-          {applyLog.written_files.length > 0 && (
-            <ul className="file-list">
-              {applyLog.written_files.map((f) => (
-                <li key={f}>
-                  <code>{f}</code>
-                </li>
-              ))}
-            </ul>
+      {(consoleOpen || deployFiles.length > 0) && (
+        <section className="panel console-panel">
+          <div className="panel-head">
+            <h2>{consoleOpen ? consoleTitle : "Console"}</h2>
+            {rolloutBusy ? (
+              <button
+                type="button"
+                className="danger"
+                onClick={() => void onStopRollout()}
+                title="Stop the staged rollout script"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConsoleText("");
+                  setConsoleMessage("");
+                  setConsoleOk(null);
+                  setConsoleFiles([]);
+                  if (!deployFiles.length) setConsoleOpen(false);
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {consoleMessage && (
+            <p
+              className={
+                consoleOk == null ? "hint" : consoleOk ? "ok" : "error"
+              }
+            >
+              {consoleMessage}
+            </p>
           )}
-          {(applyLog.push_stdout || applyLog.push_stderr) && (
-            <pre className="net-pre">
-              {applyLog.push_stdout}
-              {applyLog.push_stderr}
-            </pre>
+          <pre className="net-pre console-pre" ref={consoleRef}>
+            {consoleText ||
+              (busy
+                ? "Waiting for output…"
+                : consoleOpen
+                  ? "(empty)"
+                  : "Run Deploy, Undeploy, or Profile rollout to stream command output here.")}
+          </pre>
+          {consoleFiles.length > 0 && (
+            <details style={{ marginTop: 8 }} open>
+              <summary className="hint">
+                {consoleFilesLabel} ({consoleFiles.length})
+              </summary>
+              <ul className="file-list">
+                {consoleFiles.map((f) => (
+                  <li key={f}>
+                    <code>{f}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {!consoleFiles.length && deployFiles.length > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary className="hint">
+                Saved file list ({deployFiles.length})
+              </summary>
+              <ul className="file-list">
+                {deployFiles.map((f) => (
+                  <li key={f}>
+                    <code>{f}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
         </section>
       )}
+      </div>
+
+      <StatusRail
+        profileName={profile.name}
+        profileOk={profileOk}
+        isExisting={isExisting}
+        dirtyName={dirtyName}
+        savedAt={savedAt}
+        networkCollapsed={!showNet}
+        sliceCount={slices.length}
+        maxSlices={profile.max_slices}
+        plSolved={Boolean(result?.ok)}
+        plMessage={result?.ok ? result.message : null}
+        deployed={deployed}
+        deployedAt={deployedAt}
+        cluster={clusterStatus}
+        clusterError={clusterError}
+        refreshing={clusterBusy}
+        onRefresh={() => void refreshClusterStatus()}
+        rolloutBusy={rolloutBusy}
+        onRollout={() => void onProfileRollout()}
+        onStopRollout={() => void onStopRollout()}
+      />
     </div>
   );
 }

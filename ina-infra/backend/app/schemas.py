@@ -14,6 +14,10 @@ LOC_IDS = {"Edge": 0, "Regional": 1, "Central": 2, "edge": 0, "regional": 1, "ce
 _K8S_NS_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 
+# Edge workers that can host rfsim DU / UEs (Multus parent differs for usrp).
+EDGE_RF_NODES = ("usrp", "edge-0", "edge-1")
+
+
 class Profile(BaseModel):
     """Deployment profile: name == K8s namespace on workload clusters."""
 
@@ -21,6 +25,14 @@ class Profile(BaseModel):
     subnet: str = Field("10.1.140.0/24", description="Multus macvlan CIDR")
     max_slices: int = Field(16, ge=1, le=32)
     dnn_prefix: str = Field("10.140", description="DNN pool prefix → {dnn_prefix}.{n}.0/24")
+    du_node: str = Field(
+        "usrp",
+        description="Edge node hostname for OAI DU (usrp | edge-0 | edge-1)",
+    )
+    ue_node: str = Field(
+        "usrp",
+        description="Edge node hostname for OAI UEs (usrp | edge-0 | edge-1)",
+    )
 
     @field_validator("name")
     @classmethod
@@ -28,6 +40,16 @@ class Profile(BaseModel):
         if not _K8S_NS_RE.match(v):
             raise ValueError(f"invalid K8s namespace / profile name: {v!r}")
         return v
+
+    @field_validator("du_node", "ue_node")
+    @classmethod
+    def _valid_edge_rf_node(cls, v: str) -> str:
+        node = (v or "").strip()
+        if node not in EDGE_RF_NODES:
+            raise ValueError(
+                f"invalid edge RF node {v!r}; expected one of {list(EDGE_RF_NODES)}"
+            )
+        return node
 
 
 class SliceIn(BaseModel):
@@ -168,22 +190,144 @@ class PlApplyRequest(BaseModel):
     result: PlSolveResponse
     slices: List[SliceIn] = Field(default_factory=list)
     profile: Optional[Profile] = None
-    commit_message: str = "ina-pl: apply profile manifests"
+    commit_message: str = "ina-pl: deploy profile manifests"
     dry_run: bool = False
+    include_core: bool = Field(
+        True,
+        description=(
+            "On central, also emit dedicated-core MySQL + NRF/AUSF/UDM/UDR/AMF/SMF "
+            "into the profile namespace (alongside Multus NADs / IP ConfigMaps)."
+        ),
+    )
+    include_ran: bool = Field(
+        True,
+        description=(
+            "Emit profile gNB on edge (CU-CP/DU/FlexRIC/UEs) and co-located "
+            "UPF NFDeploy + CU-UP Deployment on each slice's PL UPF site."
+        ),
+    )
     clusters: List[str] = Field(
         default_factory=lambda: ["central", "regional", "edge"],
         description="Clusters to push via push_git_repos.sh",
     )
 
 
-class PlApplyResponse(BaseModel):
+class ProfileRolloutRequest(BaseModel):
+    skip_ues: bool = False
+    skip_ran: bool = False
+    only_ues: bool = False
+    ignore_pfcp: bool = Field(
+        False,
+        description="Continue even if SMF↔UPF PFCP association logs are not detected",
+    )
+    slice_count: Optional[int] = Field(
+        None, description="Override N; default from ina-pl-placement"
+    )
+    ue_gap_sec: Optional[int] = None
+    pdu_wait_sec: Optional[int] = None
+    du_settle_sec: Optional[int] = None
+    pfcp_wait_sec: Optional[int] = None
+    timeout_sec: Optional[int] = Field(
+        None, description="Per-deployment kubectl rollout status timeout"
+    )
+    wall_timeout_sec: int = Field(
+        900,
+        description="Hard wall-clock timeout for the whole staged rollout script",
+    )
+
+
+class ProfileRolloutResponse(BaseModel):
     ok: bool
-    dry_run: bool = False
+    profile: str
     message: str = ""
-    written_files: List[str] = Field(default_factory=list)
-    push_stdout: str = ""
-    push_stderr: str = ""
+    stdout: str = ""
+    stderr: str = ""
     exit_code: Optional[int] = None
+
+
+class ProfileRolloutStopResponse(BaseModel):
+    ok: bool
+    profile: str
+    stopped: bool = False
+    message: str = ""
+
+
+class DeployStatusItem(BaseModel):
+    name: str
+    exists: bool
+    ready: int = 0
+    desired: int = 0
+    available: int = 0
+    up_to_date: int = 0
+    ready_text: str = "—"
+    status: str = "Missing"
+    ok: bool = False
+
+
+class ConfigSyncStatus(BaseModel):
+    """Config Sync RootSync progress for a workload cluster."""
+
+    name: str = ""
+    namespace: str = "config-management-system"
+    exists: bool = False
+    overall: str = "unknown"  # synced | syncing | error | missing | unknown
+    summary: str = ""
+    source_commit: str = ""
+    render_commit: str = ""
+    sync_commit: str = ""
+    last_synced_commit: str = ""
+    syncing: bool = False
+    stalled: bool = False
+    reconciling: bool = False
+    error_count: int = 0
+    message: str = ""
+    updated_at: Optional[str] = None
+    error: Optional[str] = None
+    repo: str = ""
+    branch: str = ""
+
+
+class ClusterDeployStatus(BaseModel):
+    cluster: str
+    context: str = ""
+    namespace: str = ""
+    namespace_exists: bool = False
+    namespace_phase: Optional[str] = None
+    overall: str = "unknown"
+    summary: str = ""
+    error: Optional[str] = None
+    deployments: List[DeployStatusItem] = Field(default_factory=list)
+    expected: List[str] = Field(default_factory=list)
+    config_sync: Optional[ConfigSyncStatus] = None
+
+
+class ClusterConfigSyncOut(BaseModel):
+    cluster: str
+    context: str = ""
+    config_sync: ConfigSyncStatus
+
+
+class ProfileClusterStatusOut(BaseModel):
+    namespace: str
+    cluster: str = "central"
+    context: str = "central@central"
+    namespace_exists: bool = False
+    namespace_phase: Optional[str] = None
+    overall: str = "unknown"
+    summary: str = ""
+    error: Optional[str] = None
+    deployments: List[DeployStatusItem] = Field(default_factory=list)
+    expected: List[str] = Field(default_factory=list)
+    clusters: List[ClusterDeployStatus] = Field(
+        default_factory=list,
+        description="Per-cluster status (central, regional, edge)",
+    )
+    config_syncs: List[ClusterConfigSyncOut] = Field(
+        default_factory=list,
+        description="Config Sync RootSync status (mgmt, central, regional, edge)",
+    )
+    config_sync_overall: str = "unknown"
+    config_sync_summary: str = ""
 
 
 class NetworkOut(BaseModel):
@@ -217,7 +361,54 @@ class ProfileRecord(BaseModel):
     pl_result_file: Optional[str] = Field(
         None, description="Path to last JSON dump under backend/results/"
     )
+    deployed: bool = Field(
+        False, description="True after a successful Deploy (GitOps push)"
+    )
+    deployed_at: Optional[str] = Field(
+        None, description="UTC ISO timestamp of last successful Deploy"
+    )
+    deploy_files: List[str] = Field(
+        default_factory=list,
+        description="Last generated GitOps file list (dry or real deploy)",
+    )
+    deploy_clusters: List[str] = Field(
+        default_factory=list,
+        description="Clusters touched by last deploy",
+    )
     updated_at: str = ""
+
+
+class PlApplyResponse(BaseModel):
+    ok: bool
+    dry_run: bool = False
+    message: str = ""
+    written_files: List[str] = Field(default_factory=list)
+    push_stdout: str = ""
+    push_stderr: str = ""
+    exit_code: Optional[int] = None
+    deployed: bool = False
+    profile: Optional[ProfileRecord] = None
+
+
+class PlUndeployRequest(BaseModel):
+    profile: Optional[Profile] = None
+    commit_message: str = "ina-pl: undeploy profile manifests"
+    dry_run: bool = False
+    clusters: List[str] = Field(
+        default_factory=lambda: ["central", "regional", "edge"],
+    )
+
+
+class PlUndeployResponse(BaseModel):
+    ok: bool
+    dry_run: bool = False
+    message: str = ""
+    removed_paths: List[str] = Field(default_factory=list)
+    push_stdout: str = ""
+    push_stderr: str = ""
+    exit_code: Optional[int] = None
+    deployed: bool = False
+    profile: Optional[ProfileRecord] = None
 
 
 class ProfileCreateRequest(BaseModel):

@@ -1,0 +1,49 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFConfig
+metadata:
+  name: amf-core-config
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+spec:
+  configRefs:
+  - apiVersion: cellular.nephio.org/v1alpha1
+    kind: PLMN
+    metadata:
+      name: {{ namespace }}-plmn
+    spec:
+      plmnInfo:
+      - plmnID:
+          mcc: '001'
+          mnc: '01'
+        tac: 81
+        nssai:
+        - sst: 1
+          sd: FFFFFF
+          dnnInfo:
+          - name: oai
+            sessionType: ipv4
+            dns: 1.1.1.1
+            subnet: 10.0.0.0/24
+{% for sl in slices %}
+        - sst: 1
+          sd: '{{ '%06d' % sl.n }}'
+          dnnInfo:
+          - name: oai{{ sl.n }}
+            sessionType: ipv4
+            dns: 1.1.1.1
+            subnet: {{ sl.dnn_cidr }}
+{% endfor %}
+  - apiVersion: cellular.nephio.org/v1alpha1
+    kind: ServedGUAMI
+    metadata:
+      name: {{ namespace }}-served-guami
+    spec:
+    - amfID:
+        amfPointer: '01'
+        amfRegionID: '01'
+        amfSetID: '001'
+      plmnID:
+        mcc: '001'
+        mnc: '01'

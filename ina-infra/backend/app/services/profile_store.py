@@ -1,4 +1,4 @@
-"""SQLite persistence for INA-Infra profiles (identity + slices + network + PL result)."""
+"""SQLite persistence for INA-Infra profiles (identity + slices + network + PL + deploy)."""
 
 from __future__ import annotations
 
@@ -60,6 +60,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE profiles ADD COLUMN pl_result_json TEXT")
     if "pl_result_file" not in cols:
         conn.execute("ALTER TABLE profiles ADD COLUMN pl_result_file TEXT")
+    if "deployed" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN deployed INTEGER NOT NULL DEFAULT 0"
+        )
+    if "deployed_at" not in cols:
+        conn.execute("ALTER TABLE profiles ADD COLUMN deployed_at TEXT")
+    if "deploy_files_json" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN deploy_files_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "deploy_clusters_json" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN deploy_clusters_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "du_node" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN du_node TEXT NOT NULL DEFAULT 'usrp'"
+        )
+    if "ue_node" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN ue_node TEXT NOT NULL DEFAULT 'usrp'"
+        )
 
 
 def init_db() -> Path:
@@ -76,12 +98,15 @@ def init_db() -> Path:
               network_json TEXT NOT NULL DEFAULT '{}',
               pl_result_json TEXT,
               pl_result_file TEXT,
+              deployed INTEGER NOT NULL DEFAULT 0,
+              deployed_at TEXT,
+              deploy_files_json TEXT NOT NULL DEFAULT '[]',
+              deploy_clusters_json TEXT NOT NULL DEFAULT '[]',
               updated_at TEXT NOT NULL
             )
             """
         )
         _migrate(conn)
-        # Backfill empty network_json with defaults
         default_net = json.dumps(
             pl_solver.default_network_in().model_dump(exclude_none=True)
         )
@@ -132,6 +157,20 @@ def _parse_pl_result(raw: Any) -> Optional[PlSolveResponse]:
     return PlSolveResponse.model_validate(data)
 
 
+def _parse_str_list(raw: Any) -> List[str]:
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        if not raw.strip():
+            return []
+        data = json.loads(raw)
+    else:
+        data = raw
+    if not isinstance(data, list):
+        return []
+    return [str(x) for x in data]
+
+
 def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
     keys = row.keys()
     slices = [SliceIn.model_validate(s) for s in json.loads(row["slices_json"])]
@@ -142,11 +181,25 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
     pl_result_file = None
     if "pl_result_file" in keys and row["pl_result_file"]:
         pl_result_file = str(row["pl_result_file"])
+    deployed = bool(int(row["deployed"])) if "deployed" in keys else False
+    deployed_at = (
+        str(row["deployed_at"])
+        if "deployed_at" in keys and row["deployed_at"]
+        else None
+    )
+    deploy_files = _parse_str_list(
+        row["deploy_files_json"] if "deploy_files_json" in keys else "[]"
+    )
+    deploy_clusters = _parse_str_list(
+        row["deploy_clusters_json"] if "deploy_clusters_json" in keys else "[]"
+    )
     profile = Profile(
         name=row["name"],
         subnet=row["subnet"],
         max_slices=int(row["max_slices"]),
         dnn_prefix=row["dnn_prefix"],
+        du_node=(row["du_node"] if "du_node" in keys and row["du_node"] else "usrp"),
+        ue_node=(row["ue_node"] if "ue_node" in keys and row["ue_node"] else "usrp"),
     )
     return ProfileRecord(
         profile=profile,
@@ -154,6 +207,10 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
         network=network,
         pl_result=pl_result,
         pl_result_file=pl_result_file,
+        deployed=deployed,
+        deployed_at=deployed_at,
+        deploy_files=deploy_files,
+        deploy_clusters=deploy_clusters,
         updated_at=row["updated_at"],
     )
 
@@ -163,11 +220,11 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
     now = datetime.now(timezone.utc).isoformat()
     network = rec.network or pl_solver.default_network_in()
 
-    # Preserve prior PL result when caller omits it (e.g. SLA-only Update).
     existing = conn.execute(
-        "SELECT pl_result_json, pl_result_file FROM profiles WHERE name = ?",
+        "SELECT * FROM profiles WHERE name = ?",
         (rec.profile.name,),
     ).fetchone()
+
     if rec.pl_result is not None:
         pl_json = json.dumps(rec.pl_result.model_dump(exclude_none=True))
         pl_file = rec.pl_result_file
@@ -182,21 +239,62 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
         pl_json = None
         pl_file = rec.pl_result_file
 
+    # Deploy fields: caller may set them; otherwise preserve existing.
+    if existing is not None:
+        # If deploy_files explicitly provided (including empty after undeploy via
+        # save_deploy_state), use rec values. Heuristic: always use rec when
+        # save_profile is called with full record from get+update.
+        deployed = int(bool(rec.deployed))
+        deployed_at = rec.deployed_at
+        deploy_files_json = json.dumps(list(rec.deploy_files))
+        deploy_clusters_json = json.dumps(list(rec.deploy_clusters))
+        # Preserve deploy state when UI Save only sends defaults (deployed=False,
+        # empty files) and prior state was deployed — detect "omit" via sentinel:
+        # if rec has empty deploy_files AND not deployed AND existing was deployed
+        # AND rec.deployed_at is None, keep existing unless undeploy cleared it.
+        # Simpler approach: save_profile from UI doesn't touch deploy_*; use
+        # dedicated save_deploy_state. For save_profile from UI with default
+        # deployed=False, preserve existing deploy columns.
+        if (
+            not rec.deployed
+            and not rec.deploy_files
+            and rec.deployed_at is None
+            and existing["deployed"]
+        ):
+            deployed = int(existing["deployed"])
+            deployed_at = existing["deployed_at"]
+            deploy_files_json = existing["deploy_files_json"] or "[]"
+            deploy_clusters_json = existing["deploy_clusters_json"] or "[]"
+    else:
+        deployed = int(bool(rec.deployed))
+        deployed_at = rec.deployed_at
+        deploy_files_json = json.dumps(list(rec.deploy_files))
+        deploy_clusters_json = json.dumps(list(rec.deploy_clusters))
+
     conn.execute(
         """
         INSERT INTO profiles (
-          name, subnet, max_slices, dnn_prefix, slices_json, network_json,
-          pl_result_json, pl_result_file, updated_at
+          name, subnet, max_slices, dnn_prefix, du_node, ue_node,
+          slices_json, network_json,
+          pl_result_json, pl_result_file,
+          deployed, deployed_at, deploy_files_json, deploy_clusters_json,
+          updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
           subnet=excluded.subnet,
           max_slices=excluded.max_slices,
           dnn_prefix=excluded.dnn_prefix,
+          du_node=excluded.du_node,
+          ue_node=excluded.ue_node,
           slices_json=excluded.slices_json,
           network_json=excluded.network_json,
           pl_result_json=excluded.pl_result_json,
           pl_result_file=excluded.pl_result_file,
+          deployed=excluded.deployed,
+          deployed_at=excluded.deployed_at,
+          deploy_files_json=excluded.deploy_files_json,
+          deploy_clusters_json=excluded.deploy_clusters_json,
           updated_at=excluded.updated_at
         """,
         (
@@ -204,10 +302,16 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
             rec.profile.subnet,
             rec.profile.max_slices,
             rec.profile.dnn_prefix,
+            rec.profile.du_node,
+            rec.profile.ue_node,
             json.dumps([s.model_dump() for s in rec.slices]),
             json.dumps(network.model_dump(exclude_none=True)),
             pl_json,
             pl_file,
+            deployed,
+            deployed_at,
+            deploy_files_json,
+            deploy_clusters_json,
             now,
         ),
     )
@@ -270,6 +374,65 @@ def save_pl_result(
     if network is not None:
         updates["network"] = network
     return save_profile(rec.model_copy(update=updates))
+
+
+def save_deploy_state(
+    name: str,
+    *,
+    deployed: bool,
+    deploy_files: Optional[List[str]] = None,
+    deploy_clusters: Optional[List[str]] = None,
+    pl_result: Optional[PlSolveResponse] = None,
+    pl_result_file: Optional[str] = None,
+) -> Optional[ProfileRecord]:
+    """Update deploy status / generated file list for a profile."""
+    rec = get_profile(name)
+    if rec is None:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    result = pl_result if pl_result is not None else rec.pl_result
+    result_file = (
+        pl_result_file if pl_result_file is not None else rec.pl_result_file
+    )
+    files = list(deploy_files) if deploy_files is not None else list(rec.deploy_files)
+    clusters = (
+        list(deploy_clusters)
+        if deploy_clusters is not None
+        else list(rec.deploy_clusters)
+    )
+    pl_json = (
+        json.dumps(result.model_dump(exclude_none=True)) if result is not None else None
+    )
+    init_db()
+    with _db() as conn:
+        conn.execute(
+            """
+            UPDATE profiles SET
+              pl_result_json = ?,
+              pl_result_file = ?,
+              deployed = ?,
+              deployed_at = ?,
+              deploy_files_json = ?,
+              deploy_clusters_json = ?,
+              updated_at = ?
+            WHERE name = ?
+            """,
+            (
+                pl_json,
+                result_file,
+                int(bool(deployed)),
+                now if deployed else None,
+                json.dumps(files),
+                json.dumps(clusters),
+                now,
+                name,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM profiles WHERE name = ?", (name,)
+        ).fetchone()
+    assert row is not None
+    return _row_to_record(row)
 
 
 def create_profile(rec: ProfileRecord) -> ProfileRecord:

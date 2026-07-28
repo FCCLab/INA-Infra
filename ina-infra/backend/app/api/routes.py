@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.schemas import (
     NetworkIn,
@@ -11,15 +12,41 @@ from app.schemas import (
     PlApplyResponse,
     PlSolveRequest,
     PlSolveResponse,
+    PlUndeployRequest,
+    PlUndeployResponse,
+    ProfileClusterStatusOut,
     ProfileCreateRequest,
     ProfileDefaultsOut,
     ProfileListOut,
     ProfileRecord,
+    ProfileRolloutRequest,
+    ProfileRolloutResponse,
+    ProfileRolloutStopResponse,
     SliceIn,
 )
-from app.services import gitea_apply, pl_solver, profile_store
+from app.services import (
+    cluster_status,
+    gitea_apply,
+    pl_solver,
+    profile_rollout,
+    profile_store,
+)
 
 router = APIRouter(prefix="/api/v1")
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse_response(gen):
+    return StreamingResponse(
+        gen,
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 @router.get("/health")
@@ -69,6 +96,49 @@ def get_profile(name: str):
     if rec is None:
         raise HTTPException(status_code=404, detail=f"profile not found: {name}")
     return rec
+
+
+@router.get("/profiles/{name}/cluster-status", response_model=ProfileClusterStatusOut)
+def get_profile_cluster_status(name: str):
+    """Deployment readiness for the profile namespace on central."""
+    try:
+        raw = cluster_status.profile_cluster_status(name)
+        return ProfileClusterStatusOut.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/profiles/{name}/rollout",
+    response_model=ProfileRolloutResponse,
+)
+def post_profile_rollout(name: str, body: ProfileRolloutRequest | None = None):
+    """Staged pod restart: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs."""
+    try:
+        return profile_rollout.run_profile_rollout(name, body or ProfileRolloutRequest())
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/profiles/{name}/rollout/stream")
+def post_profile_rollout_stream(
+    name: str, body: ProfileRolloutRequest | None = None
+):
+    """SSE: live stdout/stderr from staged profile rollout."""
+    return _sse_response(
+        profile_rollout.iter_profile_rollout_sse(
+            name, body or ProfileRolloutRequest()
+        )
+    )
+
+
+@router.post(
+    "/profiles/{name}/rollout/stop",
+    response_model=ProfileRolloutStopResponse,
+)
+def post_profile_rollout_stop(name: str):
+    """Stop an in-progress staged profile rollout (kills script + ssh children)."""
+    return profile_rollout.stop_profile_rollout(name)
 
 
 @router.post("/profiles", response_model=ProfileRecord, status_code=201)
@@ -143,6 +213,26 @@ def pl_apply(body: PlApplyRequest):
         return gitea_apply.apply_to_gitea(body)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/pl/apply/stream")
+def pl_apply_stream(body: PlApplyRequest):
+    """SSE: live Gitea push output for deploy / dry-deploy."""
+    return _sse_response(gitea_apply.iter_apply_sse(body))
+
+
+@router.post("/pl/undeploy", response_model=PlUndeployResponse)
+def pl_undeploy(body: PlUndeployRequest):
+    try:
+        return gitea_apply.undeploy_from_gitea(body)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/pl/undeploy/stream")
+def pl_undeploy_stream(body: PlUndeployRequest):
+    """SSE: live Gitea push + cleanup output for undeploy."""
+    return _sse_response(gitea_apply.iter_undeploy_sse(body))
 
 
 @router.post("/pm/solve", status_code=501)

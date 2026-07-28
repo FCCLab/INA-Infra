@@ -117,7 +117,10 @@ data:
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_read_timeout 300s;
+            proxy_read_timeout 900s;
+            proxy_buffering off;
+            proxy_cache off;
+            chunked_transfer_encoding on;
         }}
 
         location /docs {{

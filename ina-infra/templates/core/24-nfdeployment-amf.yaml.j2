@@ -1,0 +1,26 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFDeployment
+metadata:
+  name: amf-core
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+spec:
+  provider: amf.openairinterface.org
+  capacity:
+    maxSubscribers: {{ max_subscribers | default(64) }}
+  interfaces:
+  - name: n2
+    ipv4:
+      address: {{ amf_n2 }}/{{ prefix_len }}
+      gateway: {{ gateway }}
+    vlanID: 4
+  networkInstances:
+  - name: vpc-ran
+    interfaces:
+    - n2
+  parametersRefs:
+  - name: amf-core-config
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFConfig

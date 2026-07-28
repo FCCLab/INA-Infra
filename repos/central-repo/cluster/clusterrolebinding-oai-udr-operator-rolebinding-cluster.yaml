@@ -9,4 +9,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: oai-udr-operator
-  namespace: oai-cn-operators
+  namespace: ina-infra

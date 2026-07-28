@@ -15,7 +15,7 @@ PM / PS are stubbed (HTTP 501).
 
 **IP formula:** slice-scoped `host = base[role] + n` (n = 1..N). Shared AMF/SMF/CU-CP/DU/FlexRIC use fixed hosts. See `backend/app/services/ip_allocator.py`.
 
-**Apply** purge+rewrites `repos/{central,regional,edge}-repo/namespaces/<profile>/` from [`templates/`](templates/) (NADs + IP ConfigMaps). Mgmt UI stays in `repos/mgmt/namespaces/ina-infra/` (UI only).
+**Apply** purge+rewrites `repos/{central,regional,edge}-repo/namespaces/<profile>/` from [`templates/`](templates/) (NADs + IP ConfigMaps). On **central**, also emits a dedicated control-plane stack in that same profile namespace: MySQL + NRF/AUSF/UDM/UDR/AMF/SMF (`include_core=true` by default; shared `oai-cn` is untouched). Mgmt UI stays in `repos/mgmt/namespaces/ina-infra/` (UI only).
 
 N6 GWs on `.140`: `./ina-infra/scripts/setup_ina_n6_gw.sh`
 
