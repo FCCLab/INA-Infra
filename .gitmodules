@@ -1,3 +1,23 @@
 [submodule "network-slicing"]
 	path = network-slicing
 	url = https://github.com/FCCLab/network-slicing.git
+[submodule "repos/mgmt"]
+	path = repos/mgmt
+	url = http://10.1.132.200:3000/nephio/mgmt.git
+	branch = main
+[submodule "repos/central-repo"]
+	path = repos/central-repo
+	url = http://10.1.132.200:3000/nephio/central-repo.git
+	branch = main
+[submodule "repos/regional-repo"]
+	path = repos/regional-repo
+	url = http://10.1.132.200:3000/nephio/regional-repo.git
+	branch = main
+[submodule "repos/edge-repo"]
+	path = repos/edge-repo
+	url = http://10.1.132.200:3000/nephio/edge-repo.git
+	branch = main
+[submodule "repos/ue-repo"]
+	path = repos/ue-repo
+	url = http://10.1.132.200:3000/nephio/ue-repo.git
+	branch = main

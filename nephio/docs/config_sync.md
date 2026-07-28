@@ -39,13 +39,21 @@ Run all three:
 
 ## Gitea repos
 
-| Cluster  | Gitea repo            | RootSync name  | Token secret on mgmt                    |
-|----------|-----------------------|----------------|-----------------------------------------|
-| mgmt     | `nephio/mgmt`         | `mgmt`         | `mgmt-access-token-configsync`          |
-| central  | `nephio/central-repo` | `central-repo` | `central-repo-access-token-configsync`  |
-| regional | `nephio/regional-repo`| `regional-repo`| `regional-repo-access-token-configsync` |
-| edge     | `nephio/edge-repo`    | `edge-repo`    | `edge-repo-access-token-configsync`     |
-| ue       | `nephio/ue-repo`      | `ue-repo`      | `ue-repo-access-token-configsync`       |
+| Cluster  | Gitea repo            | Local submodule       | RootSync name  | Token secret on mgmt                    |
+|----------|-----------------------|-----------------------|----------------|-----------------------------------------|
+| mgmt     | `nephio/mgmt`         | `repos/mgmt`          | `mgmt`         | `mgmt-access-token-configsync`          |
+| central  | `nephio/central-repo` | `repos/central-repo`  | `central-repo` | `central-repo-access-token-configsync`  |
+| regional | `nephio/regional-repo`| `repos/regional-repo` | `regional-repo`| `regional-repo-access-token-configsync` |
+| edge     | `nephio/edge-repo`    | `repos/edge-repo`     | `edge-repo`    | `edge-repo-access-token-configsync`     |
+| ue       | `nephio/ue-repo`      | `repos/ue-repo`       | `ue-repo`      | `ue-repo-access-token-configsync`       |
+
+`repos/*` are **git submodules** pointing at those Gitea remotes (see `.gitmodules`). After cloning this parent repo:
+
+```bash
+git submodule update --init --recursive
+```
+
+Render scripts write into the submodule working trees; `push_git_repos.sh` pulls from Gitea first, then commits and pushes inside each submodule (never pushes before a successful pull/merge).
 
 Gitea: [http://10.1.132.200:3000](http://10.1.132.200:3000) (`nephio` / `secret`).
 

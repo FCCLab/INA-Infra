@@ -29,13 +29,15 @@ Deploy progress:
 
 ## Step 1 — Choose target
 
-| Cluster | Local tree | Gitea | Context |
-|---------|------------|-------|---------|
+| Cluster | Local tree (submodule) | Gitea | Context |
+|---------|------------------------|-------|---------|
 | mgmt | `repos/mgmt/` | `nephio/mgmt` | `mgmt@mgmt` |
 | central | `repos/central-repo/` | `nephio/central-repo` | `central@central` |
 | regional | `repos/regional-repo/` | `nephio/regional-repo` | `regional@regional` |
 | edge | `repos/edge-repo/` | `nephio/edge-repo` | `edge@edge` |
 | ue | `repos/ue-repo/` | `nephio/ue-repo` | `ue@ue` |
+
+`repos/*` are Gitea submodules (`.gitmodules`). Init: `git submodule update --init --recursive`.
 
 Unstructured layout:
 
@@ -83,10 +85,10 @@ Respect order when stacking platform + OAI (see [reference.md](reference.md)).
 
 ```bash
 ./bringup/03_push_to_git_repos/push_git_repos.sh [cluster ...]
-# optional: -m "message" | -n dry-run
+# optional: -m "message" | -p pull-only | -n dry-run
 ```
 
-Default with no args: all of mgmt, central, regional, edge, ue. Pass only the clusters you changed.
+Pulls each Gitea submodule first, then commits and pushes (never pushes before a successful pull/merge). Default with no args: all of mgmt, central, regional, edge, ue.
 
 Gitea lab: `http://10.1.132.200:3000` (`nephio` / `secret`).
 

@@ -1,7 +1,0 @@
-apiVersion: workload.nephio.org/v1alpha1
-kind: NFDeployment
-metadata:
-  name: nrf-core
-  namespace: oai-cn
-spec:
-  provider: nrf.openairinterface.org
