@@ -3,9 +3,9 @@ export type Profile = {
   subnet: string;
   max_slices: number;
   dnn_prefix: string;
-  /** Edge worker for OAI DU (usrp | edge-0 | edge-1). */
+  /** Edge kubernetes.io/hostname for OAI DU. */
   du_node: string;
-  /** Edge worker for OAI UEs (usrp | edge-0 | edge-1). */
+  /** Edge kubernetes.io/hostname for OAI UEs. */
   ue_node: string;
 };
 
@@ -286,7 +286,26 @@ export const DEFAULT_PROFILE: Profile = {
 };
 
 /** Edge nodes that can host rfsim DU / UEs. */
-export const EDGE_RF_NODES = ["usrp", "edge-0", "edge-1"] as const;
+/** @deprecated Prefer api.edgeNodes() — kept as offline fallback. */
+export const EDGE_RF_NODES = ["usrp", "edge-0", "edge-1", "edge-2"] as const;
+
+export type EdgeNodeOut = {
+  name: string;
+  ready: boolean;
+  internal_ip?: string;
+  roles?: string[];
+  multus_master?: string;
+  capacity_cpu?: string;
+  capacity_memory?: string;
+};
+
+export type EdgeNodesOut = {
+  cluster: string;
+  nodes: EdgeNodeOut[];
+  error?: string | null;
+  default_du?: string;
+  default_ue?: string;
+};
 
 /** Default 4-slice SLAs (see ina-infra/sla.md). */
 export const DEFAULT_SLICES: SliceIn[] = [
@@ -541,6 +560,7 @@ export const api = {
     request<ProfileClusterStatusOut>(
       `/api/v1/profiles/${encodeURIComponent(name)}/cluster-status`,
     ),
+  edgeNodes: () => request<EdgeNodesOut>("/api/v1/clusters/edge/nodes"),
   profileRollout: (name: string, body: ProfileRolloutRequest = {}) =>
     request<ProfileRolloutResponse>(
       `/api/v1/profiles/${encodeURIComponent(name)}/rollout`,

@@ -4,6 +4,7 @@ import {
   DEFAULT_PROFILE,
   DEFAULT_SLICES,
   EDGE_RF_NODES,
+  EdgeNodeOut,
   IpPlan,
   NetworkIn,
   PlSolveResponse,
@@ -115,6 +116,50 @@ export default function PlanningPage() {
   );
   const [clusterError, setClusterError] = useState<string | null>(null);
   const [clusterBusy, setClusterBusy] = useState(false);
+  const [edgeNodes, setEdgeNodes] = useState<EdgeNodeOut[]>([]);
+  const [edgeNodesError, setEdgeNodesError] = useState<string | null>(null);
+
+  async function refreshEdgeNodes() {
+    try {
+      const out = await api.edgeNodes();
+      setEdgeNodes(out.nodes || []);
+      setEdgeNodesError(out.error || null);
+      return out;
+    } catch (e) {
+      setEdgeNodesError(e instanceof Error ? e.message : String(e));
+      setEdgeNodes([]);
+      return null;
+    }
+  }
+
+  const edgeRfOptions = useMemo(() => {
+    const names = edgeNodes.map((n) => n.name);
+    const fallback = [...EDGE_RF_NODES];
+    const merged = names.length > 0 ? names : fallback;
+    // Keep current profile selection visible even if node went NotReady.
+    for (const cur of [profile.du_node, profile.ue_node]) {
+      if (cur && !merged.includes(cur)) merged.push(cur);
+    }
+    return merged;
+  }, [edgeNodes, profile.du_node, profile.ue_node]);
+
+  const edgeNodeByName = useMemo(() => {
+    const m = new Map<string, EdgeNodeOut>();
+    for (const n of edgeNodes) m.set(n.name, n);
+    return m;
+  }, [edgeNodes]);
+
+  function edgeOptionLabel(name: string): string {
+    const n = edgeNodeByName.get(name);
+    if (!n) return name;
+    const bits = [
+      name,
+      n.ready ? "Ready" : "NotReady",
+      n.multus_master || null,
+      n.internal_ip || null,
+    ].filter(Boolean);
+    return bits.join(" · ");
+  }
 
   async function refreshNames() {
     const list = await api.listProfiles();
@@ -158,8 +203,12 @@ export default function PlanningPage() {
     setProfile({
       ...DEFAULT_PROFILE,
       ...rec.profile,
-      du_node: rec.profile.du_node || "usrp",
-      ue_node: rec.profile.ue_node || "usrp",
+      du_node: rec.profile.du_node || rec.profile.ue_node || "usrp",
+      // DU + UE always co-located on the same edge worker for rfsim.
+      ue_node:
+        rec.profile.du_node ||
+        rec.profile.ue_node ||
+        "usrp",
     });
     setSlices(rec.slices);
     const net =
@@ -201,10 +250,12 @@ export default function PlanningPage() {
           const defs = await api.profileDefaults();
           applyRecord({ ...defs, updated_at: "" } as ProfileRecord);
         }
+        await refreshEdgeNodes();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const nextId = useMemo(
@@ -681,38 +732,54 @@ export default function PlanningPage() {
             />
           </FieldHelp>
           <FieldHelp
-            label="DU node (edge)"
-            help="kubernetes.io/hostname for OAI DU. usrp uses Multus parent enp4s0f0; edge-0/1 use enp7s0. Prefer usrp for rfsim; only one DU stack per node."
+            className="field-help-wide"
+            label="RAN node (DU + UE)"
+            help="Single edge worker for both OAI DU and UEs (rfsim). Auto-detected from the edge cluster. usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
           >
             <select
-              value={profile.du_node || "usrp"}
+              className="ran-node-select"
+              value={profile.du_node || profile.ue_node || "usrp"}
               disabled={busy}
-              onChange={(e) => updateProfile({ du_node: e.target.value })}
+              onChange={(e) => {
+                const n = e.target.value;
+                updateProfile({ du_node: n, ue_node: n });
+              }}
+              onFocus={() => {
+                void refreshEdgeNodes();
+              }}
             >
-              {EDGE_RF_NODES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </FieldHelp>
-          <FieldHelp
-            label="UE node (edge)"
-            help="kubernetes.io/hostname for OAI UEs. Must reach the DU rfsim server (usually same node as DU)."
-          >
-            <select
-              value={profile.ue_node || "usrp"}
-              disabled={busy}
-              onChange={(e) => updateProfile({ ue_node: e.target.value })}
-            >
-              {EDGE_RF_NODES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
+              {edgeRfOptions.map((n) => (
+                <option key={n} value={n} title={edgeOptionLabel(n)}>
+                  {edgeOptionLabel(n)}
                 </option>
               ))}
             </select>
           </FieldHelp>
         </div>
+        {edgeNodesError && (
+          <p className="hint error">Edge nodes: {edgeNodesError}</p>
+        )}
+        {!edgeNodesError && edgeNodes.length > 0 && (
+          <p className="hint">
+            Edge nodes ({edgeNodes.length}):{" "}
+            {edgeNodes
+              .map(
+                (n) =>
+                  `${n.name}${n.ready ? "" : " (NotReady)"}${
+                    n.multus_master ? `/${n.multus_master}` : ""
+                  }`,
+              )
+              .join(", ")}
+          </p>
+        )}
+        {profile.du_node &&
+          profile.ue_node &&
+          profile.du_node !== profile.ue_node && (
+            <p className="hint error">
+              DU ({profile.du_node}) and UE ({profile.ue_node}) differ — pick a
+              RAN node to co-locate them.
+            </p>
+          )}
         {!profileOk && <p className="hint error">Invalid K8s namespace name.</p>}
         {dirtyName && (
           <p className="hint">

@@ -266,6 +266,18 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.profile-grid .field-help-wide {
+  /* Fit long RAN labels without spanning the whole form row. */
+  min-width: 18rem;
+  max-width: 24rem;
+}
+
+.profile-grid .ran-node-select {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .profile-grid label {
   display: flex;
   flex-direction: column;

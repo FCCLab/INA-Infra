@@ -14,8 +14,11 @@ LOC_IDS = {"Edge": 0, "Regional": 1, "Central": 2, "edge": 0, "regional": 1, "ce
 _K8S_NS_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 
-# Edge workers that can host rfsim DU / UEs (Multus parent differs for usrp).
-EDGE_RF_NODES = ("usrp", "edge-0", "edge-1")
+# Edge RF node names are live-discovered from the edge cluster (see /clusters/edge/nodes).
+# Keep a soft default preference order for UI when the API is unreachable.
+EDGE_RF_NODE_FALLBACK = ("usrp", "edge-0", "edge-1", "edge-2")
+
+_K8S_NODE_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$", re.I)
 
 
 class Profile(BaseModel):
@@ -27,11 +30,11 @@ class Profile(BaseModel):
     dnn_prefix: str = Field("10.140", description="DNN pool prefix → {dnn_prefix}.{n}.0/24")
     du_node: str = Field(
         "usrp",
-        description="Edge node hostname for OAI DU (usrp | edge-0 | edge-1)",
+        description="Edge node hostname for OAI DU (kubernetes.io/hostname)",
     )
     ue_node: str = Field(
         "usrp",
-        description="Edge node hostname for OAI UEs (usrp | edge-0 | edge-1)",
+        description="Edge node hostname for OAI UEs (kubernetes.io/hostname)",
     )
 
     @field_validator("name")
@@ -45,12 +48,27 @@ class Profile(BaseModel):
     @classmethod
     def _valid_edge_rf_node(cls, v: str) -> str:
         node = (v or "").strip()
-        if node not in EDGE_RF_NODES:
-            raise ValueError(
-                f"invalid edge RF node {v!r}; expected one of {list(EDGE_RF_NODES)}"
-            )
+        if not node or not _K8S_NODE_RE.match(node):
+            raise ValueError(f"invalid edge RF node hostname: {v!r}")
         return node
 
+
+class EdgeNodeOut(BaseModel):
+    name: str
+    ready: bool = False
+    internal_ip: str = ""
+    roles: List[str] = Field(default_factory=list)
+    multus_master: str = ""
+    capacity_cpu: str = ""
+    capacity_memory: str = ""
+
+
+class EdgeNodesOut(BaseModel):
+    cluster: str = "edge"
+    nodes: List[EdgeNodeOut] = Field(default_factory=list)
+    error: Optional[str] = None
+    default_du: str = "usrp"
+    default_ue: str = "usrp"
 
 class SliceIn(BaseModel):
     id: int

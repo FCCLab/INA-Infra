@@ -561,3 +561,96 @@ def profile_cluster_status(namespace: str) -> Dict[str, Any]:
         "config_sync_overall": sync_overall,
         "config_sync_summary": sync_summary,
     }
+
+
+def list_edge_nodes() -> Dict[str, Any]:
+    """Auto-detect Ready edge cluster nodes for DU / UE placement."""
+    from app.services import multus_iface
+
+    raw, err = _kubectl_json("edge", ["get", "nodes"], timeout=20.0)
+    if err or not raw:
+        return {
+            "cluster": "edge",
+            "nodes": [],
+            "error": err or "kubectl returned empty",
+            "default_du": "usrp",
+            "default_ue": "usrp",
+        }
+
+    nodes: List[Dict[str, Any]] = []
+    for item in raw.get("items") or []:
+        md = item.get("metadata") or {}
+        status = item.get("status") or {}
+        name = md.get("name") or ""
+        if not name:
+            continue
+        labels = md.get("labels") or {}
+        roles = sorted(
+            k.replace("node-role.kubernetes.io/", "")
+            for k in labels
+            if k.startswith("node-role.kubernetes.io/")
+        )
+        ready = False
+        for cond in status.get("conditions") or []:
+            if cond.get("type") == "Ready" and cond.get("status") == "True":
+                ready = True
+                break
+        internal_ip = ""
+        for addr in status.get("addresses") or []:
+            if addr.get("type") == "InternalIP":
+                internal_ip = addr.get("address") or ""
+                break
+        cap = status.get("capacity") or {}
+        master = ""
+        try:
+            master = multus_iface.detect_host_master(name)
+        except Exception:
+            master = ""
+        nodes.append(
+            {
+                "name": name,
+                "ready": ready,
+                "internal_ip": internal_ip,
+                "roles": roles,
+                "multus_master": master,
+                "capacity_cpu": str(cap.get("cpu") or ""),
+                "capacity_memory": str(cap.get("memory") or ""),
+            }
+        )
+
+    # Prefer usrp for rfsim defaults; else first Ready non-control-plane worker.
+    ready_names = [n["name"] for n in nodes if n["ready"]]
+    workers = [
+        n["name"]
+        for n in nodes
+        if n["ready"] and "control-plane" not in (n.get("roles") or [])
+    ]
+    default = "usrp"
+    if "usrp" in ready_names:
+        default = "usrp"
+    elif workers:
+        default = workers[0]
+    elif ready_names:
+        default = ready_names[0]
+
+    # Stable UI order: usrp first, then edge-* numeric, then others.
+    def _sort_key(n: Dict[str, Any]) -> tuple:
+        name = n["name"]
+        if name == "usrp":
+            return (0, name)
+        if name.startswith("edge-"):
+            try:
+                return (1, int(name.split("-", 1)[1]))
+            except ValueError:
+                return (1, name)
+        return (2, name)
+
+    nodes.sort(key=_sort_key)
+
+    return {
+        "cluster": "edge",
+        "nodes": nodes,
+        "error": None,
+        "default_du": default,
+        "default_ue": default,
+    }

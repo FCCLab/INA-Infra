@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.schemas import (
+    EdgeNodesOut,
     NetworkIn,
     NetworkOut,
     PlApplyRequest,
@@ -96,6 +97,15 @@ def get_profile(name: str):
     if rec is None:
         raise HTTPException(status_code=404, detail=f"profile not found: {name}")
     return rec
+
+
+@router.get("/clusters/edge/nodes", response_model=EdgeNodesOut)
+def get_edge_nodes():
+    """List edge cluster nodes (auto-detected) for DU / UE placement."""
+    try:
+        return cluster_status.list_edge_nodes()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/profiles/{name}/cluster-status", response_model=ProfileClusterStatusOut)

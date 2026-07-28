@@ -63,6 +63,9 @@ def _fallback_for_host(host: str) -> str:
     h = (host or "").strip()
     if h == "usrp":
         return FALLBACK_USRP
+    # Bare-metal edge workers often use eno1 (see edge-2).
+    if h.startswith("edge-") and h not in ("edge-0", "edge-1"):
+        return os.environ.get("INA_MULTUS_MASTER_BAREMETAL", "eno1")
     return FALLBACK_DEFAULT
 
 
