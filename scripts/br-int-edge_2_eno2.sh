@@ -277,22 +277,24 @@ cmd_setup() {
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") <attach|detach|setup|status> [options]
+Usage: $(basename "$0") [attach|detach|setup|status] [options]
 
 Connect physical NIC $IFACE to Nephio edge site bridge $BRIDGE (${BRIDGE_IP}/${BRIDGE_PREFIX}).
 
-  status          Show bridge ports and attach blockers
+With no command, runs **setup** (create bridge if needed, attach $IFACE, verify ping).
+
+  setup           ensure_bridge + attach (+ ping Edge-0 site IP) — default
   attach          Enslave $IFACE to $BRIDGE
   attach --force  Stop VMs with direct $IFACE NICs, then attach
   detach          Remove $IFACE from $BRIDGE
-  setup           ensure_bridge + attach (+ ping Edge-0 site IP by default)
+  status          Show bridge ports and attach blockers
 
 Nephio-Edge-{0,1} site NICs already use $BRIDGE via libvirt vnet* (enp7s0).
 $IFACE becomes an L2 uplink for that bridge (same pattern as eno1 -> br-mgmt).
 
 Examples:
+  sudo $0
   sudo $0 status
-  sudo $0 setup
   sudo $0 attach --force
 
 Environment:
@@ -304,7 +306,7 @@ EOF
 }
 
 main() {
-  local cmd="${1:-status}"
+  local cmd="${1:-setup}"
   shift || true
   case "$cmd" in
     status) cmd_status ;;
