@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pull latest from Gitea, overlay repos/{gitea-repo}/, merge (abort on conflict), push.
+# Pull latest from Gitea into repos/, then commit overlay and push.
+# Never pushes without a successful pull+merge first.
 # Used for Config Sync unstructured GitOps.
 set -euo pipefail
 
@@ -18,6 +19,8 @@ GITEA_ORG="${GITEA_ORG:-nephio}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 COMMIT_MSG="${COMMIT_MSG:-}"
 DRY_RUN=0
+PULL_ONLY=0
+REPLACE_REMOTE=0
 
 ALL_PUSH_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 
@@ -25,15 +28,17 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options] [cluster ...]
 
-Push GitOps content from repos/<gitea-repo>/ to Gitea for Config Sync.
+Pull latest Gitea content into repos/<gitea-repo>/, then push local overlay.
 Default (no args): mgmt, central, regional, edge, ue.
 
-Flow per repo:
+Flow per repo (pull first — never push immediately):
   1. Clone/pull latest from Gitea
-  2. Overlay local repos/<name>/ and commit (if changes)
-  3. Fetch again and merge origin/<branch>
-  4. On merge conflict: abort (no push), list conflicted files
-  5. On clean merge: push
+  2. Merge remote into local repos/<name>/ (remote-only files added;
+     existing local files kept — local wins on same path)
+  3. Build worktree from updated local tree and commit (if changes)
+  4. Fetch again and merge origin/<branch>
+  5. On merge conflict: abort (no push), list conflicted files
+  6. On clean merge: push
 
 Each cluster maps to a Gitea repo (see repos/):
   mgmt      → repos/mgmt              → nephio/mgmt
@@ -51,6 +56,9 @@ Prerequisites:
 
 Options:
   -m, --message MSG   Git commit message
+  -p, --pull-only     Only pull Gitea → repos/ (no commit/push)
+  -r, --replace       Skip pull-into-local; replace remote with local tree
+                      (old behavior: local is sole source of truth)
   -n, --dry-run       Print actions only
   -h, --help          Show this help
 
@@ -62,6 +70,7 @@ Environment:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --pull-only central
   $(basename "$0") central regional
   $(basename "$0") -m "Add OpenSpeedTest" mgmt
 
@@ -95,12 +104,23 @@ git_url_for_repo() {
 }
 
 # Fetch origin/<branch> and merge into HEAD. On conflict: list files, abort, return 1.
+# Always fetch before deciding; never push without this succeeding.
 merge_origin_or_abort() {
   local branch="$1"
+  local local_rev remote_rev
 
+  echo "    fetching origin/${branch} ..."
   git fetch origin "$branch"
+  local_rev="$(git rev-parse HEAD)"
+  remote_rev="$(git rev-parse "origin/${branch}")"
+  if [[ "$local_rev" == "$remote_rev" ]]; then
+    echo "    origin/${branch} already at HEAD"
+    return 0
+  fi
+
   if git merge-base --is-ancestor "origin/${branch}" HEAD 2>/dev/null; then
-    # HEAD already contains remote tip (remote unchanged or we are ahead).
+    # We are strictly ahead of remote.
+    echo "    ahead of origin/${branch} (fast-forward push)"
     return 0
   fi
 
@@ -108,6 +128,11 @@ merge_origin_or_abort() {
   if ! git merge-base HEAD "origin/${branch}" >/dev/null 2>&1; then
     echo "    deepening clone for merge-base ..."
     git fetch --deepen 200 origin "$branch" || true
+  fi
+
+  if git merge-base --is-ancestor "origin/${branch}" HEAD 2>/dev/null; then
+    echo "    ahead of origin/${branch} (fast-forward push)"
+    return 0
   fi
 
   echo "    merging origin/${branch} ..."
@@ -121,6 +146,16 @@ merge_origin_or_abort() {
   git diff --name-only --diff-filter=U | sed 's/^/      /' >&2 || true
   git merge --abort 2>/dev/null || true
   return 1
+}
+
+# Pull remote-only paths into local repos/ (local existing files win).
+pull_remote_into_local() {
+  local work_dir="$1"
+  local src_dir="$2"
+
+  mkdir -p "$src_dir"
+  # --ignore-existing: do not overwrite local renders; only add missing remote files.
+  rsync -a --ignore-existing --exclude '.git' "${work_dir}/" "${src_dir}/"
 }
 
 push_cluster_repo() {
@@ -142,13 +177,23 @@ push_cluster_repo() {
     return 1
   fi
 
-  echo "==> [${cluster}] pull+push ${src_dir} → ${GITEA_ORG}/${repo_name}"
+  if [[ "$PULL_ONLY" == "1" ]]; then
+    echo "==> [${cluster}] pull-only ${safe_url} → ${src_dir}"
+  else
+    echo "==> [${cluster}] pull-then-push ${src_dir} → ${GITEA_ORG}/${repo_name}"
+  fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "    dry-run: git clone ${safe_url} (branch ${GIT_BRANCH})"
-    echo "    dry-run: overlay ${src_dir}/ → workdir/"
-    echo "    dry-run: commit if dirty → fetch/merge origin/${GIT_BRANCH}"
-    echo "    dry-run: on conflict abort; else git push origin ${GIT_BRANCH}"
+    if [[ "$REPLACE_REMOTE" == "1" ]]; then
+      echo "    dry-run: replace workdir with ${src_dir}/ (no pull-into-local)"
+    else
+      echo "    dry-run: rsync --ignore-existing remote → ${src_dir}/ (pull first)"
+    fi
+    if [[ "$PULL_ONLY" != "1" ]]; then
+      echo "    dry-run: overlay updated ${src_dir}/ → workdir/ + commit if dirty"
+      echo "    dry-run: fetch/merge origin/${GIT_BRANCH}; on conflict abort; else push"
+    fi
     return 0
   fi
 
@@ -165,6 +210,26 @@ push_cluster_repo() {
 
   echo "    pulled ${safe_url}@$(git -C "$work_dir" rev-parse --short HEAD)"
 
+  # Step 1: pull latest into local repos/ first (unless --replace).
+  if [[ "$REPLACE_REMOTE" == "1" ]]; then
+    echo "    --replace: skipping pull-into-local (local tree replaces remote)"
+  else
+    echo "    syncing remote → ${src_dir}/ (keep local files, add remote-only)"
+    pull_remote_into_local "$work_dir" "$src_dir"
+  fi
+
+  if [[ "$PULL_ONLY" == "1" ]]; then
+    if [[ "$REPLACE_REMOTE" == "1" ]]; then
+      echo "    --pull-only with --replace: syncing remote → ${src_dir}/ (full mirror)"
+      mkdir -p "$src_dir"
+      rsync -a --delete --exclude '.git' "${work_dir}/" "${src_dir}/"
+    fi
+    rm -rf "$work_dir"
+    echo "    pull-only done (no push)"
+    return 0
+  fi
+
+  # Step 2: build push worktree from updated local tree.
   find "$work_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
   cp -a "$src_dir"/. "$work_dir/"
 
@@ -174,18 +239,19 @@ push_cluster_repo() {
     cd "$work_dir"
     git add -A
     if git diff --staged --quiet; then
-      echo "    no local changes (already matches ${safe_url}@${GIT_BRANCH})"
+      echo "    no local changes after pull (already matches ${safe_url}@${GIT_BRANCH})"
       exit 0
     fi
 
     git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
       commit -m "$msg"
 
-    # Re-check remote in case it moved after clone; refuse push on conflict.
+    # Step 3: re-fetch/merge before push; refuse push on conflict.
     if ! merge_origin_or_abort "$GIT_BRANCH"; then
       exit 1
     fi
 
+    echo "    pushing origin/${GIT_BRANCH} ..."
     git push origin "HEAD:${GIT_BRANCH}"
   ) || rc=$?
 
@@ -204,6 +270,14 @@ while [[ $# -gt 0 ]]; do
     -m|--message)
       COMMIT_MSG="$2"
       shift 2
+      ;;
+    -p|--pull-only)
+      PULL_ONLY=1
+      shift
+      ;;
+    -r|--replace)
+      REPLACE_REMOTE=1
+      shift
       ;;
     -n|--dry-run)
       DRY_RUN=1
@@ -238,8 +312,16 @@ if ! command -v git >/dev/null 2>&1; then
   echo "error: git not found in PATH" >&2
   exit 1
 fi
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "error: rsync not found in PATH (required to pull remote → repos/)" >&2
+  exit 1
+fi
 
-echo "Pull+merge+push repos/ → Gitea (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+if [[ "$PULL_ONLY" == "1" ]]; then
+  echo "Pull-only Gitea → repos/ (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+else
+  echo "Pull-then-push repos/ ↔ Gitea (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+fi
 echo
 
 failed=0
