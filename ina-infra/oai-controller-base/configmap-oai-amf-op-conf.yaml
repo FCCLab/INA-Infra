@@ -10,4 +10,4 @@ data:
     \  - name: 'http'\n    port: 80\n    protocol: TCP\ncompute:\n  req:\n    cpu:\
     \ '100m'\n    memory: '512Mi'\n  limits:\n    cpu: '100m'\n    memory: '512Mi'\n\
     logLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-amf:v2.0.1'\nfqdn:\n\
-    \  smf: 'oai-smf'\n  ausf: 'oai-ausf'\n  nrf: 'oai-nrf'\n  udm: 'oai-udm'\n"
+    \  smf: 'oai-smf'\n  ausf: 'oai-ausf'\n  nrf: '10.1.140.11'\n  udm: 'oai-udm'\n"

@@ -110,7 +110,7 @@ def create_deployment(name: str=None,
             }
             )
     if nrf_svc is None:
-        nrf_svc = "oai-nrf" #default value
+        nrf_svc = "10.1.140.11" #default value (Multus Nnrf)
     URL = f"curl --connect-timeout 1 --head -X GET http://{nrf_svc}/nnrf-nfm/v1/nf-instances?nf-type='NRF' --http2-prior-knowledge"
     deployment = {
                   "apiVersion": "apps/v1",

@@ -199,6 +199,29 @@ def patch_upf_op_conf(doc: dict, smf: str, nrf: str, parent: str) -> None:
     doc["data"]["upf.yaml"] = raw
 
 
+def patch_op_conf_nrf_ip(doc: dict, key: str, nrf: str) -> None:
+    """Point fqdn.nrf at Multus Nnrf IP (not DNS name oai-nrf)."""
+    if key not in doc.get("data", {}):
+        return
+    raw = doc["data"][key]
+    raw2, n = re.subn(
+        r"nrf:\s*'[^']*'",
+        f"nrf: '{nrf}'",
+        raw,
+        count=1,
+    )
+    if not n:
+        raw2, n = re.subn(
+            r"nrf:\s*oai-nrf\b",
+            f"nrf: '{nrf}'",
+            raw,
+            count=1,
+        )
+    if not n:
+        raise SystemExit(f"op-conf {key}: fqdn.nrf not found to set Nnrf IP")
+    doc["data"][key] = raw2
+
+
 def patch_nf_op_conf_parent(doc: dict, key: str, parent: str) -> None:
     """Set nad.parent in amf/smf/upf op-conf jinja blobs."""
     if key not in doc.get("data", {}):
@@ -267,6 +290,15 @@ def write_utils_configmap(dest_ops: pathlib.Path, nf: str) -> None:
         print(f"  WARN missing utils {src}")
         return
     text = patch_utils_amd64(src.read_text())
+    # Init wait default: Multus Nnrf IP (same as fqdn.nrf in op-conf).
+    text = text.replace(
+        'nrf_svc = "oai-nrf" #default value',
+        f'nrf_svc = "{nrf_sbi}" #default value (Multus Nnrf)',
+    )
+    text = text.replace(
+        "until {URL}; do echo waiting for oai-nrf; sleep 1; done",
+        f"until {{URL}}; do echo waiting for nrf svc {{nrf_svc}}; sleep 1; done",
+    )
     dump(
         {
             "apiVersion": "v1",
@@ -339,6 +371,8 @@ def copy_nf(dest_ops: pathlib.Path, nf: str, watch_ns: str, *, cluster: str) -> 
             patch_upf_nf_conf(doc)
         if nf == "upf" and kind == "op-conf":
             patch_upf_op_conf(doc, smf=smf_n4, nrf=nrf_sbi, parent=parent)
+        if nf in ("amf", "smf", "ausf", "udm", "udr") and kind == "op-conf":
+            patch_op_conf_nrf_ip(doc, f"{nf}.yaml", nrf_sbi)
         if nf in ("amf", "smf", "nrf") and kind == "op-conf":
             key = f"{nf}.yaml"
             patch_nf_op_conf_parent(doc, key, parent)

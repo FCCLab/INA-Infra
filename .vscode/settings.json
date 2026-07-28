@@ -1,0 +1,6 @@
+{
+  "git.detectSubmodules": true,
+  "git.detectSubmodulesLimit": 20,
+  "git.autoRepositoryDetection": true,
+  "git.repositoryScanMaxDepth": 3
+}
