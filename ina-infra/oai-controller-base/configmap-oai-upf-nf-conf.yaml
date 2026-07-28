@@ -6,11 +6,11 @@ metadata:
 data:
   upf.yaml: "############# Common configuration\n# Log level for all the NFs\nlog_level:\n\
     \  upf: {{ conf['logLevel'] }}\n# If you enable registration, the other NFs will\
-    \ use the NRF discovery mechanism\nregister_nf:\n  upf: 'no'\nhttp_version: 2\n\
+    \ use the NRF discovery mechanism\nregister_nf:\n  upf: 'yes'\nhttp_version: 2\n\
     ## general single_nssai configuration\n## Defines YAML anchors, which are reused\
     \ in the config file\nsnssais:\n  {%- for i in conf['PLMN']['plmnInfo']%}\n  {%-\
     \ for s in i['nssai']%}\n  - &slice_{{ i['nssai'].index(s) }}\n    sst: {{ s['sst']\
-    \ }}\n    sd: {{ s['sd'] if 'sd' in s.keys() else 'FFFFFF' }}\n  {%- endfor %}\n\
+    \ }}\n    sd: \"{{ s['sd'] if 'sd' in s.keys() else 'FFFFFF' }}\"\n  {%- endfor %}\n\
     \  {%- endfor %}\n############## SBI Interfaces\n### Each NF takes its local SBI\
     \ interfaces and remote interfaces from here, unless it gets them using NRF discovery\
     \ mechanisms\nnfs:\n  upf:\n    host: {{ conf['fqdn']['upf'] }}\n    sbi:\n  \

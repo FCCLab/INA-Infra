@@ -10,4 +10,4 @@ data:
     \ 'eth0'\n  n3: 'n3'\n  n4: 'n4'\n  n6: 'n6'\n  n9: 'eth0'\ncompute:\n  req:\n\
     \    cpu: '100m'\n    memory: '512Mi'\n  limits:\n    cpu: '100m'\n    memory:\
     \ '512Mi'\nlogLevel: debug\nimage: 'docker.io/oaisoftwarealliance/oai-upf:v2.0.1'\n\
-    fqdn:\n  nrf: '10.1.138.100'\n  smf: '10.1.139.12'\n"
+    fqdn:\n  nrf: '10.1.140.11'\n  smf: '10.1.140.12'\n"

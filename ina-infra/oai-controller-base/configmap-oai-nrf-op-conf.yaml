@@ -4,8 +4,7 @@ metadata:
   name: oai-nrf-op-conf
   namespace: oai-cn-operators
 data:
-  nrf.yaml: "nfInterfaces:\n  sbi: 'eth0'\nports:\n  - name: 'http'\n    port: 80\n\
-    \    protocol: TCP\ncompute:\n  req:\n    cpu: '100m'\n    memory: '256Mi'\n \
-    \ limits:\n    cpu: '100m'\n    memory: '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-nrf:v2.0.1'\n\
-    nfInterfaces:\n  sbi: 'eth0'\nports:\n  - name: 'http'\n    port: 80\n    protocol:\
-    \ TCP\n"
+  nrf.yaml: "nad:\n  parent: 'enp7s0'\n  create: False\nnfInterfaces:\n  sbi: 'eth0'\n\
+    ports:\n  - name: 'http'\n    port: 80\n    protocol: TCP\ncompute:\n  req:\n\
+    \    cpu: '100m'\n    memory: '256Mi'\n  limits:\n    cpu: '100m'\n    memory:\
+    \ '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-nrf:v2.0.1'\n"

@@ -170,3 +170,64 @@ def format_masters(masters: Dict[str, str]) -> str:
         if k not in seen:
             parts.append(f"{k}={v}")
     return ", ".join(parts)
+
+
+def label_node_multus_master(
+    node: str,
+    master: str,
+    *,
+    context: Optional[str] = None,
+) -> None:
+    """Set ina-infra.nephio.lab/multus-master=<iface> on a Kubernetes node."""
+    ctx = context or os.environ.get("KUBECTL_CONTEXT") or ""
+    cmd = ["kubectl"]
+    if ctx:
+        cmd += ["--context", ctx]
+    cmd += [
+        "label",
+        "node",
+        node,
+        f"ina-infra.nephio.lab/multus-master={master}",
+        "--overwrite",
+    ]
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def label_cluster_nodes_multus_master(
+    cluster: str,
+    *,
+    context: Optional[str] = None,
+    nodes: Optional[list[str]] = None,
+) -> Dict[str, str]:
+    """Detect parent NIC per node and label them for UPF/AMF/SMF scheduling.
+
+    Returns ``{node: master}``.
+    """
+    # Default worker names in this lab when not provided.
+    defaults = {
+        "central": ["central-0", "central-1"],
+        "regional": ["regional-0", "regional-1"],
+        "edge": ["edge-0", "edge-1", "edge-2", "usrp"],
+        "ue": ["ue-0", "ue-1"],
+    }
+    targets = nodes if nodes is not None else defaults.get(cluster, [CLUSTER_PROBE_HOST.get(cluster, cluster)])
+    # Prefer kube context name like edge@edge
+    ctx = context
+    if not ctx:
+        ctx = {
+            "central": "central@central",
+            "regional": "regional@regional",
+            "edge": "edge@edge",
+            "ue": "ue@ue",
+        }.get(cluster)
+
+    out: Dict[str, str] = {}
+    for node in targets:
+        # Skip nodes that are not Ready / don't exist — label will fail quietly.
+        master = detect_host_master(node, use_cache=True)
+        try:
+            label_node_multus_master(node, master, context=ctx)
+            out[node] = master
+        except (subprocess.CalledProcessError, OSError):
+            continue
+    return out

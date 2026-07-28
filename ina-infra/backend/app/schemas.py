@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 LOC_NAMES = {0: "Edge", 1: "Regional", 2: "Central"}
@@ -146,6 +146,10 @@ class SharedIps(BaseModel):
     gw_regional: str
     gw_edge: str
     amf_n2: str
+    nrf_sbi: str = Field(
+        "",
+        description="NRF Nnrf (HTTP/2 SBI) Multus IP; default host .11 on profile subnet",
+    )
     smf_n4: str
     cucp_n2: str
     cucp_f1c: str
@@ -156,6 +160,16 @@ class SharedIps(BaseModel):
     xapp_e2: str
     gateway: str = Field(..., description="Default NAD gateway (central site GW)")
     prefix_len: int = 24
+
+    @model_validator(mode="after")
+    def _backfill_nrf_sbi(self) -> "SharedIps":
+        """Older stored plans omit nrf_sbi; derive .11 from AMF N2 prefix."""
+        if self.nrf_sbi:
+            return self
+        if self.amf_n2 and self.amf_n2.count(".") == 3:
+            prefix = self.amf_n2.rsplit(".", 1)[0]
+            object.__setattr__(self, "nrf_sbi", f"{prefix}.11")
+        return self
 
 
 class SliceIps(BaseModel):

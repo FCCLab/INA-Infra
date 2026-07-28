@@ -49,6 +49,7 @@ export type SharedIps = {
   gw_regional: string;
   gw_edge: string;
   amf_n2: string;
+  nrf_sbi?: string;
   smf_n4: string;
   cucp_n2: string;
   cucp_f1c: string;

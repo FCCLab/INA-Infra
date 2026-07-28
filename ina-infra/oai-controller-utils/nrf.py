@@ -48,6 +48,9 @@ if SVC_TYPE not in ['ClusterIP', 'LoadBalancer', 'NodePort']:
     print(f"SVC_TYPE is case sensitive are you spelling {SVC_TYPE} correct?")
     sys.exit('-1')
 
+NNRF_PROXY_IMAGE = str(os.getenv('NNRF_PROXY_IMAGE', 'nicolaka/netshoot'))
+
+
 def create_deployment(name: str=None, 
                     namespace: str=None, 
                     compute: dict=None, 
@@ -56,6 +59,7 @@ def create_deployment(name: str=None,
                     image_pull_secrets: list=None, 
                     ports: list=None,
                     interfaces: list=None,
+                    nad: dict=None,
                     config_map: str=None, 
                     nf_type: str=None, 
                     sa_name: str=None,
@@ -80,6 +84,8 @@ def create_deployment(name: str=None,
     :type ports: list
     :param interfaces: list of interfaces to attach with this NF
     :type interfaces: list
+    :param nad: network attachment definition config (create/parent)
+    :type nad: dict
     :param config_map: config_map name
     :type config_map: str
     :param nf_type: nf_type name
@@ -177,6 +183,79 @@ def create_deployment(name: str=None,
                     }
                   }
                 }
+
+    # Multus Nnrf: attach macvlan for cross-site UPFs. OAI SBI stays on eth0 so
+    # in-cluster AUSF/UDM/UDR keep working via ClusterIP; a sidecar TCP-proxies
+    # Multus:80 → eth0:80 (HTTP/2 byte stream).
+    if interfaces is not None:
+        nad_config = nad if nad is not None else {'create': False, 'parent': 'enp7s0'}
+        for interface in interfaces:
+            nad_name = f"{name}-{interface['name']}"
+            nad_status = create_nad(
+                name=nad_name,
+                namespace=namespace,
+                nad_config=nad_config,
+                labels=labels,
+                logger=logger,
+                kopf=kopf,
+                nf_type=nf_type,
+            )
+            if nad_status['status']:
+                _interfaces.append({
+                    'name': nad_status['name'],
+                    'interface': interface['name'],
+                    'ips': [interface['ipv4']['address']],
+                    'gateway': [interface['ipv4']['gateway']],
+                })
+            else:
+                output = {
+                    'message': 'Deployment failure',
+                    'reason': nad_status['reason'],
+                    'status': "False",
+                    'type': "Error",
+                    'generation': 0,
+                    'observedGeneration': 0,
+                    'ready': False,
+                    'error': True,
+                }
+                logger.error(
+                    f"Error {nad_status['reason']}, in creating deployment {name} "
+                    f"in namespace {namespace}"
+                )
+                return output
+        deployment['spec']['template']['metadata'].update({
+            'annotations': {
+                'k8s.v1.cni.cncf.io/networks': json.dumps(_interfaces),
+            }
+        })
+        # First Multus iface name (nnrf) + SBI listen port from op-conf.
+        nnrf_iface = interfaces[0]['name']
+        nnrf_port = 80
+        for port in ports or []:
+            if str(port.get('name', '')).lower() in ('http', 'sbi'):
+                nnrf_port = int(port['port'])
+                break
+        deployment['spec']['template']['spec']['containers'].append({
+            "name": "nnrf-proxy",
+            "image": NNRF_PROXY_IMAGE,
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+                "sh", "-c",
+                f"set -eu; IFACE={nnrf_iface}; PORT={nnrf_port}; "
+                "for i in $(seq 1 90); do "
+                "IP=$(ip -4 -o addr show \"$IFACE\" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true); "
+                "ETH=$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true); "
+                "if [ -n \"${IP:-}\" ] && [ -n \"${ETH:-}\" ]; then "
+                "echo \"nnrf-proxy: $IFACE/$IP -> eth0/$ETH:$PORT\"; "
+                "exec socat TCP-LISTEN:$PORT,bind=$IP,reuseaddr,fork TCP:$ETH:$PORT; "
+                "fi; sleep 1; done; "
+                "echo \"nnrf-proxy: timed out waiting for $IFACE/eth0\" >&2; exit 1",
+            ],
+            "resources": {
+                "requests": {"cpu": "20m", "memory": "32Mi"},
+                "limits": {"cpu": "100m", "memory": "64Mi"},
+            },
+        })
 
     kopf.adopt(deployment)  # includes namespace, name, existing labels
     kopf.label(deployment, labels, nested=['spec.template'])
@@ -315,6 +394,96 @@ def create_config_map(name: str=None, namespace: str=None,
         return {}
 
     return {'creation_timestamp':creation_timestamp,'name':name}
+
+
+def create_nad(name: str=None, namespace: str=None,
+              labels:dict=None,
+              nad_config:dict=None,
+              logger=None, kopf=None, nf_type: str=None):
+    '''Look up (or optionally create) a NetworkAttachmentDefinition for Multus.'''
+    headers = {"Content-type": "application/json",
+        "Accept": "application/json",
+        "Authorization": "Bearer {}".format(TOKEN)}
+    try:
+        r = requests.get(
+            f"{KUBERNETES_BASE_URL}/apis/k8s.cni.cncf.io/v1/namespaces/{namespace}/network-attachment-definitions/{name}",
+            headers=headers, verify=HTTPS_VERIFY)
+    except Exception:
+        return {'status': False, 'reason': 'NotAbleToCommunicateWithTheCluster'}
+    if r.status_code in [200]:
+        return {'status': True, 'name': name}
+    if r.status_code in [401, 403]:
+        return {'status': False, 'reason': 'Unauthorized'}
+    if r.status_code == 404 and nad_config and nad_config.get('create'):
+        config = {
+            "cniVersion": "0.3.1",
+            "plugins": [
+                {
+                    "type": "macvlan",
+                    "capabilities": {"ips": True},
+                    "master": f"{nad_config['parent']}",
+                    "mode": "bridge",
+                    "ipam": {"type": "static"},
+                },
+                {
+                    "capabilities": {"mac": True},
+                    "type": "tuning",
+                },
+            ],
+        }
+        if 'routes' in nad_config:
+            config['plugins'][0]['ipam'].update({"routes": nad_config['routes']})
+        nad = {
+            "apiVersion": "k8s.cni.cncf.io/v1",
+            "kind": "NetworkAttachmentDefinition",
+            "metadata": {
+                "name": name,
+                "namespace": namespace,
+                "labels": labels,
+            },
+            "spec": {"config": str(json.dumps(config))},
+        }
+        logger.debug(
+            f"network-attachment-definition {name} does not exist in namespace "
+            f"{namespace} operator is creating it now"
+        )
+        r = requests.post(
+            f"{KUBERNETES_BASE_URL}/apis/k8s.cni.cncf.io/v1/namespaces/{namespace}/network-attachment-definitions",
+            headers=headers, json=nad, verify=HTTPS_VERIFY)
+        logger.debug(
+            "Response of the request to create nad %s response %s"
+            % (r.request.url, r.json())
+        )
+        if r.status_code in [200, 201]:
+            return {'status': True, 'name': name}
+        if r.status_code in [401, 403]:
+            return {'status': False, 'reason': 'unauthorized'}
+        if r.status_code == 404:
+            return {'status': False, 'reason': 'notFound'}
+        return {'status': False, 'reason': r.json()}
+    if r.status_code == 404:
+        return {'status': False, 'reason': 'NetworkAttachmentDefinitionDoesNotExist'}
+    return {'status': False, 'reason': f'UnexpectedStatus{r.status_code}'}
+
+
+def delete_nad(name: str=None, namespace: str=None, logger=None):
+    headers = {"Content-type": "application/json",
+        "Accept": "application/json",
+        "Authorization": "Bearer {}".format(TOKEN)}
+    r = requests.delete(
+        f"{KUBERNETES_BASE_URL}/apis/k8s.cni.cncf.io/v1/namespaces/{namespace}/network-attachment-definitions/{name}",
+        headers=headers, verify=HTTPS_VERIFY)
+    logger.debug(
+        "Response of the request to delete nad %s response %s"
+        % (r.request.url, r.json())
+    )
+    if r.status_code in [200, 202, 204]:
+        return {'status': True, 'name': name}
+    if r.status_code in [401, 403]:
+        return {'status': False, 'reason': 'Unauthorized'}
+    if r.status_code == 404:
+        return {'status': False, 'reason': 'NetworkAttachmentDefinitionDoesNotExist'}
+    return {'status': False, 'reason': r.json()}
 
 
 def deployment_status(deployment_name: str=None, namespace: str=None,logger=None, kopf=None):

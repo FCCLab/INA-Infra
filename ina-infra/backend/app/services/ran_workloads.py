@@ -105,10 +105,31 @@ def _dnn(n: int) -> str:
 
 
 def _snssai_list(n_slices: int) -> str:
+    """PLMN snssaiList: default SST/SD + one entry per profile slice (1..N)."""
     items = ['{ sst = 1, sd = 0xFFFFFF }']
     for n in range(1, n_slices + 1):
         items.append(f"{{ sst = 1, sd = 0x{_slice_sd_hex(n)} }}")
     return ", ".join(items)
+
+
+def _du_slices_block(n_slices: int) -> str:
+    """MAC Slices{} rows matching profile N (plus slice_id 0 / SD FFFFFF).
+
+    PRB caps mirror the prior lab defaults: slices 1–2 get 100%, 3+ get 50%.
+    """
+    rows = [
+        "  { slice_id = 0; sst = 1; sd = 0xffffff; "
+        "dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },"
+    ]
+    for n in range(1, n_slices + 1):
+        max_prb = 100.0 if n <= 2 else 50.0
+        comma = "," if n < n_slices else ""
+        rows.append(
+            f"  {{ slice_id = {n}; sst = 1; sd = 0x{_slice_sd_hex(n)}; "
+            f"dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; "
+            f"max_prb_ratio = {max_prb}; }}{comma}"
+        )
+    return "\n".join(rows)
 
 
 def _cucp_conf(shared, n_slices: int) -> str:
@@ -193,19 +214,26 @@ ngap_log_level                        ="debug";
 
 
 def _du_conf(shared, n_slices: int) -> str:
-    """Lab-proven gnb.conf with Multus IPs substituted (n_slices reserved for future)."""
-    _ = n_slices
+    """Lab-proven gnb.conf: Multus IPs + profile slice count (snssaiList / Slices)."""
     tmpl_path = (
         Path(__file__).resolve().parents[3] / "templates" / "du" / "gnb.conf.tmpl"
     )
     if not tmpl_path.is_file():
         # Fallback: repo layout ina-infra/templates/...
-        tmpl_path = Path(__file__).resolve().parents[4] / "ina-infra" / "templates" / "du" / "gnb.conf.tmpl"
+        tmpl_path = (
+            Path(__file__).resolve().parents[4]
+            / "ina-infra"
+            / "templates"
+            / "du"
+            / "gnb.conf.tmpl"
+        )
     text = tmpl_path.read_text(encoding="utf-8")
     return (
         text.replace("{{DU_F1}}", shared.du_f1)
         .replace("{{CUCP_F1C}}", shared.cucp_f1c)
         .replace("{{FLEXRIC_E2}}", shared.flexric_e2)
+        .replace("{{SNSSAI_LIST}}", _snssai_list(n_slices))
+        .replace("{{SLICES_BLOCK}}", _du_slices_block(n_slices))
     )
 
 

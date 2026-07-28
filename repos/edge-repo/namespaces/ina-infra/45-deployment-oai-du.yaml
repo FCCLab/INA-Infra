@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-du
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: oai-du
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-du
+  template:
+    metadata:
+      labels:
+        app: oai-du
+        app.kubernetes.io/name: oai-du
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "du-f1", "interface": "f1", "ips":
+          ["10.1.140.203/24"], "gateways": ["10.1.140.3"]}, {"name": "du-rf", "interface":
+          "rf", "ips": ["10.1.140.204/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-du-sa
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      containers:
+      - name: du
+        image: 10.1.132.30:5000/oai-du:nws-v0.8-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --rfsim --log_config.global_log_options level,nocolor,time
+        ports:
+        - name: f1c
+          containerPort: 38472
+          protocol: SCTP
+        - name: f1u
+          containerPort: 2152
+          protocol: UDP
+        - name: rfsim
+          containerPort: 4043
+          protocol: TCP
+        - name: tmgr
+          containerPort: 7374
+          protocol: TCP
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-du-configmap

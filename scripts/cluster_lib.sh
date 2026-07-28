@@ -237,6 +237,18 @@ oai_nrf_lb_ip() {
   printf '%s' "${OAI_NRF_LB_IP}"
 }
 
+# ina-infra NRF Nnrf on Multus 10.1.140.0/24 (same fabric as UPF N3/N4/N6).
+# UPFs on regional/edge must use this IP, not in-cluster oai-nrf DNS / MetalLB .138.
+INA_NRF_SBI_IP="${INA_NRF_SBI_IP:-10.1.140.11}"
+# Back-compat alias used by older render/env paths.
+INA_NRF_LB_IP="${INA_NRF_LB_IP:-${INA_NRF_SBI_IP}}"
+ina_nrf_sbi_ip() {
+  printf '%s' "${INA_NRF_SBI_IP}"
+}
+ina_nrf_lb_ip() {
+  printf '%s' "${INA_NRF_LB_IP}"
+}
+
 # OAI macvlan IP: cluster_base + offset on 10.1.139.0/24.
 oai_macvlan_ip() {
   local cluster="$1"

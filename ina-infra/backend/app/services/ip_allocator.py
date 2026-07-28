@@ -20,6 +20,7 @@ SHARED_BASES: Dict[str, int] = {
     "gw_regional": 2,
     "gw_edge": 3,
     "amf_n2": 10,
+    "nrf_sbi": 11,  # Nnrf (HTTP/2 SBI) on Multus — UPF peers use this, not MetalLB .138
     "smf_n4": 12,
     "cucp_n2": 200,
     "cucp_f1c": 201,
@@ -107,6 +108,7 @@ def allocate_profile_ips(
         gw_regional=_host(prefix, SHARED_BASES["gw_regional"]),
         gw_edge=_host(prefix, SHARED_BASES["gw_edge"]),
         amf_n2=_host(prefix, SHARED_BASES["amf_n2"]),
+        nrf_sbi=_host(prefix, SHARED_BASES["nrf_sbi"]),
         smf_n4=_host(prefix, SHARED_BASES["smf_n4"]),
         cucp_n2=_host(prefix, SHARED_BASES["cucp_n2"]),
         cucp_f1c=_host(prefix, SHARED_BASES["cucp_f1c"]),

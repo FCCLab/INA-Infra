@@ -147,7 +147,7 @@ def _summary_txt(ip_plan: IpPlan, result: PlSolveResponse) -> str:
     lines.extend(
         [
             "#",
-            f"# AMF_N2={sh.amf_n2} SMF_N4={sh.smf_n4}",
+            f"# AMF_N2={sh.amf_n2} NRF_SBI={sh.nrf_sbi} SMF_N4={sh.smf_n4}",
             f"# CUCP N2/F1/E1={sh.cucp_n2}/{sh.cucp_f1c}/{sh.cucp_e1}",
             f"# DU F1/RF={sh.du_f1}/{sh.du_rf} FlexRIC={sh.flexric_e2}",
             "",
@@ -255,12 +255,24 @@ def _write_dedicated_core(
     _write(ns_dir / "05-configmap-mysql-initialization.yaml", _mysql_init_configmap(namespace), written)
 
     for name, tmpl in (
-        ("20-nfdeployment-nrf.yaml", "core/20-nfdeployment-nrf.yaml.j2"),
         ("21-nfdeployment-ausf.yaml", "core/21-nfdeployment-ausf.yaml.j2"),
         ("22-nfdeployment-udm.yaml", "core/22-nfdeployment-udm.yaml.j2"),
         ("23-nfdeployment-udr.yaml", "core/23-nfdeployment-udr.yaml.j2"),
     ):
         _write(ns_dir / name, _render(env, tmpl, namespace=namespace), written)
+
+    _write(
+        ns_dir / "20-nfdeployment-nrf.yaml",
+        _render(
+            env,
+            "core/20-nfdeployment-nrf.yaml.j2",
+            namespace=namespace,
+            nrf_sbi=shared.nrf_sbi,
+            gateway=gw,
+            prefix_len=plen,
+        ),
+        written,
+    )
 
     _write(
         ns_dir / "24-nfdeployment-amf.yaml",
@@ -437,6 +449,7 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
             )
             for nad_name, role, addr in (
                 ("amf-core-n2", "amf_n2", shared.amf_n2),
+                ("nrf-core-nnrf", "nrf_sbi", shared.nrf_sbi),
                 ("smf-core-n4", "smf_n4", shared.smf_n4),
             ):
                 _write(
@@ -639,9 +652,14 @@ def _render_profile_oai_controllers(*, namespace: str, smf_n4: str) -> List[str]
     env["REPOS_DIR"] = str(_repos_dir())
     env["REPO_ROOT"] = str(_repo_root())
     env["INA_SMF_N4"] = smf_n4
-    # UPF op-conf NRF peer: lab MetalLB VIP (cross-cluster reachability). Profile
-    # NRF is headless ClusterIP; override with OAI_NRF_LB_IP when that changes.
-    env.setdefault("OAI_NRF_LB_IP", os.environ.get("OAI_NRF_LB", "10.1.138.100"))
+    # UPF op-conf NRF peer: Multus Nnrf on profile subnet (not MetalLB .138 / oai-cn .100).
+    env["INA_NRF_SBI_IP"] = os.environ.get(
+        "INA_NRF_SBI_IP",
+        os.environ.get("INA_NRF_LB_IP", os.environ.get("INA_NRF_LB", "10.1.140.11")),
+    )
+    env["INA_NRF_LB_IP"] = env["INA_NRF_SBI_IP"]
+    # Do not point UPFs at oai-cn NRF.
+    env.pop("OAI_NRF_LB_IP", None)
 
     proc = subprocess.run(
         ["bash", str(script), namespace],

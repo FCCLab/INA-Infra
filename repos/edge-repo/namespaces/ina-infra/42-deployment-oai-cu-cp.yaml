@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-cu-cp
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: oai-cu-cp
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-cu-cp
+  template:
+    metadata:
+      labels:
+        app: oai-cu-cp
+        app.kubernetes.io/name: oai-cu-cp
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "cucp-e1", "interface": "e1", "ips":
+          ["10.1.140.202/24"], "gateways": ["10.1.140.3"]}, {"name": "cucp-f1c", "interface":
+          "f1c", "ips": ["10.1.140.201/24"], "gateways": ["10.1.140.3"]}, {"name":
+          "cucp-n2", "interface": "n2", "ips": ["10.1.140.200/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-cu-cp-sa
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - edge-0
+                - edge-1
+      containers:
+      - name: cucp
+        image: 10.1.132.30:5000/oai-cucp:nws-v0.8-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --log_config.global_log_options level,nocolor,time
+        - name: USE_VOLUMED_CONF
+          value: 'yes'
+        ports:
+        - name: n2
+          containerPort: 36412
+          protocol: SCTP
+        - name: e1
+          containerPort: 38462
+          protocol: SCTP
+        - name: f1c
+          containerPort: 38472
+          protocol: UDP
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-cu-cp-configmap

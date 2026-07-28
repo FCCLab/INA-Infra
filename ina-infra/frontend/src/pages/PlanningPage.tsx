@@ -993,6 +993,17 @@ export default function PlanningPage() {
                       </td>
                     </tr>
                     <tr>
+                      <td>NRF Nnrf (SBI)</td>
+                      <td>
+                        <code>
+                          {ipPlan.shared.nrf_sbi ||
+                            (ipPlan.shared.amf_n2
+                              ? `${ipPlan.shared.amf_n2.replace(/\.\d+$/, ".11")}`
+                              : "—")}
+                        </code>
+                      </td>
+                    </tr>
+                    <tr>
                       <td>SMF N4</td>
                       <td>
                         <code>{ipPlan.shared.smf_n4}</code>

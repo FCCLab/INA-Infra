@@ -133,33 +133,12 @@ def create_deployment(name: str=None,
                         },
                       "spec": {
                         "nodeSelector": {
-                          "kubernetes.io/arch": "amd64"
-                        },
-                        # Multus NADs use enp7s0 on VM workers; keep off bare-metal
-                        # RF nodes (usrp, edge-2, …) that use a different parent NIC.
-                        "affinity": {
-                          "nodeAffinity": {
-                            "requiredDuringSchedulingIgnoredDuringExecution": {
-                              "nodeSelectorTerms": [
-                                {
-                                  "matchExpressions": [
-                                    {
-                                      "key": "kubernetes.io/hostname",
-                                      "operator": "In",
-                                      "values": [
-                                        "edge-0",
-                                        "edge-1",
-                                        "central-0",
-                                        "central-1",
-                                        "regional-0",
-                                        "regional-1",
-                                      ],
-                                    }
-                                  ]
-                                }
-                              ]
-                            }
-                          }
+                          "kubernetes.io/arch": "amd64",
+                          # Auto: only nodes labeled with this Multus parent
+                          # (see scripts/label_ina_multus_masters.sh / multus_iface).
+                          "ina-infra.nephio.lab/multus-master": (
+                              (nad or {}).get("parent") or "enp7s0"
+                          ),
                         },
                         "securityContext": {
                           "runAsGroup": 0,

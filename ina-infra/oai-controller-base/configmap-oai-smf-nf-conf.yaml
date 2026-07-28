@@ -6,11 +6,11 @@ metadata:
 data:
   smf.yaml: "# Log level for all the NFs\nlog_level:\n  general: {{ conf['logLevel']\
     \ }}\n# If you enable registration, the other NFs will use the NRF discovery mechanism\n\
-    register_nf:\n  general: no\nhttp_version: 2\n## general single_nssai configuration\n\
+    register_nf:\n  general: yes\nhttp_version: 2\n## general single_nssai configuration\n\
     ## Defines YAML anchors, which are reused in the config file\nsnssais:\n  {%-\
     \ for i in conf['PLMN']['plmnInfo']%}\n  {%- for s in i['nssai']%}\n  - &slice_{{\
-    \ i['nssai'].index(s) }}\n    sst: {{ s['sst'] }}\n    sd: {{ s['sd'] if 'sd'\
-    \ in s.keys() else 'FFFFFF' }}\n  {%- endfor %}\n  {%- endfor %}\n##############\
+    \ i['nssai'].index(s) }}\n    sst: {{ s['sst'] }}\n    sd: \"{{ s['sd'] if 'sd'\
+    \ in s.keys() else 'FFFFFF' }}\"\n  {%- endfor %}\n  {%- endfor %}\n##############\
     \ SBI Interfaces\n### Each NF takes its local SBI interfaces and remote interfaces\
     \ from here, unless it gets them using NRF discovery mechanisms\nnfs:\n  amf:\n\
     \    host: {{ conf['fqdn']['amf'] }}\n    sbi:\n      port: 80\n      api_version:\
@@ -23,17 +23,19 @@ data:
     smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
     \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
     \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
-    \ we resolve from NRF, this is just to configure usage_reporting\n  upfs:\n  \
-    \  {% set n3_addrs = ['10.1.139.20', '10.1.139.23', '10.1.139.26', '10.1.139.29',\
-    \ '10.1.139.32'] %}\n    {% set slice_sds = ['000001', '000002', '000003', '000004',\
-    \ '000005'] %}\n    {%- for i in conf['upfs'] %}\n    - host: {{ i }}\n      config:\n\
-    \        enable_usage_reporting: no\n        n3_local_ipv4: {{ n3_addrs[loop.index0]\
-    \ if loop.index0 < (n3_addrs|length) else n3_addrs[0] }}\n      upf_info:\n  \
-    \      sNssaiUpfInfoList:\n          - sNssai:\n              sst: 1\n       \
-    \       sd: \"{{ slice_sds[loop.index0] if loop.index0 < (slice_sds|length) else\
-    \ slice_sds[0] }}\"\n            dnnUpfInfoList:\n              - dnn: oai{{ loop.index\
-    \ }}\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4: {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns']\
-    \ }}\n    primary_ipv6: \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
+    \ Same structure as oai-slice-deployment / oai-cn; IPs are 10.1.140.* (ina).\n\
+    \  # Inline sNssai (not YAML anchors) — required for SMF UPF selection by S-NSSAI+DNN.\n\
+    \  upfs:\n    {% set n3_addrs = ['10.1.140.21', '10.1.140.22', '10.1.140.23',\
+    \ '10.1.140.24', '10.1.140.25'] %}\n    {% set slice_sds = ['000001', '000002',\
+    \ '000003', '000004', '000005'] %}\n    {%- for i in conf['upfs']|sort %}\n  \
+    \  - host: {{ i }}\n      config:\n        enable_usage_reporting: no\n      \
+    \  n3_local_ipv4: {{ n3_addrs[loop.index0] if loop.index0 < (n3_addrs|length)\
+    \ else n3_addrs[0] }}\n      upf_info:\n        sNssaiUpfInfoList:\n         \
+    \ - sNssai:\n              sst: 1\n              sd: \"{{ slice_sds[loop.index0]\
+    \ if loop.index0 < (slice_sds|length) else slice_sds[0] }}\"\n            dnnUpfInfoList:\n\
+    \              - dnn: oai{{ loop.index }}\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4:\
+    \ {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns'] }}\n    primary_ipv6:\
+    \ \"2001:4860:4860::8888\"\n    secondary_ipv4: {{ conf['ueSettings']['secondary']\
     \ }}\n    secondary_ipv6: \"2001:4860:4860::8888\"\n  ims:\n    pcscf_ipv4: \"\
     192.168.70.139\"\n    pcscf_ipv6: \"fe80::7915:f408:1787:db8b\"\n  # the DNN you\
     \ configure here should be configured in \"dnns\"\n  # follows the SmfInfo datatype\

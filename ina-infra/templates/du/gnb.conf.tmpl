@@ -22,7 +22,7 @@ gNBs =
     tracking_area_code  =  0x0051;
     uess_agg_levels = [8, 8, 8, 5, 2];
     coreset_duration = 2;
-    plmn_list = ({ mcc = 001; mnc = 01; mnc_length = 2; snssaiList = ({ sst = 1, sd = 0xFFFFFF }, { sst = 1, sd = 0x000001 }, { sst = 1, sd = 0x000002 }, { sst = 1, sd = 0x000003 }, { sst = 1, sd = 0x000004 }, { sst = 1, sd = 0x000005 }) });
+    plmn_list = ({ mcc = 001; mnc = 01; mnc_length = 2; snssaiList = ({{SNSSAI_LIST}}) });
     nr_cellid = 12345678;
     min_rxtxtime = 6;
     servingCellConfigCommon = (
@@ -100,7 +100,7 @@ MACRLCs = (
     pusch_TargetSNRx10 = 150;
     pucch_TargetSNRx10 = 150;
     stats_max_ue = 17;
-    # NSBOTH: same NS scheduler for UL and DL (match nws 5slices.nsboth).
+    # NSBOTH: same NS scheduler for UL and DL; slice list from profile n_slices.
     dl_scheduler_type = 1;
     ul_scheduler_type = 1;
     pusch_FailureThres = 1000;
@@ -111,12 +111,7 @@ MACRLCs = (
 );
 
 Slices = (
-  { slice_id = 0; sst = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },
-  { slice_id = 1; sst = 1; sd = 0x000001; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },
-  { slice_id = 2; sst = 1; sd = 0x000002; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },
-  { slice_id = 3; sst = 1; sd = 0x000003; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; },
-  { slice_id = 4; sst = 1; sd = 0x000004; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; },
-  { slice_id = 5; sst = 1; sd = 0x000005; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; }
+{{SLICES_BLOCK}}
 );
 
 L1s = (

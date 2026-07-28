@@ -9,8 +9,8 @@ data:
     register_nf:\n  amf: yes\nhttp_version: 2\n## general single_nssai configuration\n\
     ## Defines YAML anchors, which are reused in the config file\nsnssais:\n  {%-\
     \ for i in conf['PLMN']['plmnInfo']%}\n  {%- for s in i['nssai']%}\n  - &slice_{{\
-    \ i['nssai'].index(s) }}\n    sst: {{ s['sst'] }}\n    sd: {{ s['sd'] if 'sd'\
-    \ in s.keys() else 'FFFFFF' }}\n  {%- endfor %}\n  {%- endfor %}\n##############\
+    \ i['nssai'].index(s) }}\n    sst: {{ s['sst'] }}\n    sd: \"{{ s['sd'] if 'sd'\
+    \ in s.keys() else 'FFFFFF' }}\"\n  {%- endfor %}\n  {%- endfor %}\n##############\
     \ SBI Interfaces\nnfs:\n  amf:\n    host: {{ conf['fqdn']['amf'] }}  #will be\
     \ replaced by service name\n    sbi:\n      port: 80\n      api_version: v1\n\
     \      interface_name: {{ conf['nfInterfaces']['sbi'] }}\n    n2:\n      interface_name:\
