@@ -35,15 +35,17 @@ For each workload node:
   3. Set hostname to <name>
   4. Enable passwordless sudo
   5. Upload netplan (${NETPLAN_FILE}: mgmt 10.1.132.x + k8s 10.1.137.x)
-  6. Add/update utils/ssh_config/config to use mgmt IP from netplan
+  6. Pin DNS (netplan nameserver or 8.8.8.8) in resolv.conf + systemd-resolved
+  7. Add/update utils/ssh_config/config to use mgmt IP from netplan
 
 Examples:
   $(basename "$0") gh81 fcp 10.1.101.211
   $(basename "$0") -y gh81 fcp 10.1.101.211 gh82 fcp 10.1.101.212
   GH81_USER=fcp GH81_PASS=secret $(basename "$0") -y gh81 fcp 10.1.101.211
 
-Environment (optional, skip prompts; prefix = uppercase <name>):
+Environment (optional, skip prompts; prefix = uppercase <name>, '-' → '_'):
   GH81_USER GH81_PASS
+  EDGE_2_USER EDGE_2_PASS
   SSH_CONFIG     SSH config file (default: utils/ssh_config/config)
   NETPLAN_DIR    Netplan source tree (default: workloads/netplan/<name>/)
   SSH_PUBKEY     Public key file (default: from SSH config / ~/.ssh/id_rsa.pub)
@@ -100,7 +102,10 @@ ssh_copy_id_opts() {
 }
 
 node_env_prefix() {
-  printf '%s' "${1^^}"
+  # Bash env vars cannot contain '-'; edge-2 -> EDGE_2
+  local name="${1^^}"
+  name="${name//-/_}"
+  printf '%s' "$name"
 }
 
 mgmt_ip_from_netplan() {
@@ -110,22 +115,45 @@ mgmt_ip_from_netplan() {
 
 dns_from_netplan() {
   local file="$1"
-  grep -A3 'nameservers:' "$file" | grep -E '^[[:space:]]*-' | head -1 | awk '{print $2}'
+  grep -A5 'nameservers:' "$file" | grep -E '^[[:space:]]*-' | head -1 | awk '{print $2}'
 }
 
+# Always pin DNS (default 8.8.8.8): static /etc/resolv.conf + systemd-resolved drop-in.
 sync_resolv_conf() {
   local user="$1" host="$2" netplan_src="$3"
   local dns
   dns="$(dns_from_netplan "$netplan_src")"
-  if [[ -z "$dns" ]]; then
-    dns="8.8.8.8"
+  dns="${dns:-8.8.8.8}"
+
+  run_ssh "$user" "$host" "sudo bash -lc $(printf '%q' "
+set -euo pipefail
+DNS='${dns}'
+rm -f /etc/resolv.conf
+printf 'nameserver %s\n' \"\${DNS}\" > /etc/resolv.conf
+chmod 644 /etc/resolv.conf
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/99-nephio-dns.conf <<EOF
+[Resolve]
+DNS=\${DNS}
+FallbackDNS=
+Domains=
+DNSStubListener=no
+EOF
+if systemctl list-unit-files systemd-resolved.service >/dev/null 2>&1; then
+  systemctl restart systemd-resolved || true
+fi
+grep -q \"nameserver \${DNS}\" /etc/resolv.conf
+")"
+
+  info "DNS set to ${dns} (/etc/resolv.conf + systemd-resolved)"
+  if run_ssh "$user" "$host" "grep -q 'nameserver ${dns}' /etc/resolv.conf && getent hosts google.com >/dev/null"; then
+    info "DNS ${dns} ok (resolv + lookup)"
+  elif run_ssh "$user" "$host" "grep -q 'nameserver ${dns}' /etc/resolv.conf"; then
+    info "resolv.conf has ${dns} (lookup skipped/failed)"
+  else
+    err "failed to set DNS ${dns} on ${host}"
+    return 1
   fi
-  run_ssh "$user" "$host" "sudo bash -lc \"
-    rm -f /etc/resolv.conf
-    printf 'nameserver %s\n' '${dns}' > /etc/resolv.conf
-    chmod 644 /etc/resolv.conf
-  \""
-  info "resolv.conf: nameserver ${dns}"
 }
 
 read_node_credentials() {
@@ -298,7 +326,7 @@ deploy_netplan() {
   run_scp "$netplan_src" "$user" "$host" "$remote_tmp"
   run_ssh "$user" "$host" "sudo install -m 600 '$remote_tmp' '/etc/netplan/${NETPLAN_FILE}' && rm -f '$remote_tmp'"
   run_ssh "$user" "$host" "sudo netplan apply"
-  sync_resolv_conf "$user" "$host" "$netplan_src"
+  sync_resolv_conf "$user" "$host" "$netplan_src" || return 1
 
   run_ssh "$user" "$host" "sudo bash -lc \"
     if ! grep -qE '^${mgmt_ip}[[:space:]]+${node}\$' /etc/hosts; then

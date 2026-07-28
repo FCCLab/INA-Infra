@@ -437,18 +437,14 @@ if command -v docker >/dev/null && dpkg -l docker-ce 2>/dev/null | grep -q '^ii'
   sudo systemctl enable --now docker 2>/dev/null || true
 else
   echo "==> install Docker CE (containerd.io from docker.com)"
-  # Resolve duplicate docker.com apt sources (docker.gpg vs docker.asc).
-  if [[ -f /etc/apt/sources.list.d/docker.list && -f /etc/apt/sources.list.d/docker.sources ]]; then
-    echo "==> remove conflicting /etc/apt/sources.list.d/docker.list"
-    sudo rm -f /etc/apt/sources.list.d/docker.list
-  fi
+  # Drop stale/conflicting docker apt sources (list vs sources, bad Signed-By).
+  sudo rm -f /etc/apt/sources.list.d/docker.list \
+             /etc/apt/sources.list.d/docker.sources
   sudo install -m 0755 -d /etc/apt/keyrings
-  if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.asc
-    sudo chmod a+r /etc/apt/keyrings/docker.asc
-  fi
-  if [[ ! -f /etc/apt/sources.list.d/docker.sources ]]; then
-    sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOA
+  # Official key is ASCII-armored; do not --dearmor into *.asc (leaves apt without PUBKEY).
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+  sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOA
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
@@ -456,7 +452,6 @@ Components: stable
 Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOA
-  fi
   sudo apt-get $APT_OPTS update
   sudo apt-get $APT_OPTS install -y "${DOCKER_PKGS[@]}"
   sudo systemctl enable --now docker

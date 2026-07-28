@@ -10,6 +10,8 @@ source "$SCRIPT_DIR/cluster_lib.sh"
 REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 FLANNEL_MANIFEST="${FLANNEL_MANIFEST:-https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml}"
 SITE_IFACE="${SITE_IFACE:-enp7s0}"
+# Site NICs across VMs (enp7s0), GH (aerial03/enP2s2f1np1), usrp (enp4s0f0), bare-metal (eno1).
+FLANNEL_IFACE_REGEX="${FLANNEL_IFACE_REGEX:-^(aerial03|enP2s2f1np1|enp7s0|enp4s0f0|eno1)$}"
 
 fetch_manifest() {
   local out
@@ -26,7 +28,7 @@ write_cluster_flannel() {
   if [[ "$cluster" == "mgmt" ]]; then
     iface_flag=""
   else
-    iface_flag="$SITE_IFACE"
+    iface_flag="$FLANNEL_IFACE_REGEX"
   fi
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
   dest_ns="${REPOS_DIR}/${repo_name}/namespaces/kube-flannel"
@@ -38,7 +40,7 @@ from pathlib import Path
 
 import yaml
 
-src, dest_cluster, dest_ns, iface = sys.argv[1:5]
+src, dest_cluster, dest_ns, iface_regex = sys.argv[1:5]
 docs = list(yaml.safe_load_all(Path(src).read_text()))
 cluster_docs = []
 ns_docs = []
@@ -50,11 +52,11 @@ for doc in docs:
     if kind in ("ClusterRole", "ClusterRoleBinding"):
         cluster_docs.append(doc)
         continue
-    if kind == "DaemonSet" and iface:
+    if kind == "DaemonSet" and iface_regex:
         args = doc["spec"]["template"]["spec"]["containers"][0].setdefault("args", [])
-        iface_arg = f"--iface={iface}"
-        if iface_arg not in args:
-            args.append(iface_arg)
+        # Drop legacy single --iface=… so regex wins on mixed NIC fleets.
+        args[:] = [a for a in args if not a.startswith("--iface=") and not a.startswith("--iface-regex=")]
+        args.append(f"--iface-regex={iface_regex}")
     ns_docs.append(doc)
 
 def write_docs(docs, directory, prefix):
@@ -70,8 +72,8 @@ write_docs(ns_docs, dest_ns, "")
 
 print(f"  cluster: {len(cluster_docs)} resources")
 print(f"  namespaces/kube-flannel: {len(ns_docs)} resources")
-if iface:
-    print(f"  daemonset: --iface={iface}")
+if iface_regex:
+    print(f"  daemonset: --iface-regex={iface_regex}")
 PY
 
   echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (Flannel CNI)"
@@ -110,7 +112,7 @@ Usage: $(basename "$0") [cluster ...]
 Write Flannel manifests to repos/<gitea-repo>/ for Config Sync.
 Default: mgmt, central, regional, edge, ue.
 
-Workload clusters patch kube-flannel-ds with --iface=${SITE_IFACE}.
+Workload clusters patch kube-flannel-ds with --iface-regex=${FLANNEL_IFACE_REGEX}.
 Mgmt uses upstream defaults (operator network).
 
 Source: ${FLANNEL_MANIFEST}

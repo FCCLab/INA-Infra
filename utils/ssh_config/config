@@ -80,3 +80,8 @@ Host github-ntt
     HostName github.com
     User git
     IdentityFile ~/.ssh/ntt
+Host edge-2
+    HostName 10.1.132.232
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
