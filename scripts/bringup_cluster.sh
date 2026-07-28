@@ -609,6 +609,13 @@ EOF
 
 kubeadm_init_cp() {
   local host="$1" api_ip="$2"
+  # Optional mgmt IP (enp1s0) — included in apiserver cert SANs so operator hosts
+  # can reach the API via 10.1.132.0/24 when site-IP hairpin TLS fails.
+  local mgmt_ip="${3:-}"
+  local cert_sans="\"${api_ip}\""
+  if [[ -n "$mgmt_ip" && "$mgmt_ip" != "$api_ip" ]]; then
+    cert_sans+=$'\n'"  - \"${mgmt_ip}\""
+  fi
   run_remote_script "$host" <<EOF
 set -euo pipefail
 if [[ -f /etc/kubernetes/admin.conf ]]; then
@@ -632,6 +639,9 @@ apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 networking:
   podSubnet: "${POD_NETWORK_CIDR}"
+apiServer:
+  certSANs:
+  - ${cert_sans}
 INIT
 sudo kubeadm init --config /tmp/kubeadm-init.yaml
 rm -f /tmp/kubeadm-init.yaml
@@ -801,7 +811,7 @@ ensure_kubeconfig_profile_export() {
 
 copy_local_kubeconfig() {
   local host="$1" cluster="$2"
-  local local_path
+  local local_path api_ip mgmt_ip
   if [[ "$cluster" == "mgmt" ]]; then
     local_path="${HOME}/.kube/config"
   else
@@ -811,6 +821,14 @@ copy_local_kubeconfig() {
   scp_cmd -q "${host}:.kube/config" "$local_path"
   chmod 600 "$local_path"
   "$RENAME_SH" "$cluster" "$cluster" "$local_path"
+  # Prefer mgmt-plane API URL from operator hosts (site .137 hairpin can break TLS).
+  if [[ "$cluster" != "mgmt" ]]; then
+    api_ip="$(cluster_api_ip "$cluster")"
+    mgmt_ip="$(cluster_mgmt_ip "$cluster")"
+    if [[ -n "$api_ip" && -n "$mgmt_ip" && "$api_ip" != "$mgmt_ip" ]]; then
+      sed -i "s|https://${api_ip}:6443|https://${mgmt_ip}:6443|g" "$local_path"
+    fi
+  fi
   ensure_kubeconfig_profile_export
 }
 
@@ -974,8 +992,18 @@ bringup_cluster() {
   install_kubernetes "$cp_host" || return 1
 
   echo "==> [${cluster}] kubeadm init"
-  kubeadm_init_cp "$cp_host" "$api_ip" || return 1
+  kubeadm_init_cp "$cp_host" "$api_ip" "$mgmt_cp_ip" || return 1
   setup_remote_kubeconfig "$cp_host" "$cluster" || return 1
+  # Operator reachability: admin.conf uses mgmt IP (cert SAN includes both).
+  run_remote_script "$cp_host" <<EOF
+set -euo pipefail
+if [[ -f "\$HOME/.kube/config" ]]; then
+  sed -i 's|https://${api_ip}:6443|https://${mgmt_cp_ip}:6443|g' "\$HOME/.kube/config"
+fi
+if sudo test -f /etc/kubernetes/admin.conf; then
+  sudo sed -i 's|https://${api_ip}:6443|https://${mgmt_cp_ip}:6443|g' /etc/kubernetes/admin.conf
+fi
+EOF
   if [[ "$INSTALL_FLANNEL" == "1" ]]; then
     install_flannel_workload "$cp_host" || return 1
     wait_flannel_ready "$cp_host" || true
