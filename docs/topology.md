@@ -217,7 +217,39 @@ Guest ports: `inf-internal` → site `br-int-*`; `inf-upper` / `inf-lower` → `
 
 ```text
 central ── br-ext-cr ── regional ── br-ext-re ── edge ── br-ext-eu ── ue
+                 ↑ 10ms              ↑ 10ms              (no netem)
+           central inf-lower    regional inf-lower
+                                              │
+                                         eno2 (same L2 as edge)
 ```
+
+### Latency matrix (site plane `.137`)
+
+Netem on **`inf-lower` only** (`vm-sw-central`, `vm-sw-regional`): configured **10 ms each way** → **~20 ms RTT** per hop. Edge↔UE has **no** netem. Details: [nephio/docs/testbed.md](../nephio/docs/testbed.md#interconnect-latency-netem).
+
+**`eno2` node** = external host plugged into the `eno2` cable → port on `br-int-edge` → **same L2 as Edge VMs** (not routed). Site RTTs match **edge**; no mgmt `.132` on that wire.
+
+**Designed RTT (ms)**
+
+|  | central | regional | edge | ue | eno2 |
+|--|---------|----------|------|-----|------|
+| **central** | — | ~20 | ~40 | ~40 | ~40 |
+| **regional** | ~20 | — | ~20 | ~20 | ~20 |
+| **edge** | ~40 | ~20 | — | ~0 | ~0 |
+| **ue** | ~40 | ~20 | ~0 | — | ~0 |
+| **eno2** | ~40 | ~20 | ~0 | ~0 | — |
+
+**Measured** (ping avg, `*-0` → `10.1.137.x`, 2026-07-28; `eno2` = same as edge by L2):
+
+|  | central | regional | edge | ue | eno2 |
+|--|---------|----------|------|-----|------|
+| **central** | — | 28 ms | 55 ms | 55 ms | ≈edge (~55 ms) |
+| **regional** | 21 ms | — | 29 ms | 29 ms | ≈edge (~29 ms) |
+| **edge** | 41 ms | 21 ms | — | 0.8 ms | ~0 ms |
+| **ue** | 42 ms | 21 ms | 0.9 ms | — | ~0 ms |
+| **eno2** | ≈edge | ≈edge | ~0 ms | ~0 ms | — |
+
+Mgmt plane (`.132` / `br-mgmt` / `eno1`): **~0.6 ms** between Nephio sites (no netem). An **eno2-only** node is **not** on `.132`.
 
 ## Storage
 
