@@ -344,3 +344,4 @@ if (( failed > 0 )); then
 fi
 
 echo "Done. All ${SLICE_COUNT} UEs have ${OAITUN_IFACE} in ns=${PROFILE_NS}."
+echo "Next: ./scripts/ina-infra-ping-test.sh --dnn"

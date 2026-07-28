@@ -3,13 +3,14 @@
 Ping from oai-ue-{N} pods (K8s oai-slice-deployment) toward mgmt-0.
 
 Default target: 10.1.132.200 (mgmt-0), via oaitun_ue*.
-Use --dnn for per-slice DNN GW 10.1.{N}.1 instead.
+Use --dnn for per-slice DNN GW {dnn_prefix}.{N}.1 instead (default prefix 10.1).
 
 Examples:
   ./scripts/test_ping.py
   ./scripts/test_ping.py --ue1 --ue3 --count 10
   ./scripts/test_ping.py --host 10.1.132.11 --ue1
   ./scripts/test_ping.py --dnn
+  ./scripts/test_ping.py --ue-ns ina-infra --dnn --dnn-prefix 10.140
   ./scripts/test_ping.py --tmux
   ./scripts/test_ping.py --tmux --ue1 --ue2 --session oai_ping
   ./scripts/test_ping.py --list-only
@@ -35,6 +36,7 @@ DEFAULT_EDGE_HOST = "edge-0"
 DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_COUNT = 5
 DEFAULT_HOST = os.environ.get("OAI_TEST_HOST", "10.1.132.200")  # mgmt-0
+DEFAULT_DNN_PREFIX = os.environ.get("DNN_PREFIX", "10.1")
 UE_LABEL_FMT = "app.kubernetes.io/name=oai-ue-{n}"
 OAITUN_CANDIDATES = ("oaitun_ue1", "oaitun_ue0")
 
@@ -79,8 +81,8 @@ def remote_kubectl(
     return ssh_run(host, remote, ssh_config=ssh_config, timeout=timeout)
 
 
-def dnn_gw(slice_n: int) -> str:
-    return f"10.1.{slice_n}.1"
+def dnn_gw(slice_n: int, prefix: str = DEFAULT_DNN_PREFIX) -> str:
+    return f"{prefix}.{slice_n}.1"
 
 
 def list_ue_pods(
@@ -354,7 +356,12 @@ def main() -> int:
     ap.add_argument(
         "--dnn",
         action="store_true",
-        help="Ping per-slice DNN GW 10.1.N.1 instead of --host",
+        help="Ping per-slice DNN GW {dnn_prefix}.N.1 instead of --host",
+    )
+    ap.add_argument(
+        "--dnn-prefix",
+        default=DEFAULT_DNN_PREFIX,
+        help="DNN address prefix for --dnn (oai-slice: 10.1, ina-infra: 10.140)",
     )
     ap.add_argument(
         "--count",
@@ -443,7 +450,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             continue
-        host = dnn_gw(idx) if args.dnn else args.host
+        host = dnn_gw(idx, args.dnn_prefix) if args.dnn else args.host
         targets.append((idx, pod, iface, pdu, host))
         print(f"  ue{idx}: pod={pod} {iface}={pdu} -> {host}")
 

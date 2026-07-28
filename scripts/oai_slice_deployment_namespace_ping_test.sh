@@ -7,7 +7,8 @@
 #   [3] ping target via that iface
 #
 # Default target: mgmt-0 10.1.132.200 (same as scripts/test_ping.py).
-# Use --dnn for per-slice DNN GW 10.1.{N}.1.
+# Use --dnn for per-slice DNN GW ${DNN_PREFIX}.{N}.1 (default DNN_PREFIX=10.1).
+# For ina-infra profile UEs, prefer ./scripts/ina-infra-ping-test.sh (ns + DNN defaults).
 #
 # Usage:
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh
@@ -25,6 +26,7 @@ SSH_CFG="${SSH_CFG:-$REPO_ROOT/utils/ssh_config/config}"
 EDGE_HOST="${EDGE_HOST:-edge-0}"
 SLICE_NS="${OAI_SLICE_NS:-oai-slice-deployment}"
 SLICE_COUNT="${SLICE_COUNT:-${OAI_SLICE_COUNT:-5}}"
+DNN_PREFIX="${DNN_PREFIX:-10.1}"
 PING_COUNT="${PING_COUNT:-5}"
 PING_HOST="${PING_HOST:-${OAI_TEST_HOST:-10.1.132.200}}"
 USE_DNN=0
@@ -57,7 +59,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$TMUX_MODE" == "1" ]]; then
-  args=(--tmux)
+  args=(--tmux --ue-ns "$SLICE_NS" --dnn-prefix "$DNN_PREFIX")
   [[ "$USE_DNN" == "1" ]] && args+=(--dnn)
   [[ -n "${PING_HOST}" && "$USE_DNN" != "1" ]] && args+=(--host "$PING_HOST")
   for n in "${SELECTED[@]+"${SELECTED[@]}"}"; do
@@ -107,15 +109,15 @@ ue_oaitun() {
 target_for() {
   local n="$1"
   if [[ "$USE_DNN" == "1" ]]; then
-    printf '10.1.%s.1' "$n"
+    printf '%s.%s.1' "$DNN_PREFIX" "$n"
   else
     printf '%s' "$PING_HOST"
   fi
 }
 
-echo "==> oai-slice-deployment ping test (ns=${SLICE_NS} edge=${EDGE_HOST})"
+echo "==> ping test (ns=${SLICE_NS} edge=${EDGE_HOST})"
 if [[ "$USE_DNN" == "1" ]]; then
-  echo "    target=DNN GW 10.1.{N}.1  count=${PING_COUNT}"
+  echo "    target=DNN GW ${DNN_PREFIX}.{N}.1  count=${PING_COUNT}"
 else
   echo "    target=${PING_HOST}  count=${PING_COUNT}"
 fi
