@@ -151,7 +151,13 @@ rfsimulator: {
     IQfile = "/tmp/rfsimulator.iqs"
 }
 
-log_config :
+# DU is time source; CU-CP connects as client (OAI CU/DU iq_samples).
+time_management = {
+  time_source = "iq_samples";
+  mode = "server";
+  server_ip = "{{DU_F1}}";
+  server_port = 7374;
+};log_config :
 {
     global_log_level = "info";
     hw_log_level = "info";

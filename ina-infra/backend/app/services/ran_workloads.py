@@ -169,6 +169,14 @@ security = {{
   drb_ciphering = "yes";
   drb_integrity = "no";
 }};
+
+# Follow DU IQ sample time (OAI time_management.md CU/DU iq_samples).
+time_management = {{
+  mode = "client";
+  server_ip = "{shared.du_f1}";
+  server_port = 7374;
+}};
+
 log_config :
 {{
 global_log_level                      ="info";
@@ -516,6 +524,7 @@ def _write_edge_gnb(
                                         {"name": "f1c", "containerPort": 38472, "protocol": "SCTP"},
                                         {"name": "f1u", "containerPort": 2152, "protocol": "UDP"},
                                         {"name": "rfsim", "containerPort": 4043, "protocol": "TCP"},
+                                        {"name": "tmgr", "containerPort": 7374, "protocol": "TCP"},
                                     ],
                                     "volumeMounts": [
                                         {
