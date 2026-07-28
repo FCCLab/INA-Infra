@@ -135,6 +135,8 @@ def create_deployment(name: str=None,
                         "nodeSelector": {
                           "kubernetes.io/arch": "amd64"
                         },
+                        # Multus NADs use enp7s0 on VM workers; keep off bare-metal
+                        # RF nodes (usrp, edge-2, …) that use a different parent NIC.
                         "affinity": {
                           "nodeAffinity": {
                             "requiredDuringSchedulingIgnoredDuringExecution": {
@@ -143,8 +145,15 @@ def create_deployment(name: str=None,
                                   "matchExpressions": [
                                     {
                                       "key": "kubernetes.io/hostname",
-                                      "operator": "NotIn",
-                                      "values": ["usrp"]
+                                      "operator": "In",
+                                      "values": [
+                                        "edge-0",
+                                        "edge-1",
+                                        "central-0",
+                                        "central-1",
+                                        "regional-0",
+                                        "regional-1",
+                                      ],
                                     }
                                   ]
                                 }

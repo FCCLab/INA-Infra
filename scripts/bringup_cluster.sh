@@ -423,6 +423,32 @@ if [[ ! -f /etc/containerd/config.toml ]] || grep -q 'disabled_plugins = \["cri"
 fi
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo sed -i 's/disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml
+# Lab registry (mgmt) uses a self-signed cert — skip verify for pulls.
+REGISTRY="${LAB_REGISTRY:-10.1.132.30:5000}"
+sudo mkdir -p "/etc/containerd/certs.d/${REGISTRY}" /etc/containerd/conf.d
+sudo tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOR
+server = "https://${REGISTRY}"
+
+[host."https://${REGISTRY}"]
+  capabilities = ["pull", "resolve", "push"]
+  skip_verify = true
+EOR
+sudo tee /etc/containerd/conf.d/registry-certs.d.toml >/dev/null <<'EOR'
+[plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = "/etc/containerd/certs.d"
+EOR
+if ! grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" /etc/containerd/config.toml 2>/dev/null; then
+  if ! grep -qE '^\s*imports\s*=' /etc/containerd/config.toml 2>/dev/null; then
+    tmp="$(mktemp)"
+    if head -1 /etc/containerd/config.toml | grep -qE '^\s*version\s*='; then
+      { head -1 /etc/containerd/config.toml; echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; tail -n +2 /etc/containerd/config.toml; } >"$tmp"
+    else
+      { echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; cat /etc/containerd/config.toml; } >"$tmp"
+    fi
+    sudo mv "$tmp" /etc/containerd/config.toml
+  fi
+fi
+sudo sed -i 's|config_path = '\'''\''|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml || true
 sudo systemctl enable --now containerd
 sudo systemctl restart containerd
 EOF
