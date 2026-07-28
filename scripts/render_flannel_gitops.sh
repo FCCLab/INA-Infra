@@ -10,8 +10,8 @@ source "$SCRIPT_DIR/cluster_lib.sh"
 REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 FLANNEL_MANIFEST="${FLANNEL_MANIFEST:-https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml}"
 SITE_IFACE="${SITE_IFACE:-enp7s0}"
-# Site NICs across VMs (enp7s0), GH (aerial03/enP2s2f1np1), usrp (enp4s0f0), bare-metal (eno1).
-FLANNEL_IFACE_REGEX="${FLANNEL_IFACE_REGEX:-^(aerial03|enP2s2f1np1|enp7s0|enp4s0f0|eno1)$}"
+# Site NICs across VMs (enp7s0), GH (aerial03/enP2s2f1np1), usrp (enp4s0f0), bare-metal (eno1|ens12f0).
+FLANNEL_IFACE_REGEX="${FLANNEL_IFACE_REGEX:-^(aerial03|enP2s2f1np1|enp7s0|enp4s0f0|eno1|ens12f0)$}"
 
 fetch_manifest() {
   local out

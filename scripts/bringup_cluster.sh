@@ -424,6 +424,7 @@ fi
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo sed -i 's/disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml
 # Lab registry (mgmt) uses a self-signed cert — skip verify for pulls.
+# Covers containerd config v2 (cri.grpc) and v3 (cri.v1.images), including imports = [].
 REGISTRY="${LAB_REGISTRY:-10.1.132.30:5000}"
 sudo mkdir -p "/etc/containerd/certs.d/${REGISTRY}" /etc/containerd/conf.d
 sudo tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOR
@@ -436,9 +437,16 @@ EOR
 sudo tee /etc/containerd/conf.d/registry-certs.d.toml >/dev/null <<'EOR'
 [plugins.'io.containerd.cri.v1.images'.registry]
   config_path = "/etc/containerd/certs.d"
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
 EOR
-if ! grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" /etc/containerd/config.toml 2>/dev/null; then
-  if ! grep -qE '^\s*imports\s*=' /etc/containerd/config.toml 2>/dev/null; then
+if grep -qE '^\s*imports\s*=\s*\[\s*\]\s*$' /etc/containerd/config.toml 2>/dev/null; then
+  sudo sed -i "s|^[[:space:]]*imports[[:space:]]*=[[:space:]]*\\[\\][[:space:]]*$|imports = ['/etc/containerd/conf.d/*.toml']|" /etc/containerd/config.toml
+elif ! grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" /etc/containerd/config.toml 2>/dev/null; then
+  if grep -qE '^\s*imports\s*=' /etc/containerd/config.toml 2>/dev/null; then
+    sudo sed -i "s|^[[:space:]]*imports[[:space:]]*=.*$|imports = ['/etc/containerd/conf.d/*.toml']|" /etc/containerd/config.toml
+  else
     tmp="$(mktemp)"
     if head -1 /etc/containerd/config.toml | grep -qE '^\s*version\s*='; then
       { head -1 /etc/containerd/config.toml; echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; tail -n +2 /etc/containerd/config.toml; } >"$tmp"
@@ -449,6 +457,29 @@ if ! grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" /etc/containerd/config
   fi
 fi
 sudo sed -i 's|config_path = '\'''\''|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml || true
+sudo sed -i 's|config_path = ""|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml || true
+# Docker CE (kept on external workers) also needs insecure-registries for pushes/pulls.
+if command -v docker >/dev/null 2>&1; then
+  sudo mkdir -p /etc/docker
+  if command -v jq >/dev/null 2>&1 && [[ -f /etc/docker/daemon.json ]]; then
+    tmp="$(mktemp)"
+    sudo jq --arg reg "$REGISTRY" '
+      .["insecure-registries"] = (
+        (.["insecure-registries"] // [])
+        | if index($reg) then . else . + [$reg] end
+        | unique
+      )
+    ' /etc/docker/daemon.json >"$tmp"
+    sudo mv "$tmp" /etc/docker/daemon.json
+  else
+    sudo tee /etc/docker/daemon.json >/dev/null <<EOD
+{
+  "insecure-registries": ["${REGISTRY}"]
+}
+EOD
+  fi
+  sudo systemctl restart docker 2>/dev/null || true
+fi
 sudo systemctl enable --now containerd
 sudo systemctl restart containerd
 EOF
@@ -519,9 +550,11 @@ sudo systemctl enable --now containerd
 
 echo "==> install kubelet kubeadm kubectl (${K8S_VERSION}.x)"
 sudo install -d -m 0755 /etc/apt/keyrings
+# Release.key is ASCII-armored; avoid gpg --dearmor (needs /dev/tty under non-interactive sudo).
 curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key" \\
-  | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" \\
+  | sudo tee /etc/apt/keyrings/kubernetes-apt-keyring.asc >/dev/null
+sudo chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.asc
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" \\
   | sudo tee /etc/apt/sources.list.d/kubernetes.list
 sudo apt-get \$APT_OPTS update
 sudo apt-get \$APT_OPTS install -y kubelet kubeadm kubectl
@@ -560,9 +593,11 @@ $(configure_containerd_for_k8s_remote_script)
 
 echo "==> install kubelet kubeadm kubectl (${K8S_VERSION}.x)"
 sudo install -d -m 0755 /etc/apt/keyrings
+# Release.key is ASCII-armored; avoid gpg --dearmor (needs /dev/tty under non-interactive sudo).
 curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key" \\
-  | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" \\
+  | sudo tee /etc/apt/keyrings/kubernetes-apt-keyring.asc >/dev/null
+sudo chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.asc
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" \\
   | sudo tee /etc/apt/sources.list.d/kubernetes.list
 sudo apt-get \$APT_OPTS update
 sudo apt-get \$APT_OPTS install -y kubelet kubeadm kubectl

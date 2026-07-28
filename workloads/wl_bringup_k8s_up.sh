@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BRINGUP_CLUSTER="${BRINGUP_CLUSTER:-$REPO_ROOT/scripts/bringup_cluster.sh}"
+INSTALL_REGISTRY="${INSTALL_REGISTRY:-$REPO_ROOT/utils/registry/install_registry.sh}"
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
 NETPLAN_DIR="${NETPLAN_DIR:-$SCRIPT_DIR/netplan}"
 NETPLAN_FILE="${NETPLAN_FILE:-55-k8s.yaml}"
@@ -18,6 +19,7 @@ Usage: $(basename "$0") <cluster> <node>
 
 Install kubelet/kubeadm/kubectl on <node> and join it to <cluster>'s control plane.
 <node> must already be reachable via SSH (see wl_setup_ssh_mgmt_ip.sh) with netplan applied.
+After join, configures Docker + containerd to trust the lab registry (self-signed TLS).
 
 Clusters: central, regional, edge, ue
 
@@ -30,6 +32,7 @@ The Kubernetes node IP (kubelet --node-ip) is read from:
 
 Environment: same as scripts/bringup_cluster.sh (K8S_VERSION, DNS_SERVER, INSTALL_FLANNEL, ...)
 Keeps Docker CE (docker-ce, containerd.io, buildx, compose); configures containerd CRI for kubelet.
+SKIP_REGISTRY=1  skip utils/registry/install_registry.sh after join
 EOF
 }
 
@@ -87,6 +90,22 @@ main() {
   if ! join_external_worker "$cluster" "$worker" "$node_ip"; then
     exit 1
   fi
+
+  # Trust lab registry (10.1.132.30:5000 self-signed) for CRI pulls + Docker.
+  # bringup_cluster already writes certs.d during install_kubernetes_keep_docker;
+  # install_registry.sh re-applies Docker + containerd setup (idempotent) so nodes
+  # with older containerd dumps (imports = []) still pull OAI images.
+  if [[ "${SKIP_REGISTRY:-0}" != "1" ]]; then
+    if [[ ! -x "$INSTALL_REGISTRY" && ! -f "$INSTALL_REGISTRY" ]]; then
+      echo "error: registry install script not found: $INSTALL_REGISTRY" >&2
+      exit 1
+    fi
+    log_msg "configure lab registry trust on ${worker}"
+    bash "$INSTALL_REGISTRY" "$worker"
+  else
+    log_msg "SKIP_REGISTRY=1 — not running install_registry.sh"
+  fi
+
   ensure_kubeconfig_profile_export
 }
 

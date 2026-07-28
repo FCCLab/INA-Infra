@@ -6,6 +6,8 @@
 #   sudo ./scripts/setup-containerd-insecure-registry.sh 10.1.132.30:5000
 #
 # Run on every cluster node that must pull images (e.g. mgmt-0/1, edge-0, ue-1).
+# Handles both containerd config v2 (cri.grpc) and v3 (cri.v1.images), including
+# stock Docker CE configs with imports = [].
 set -euo pipefail
 
 REGISTRY="${1:-10.1.132.30:5000}"
@@ -30,64 +32,92 @@ server = "https://${REGISTRY}"
 EOF
 echo "Wrote ${CERTS_DIR}/hosts.toml"
 
-# Drop-in so imports pick up certs.d even if the main config has config_path = ''.
+# Drop-ins for both CRI registry plugin layouts (v2 + v3). Harmless if unused.
 cat >"${CONF_D}/registry-certs.d.toml" <<'EOF'
 [plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = "/etc/containerd/certs.d"
+
+[plugins."io.containerd.grpc.v1.cri".registry]
   config_path = "/etc/containerd/certs.d"
 EOF
 echo "Wrote ${CONF_D}/registry-certs.d.toml"
 
-# Ensure main config imports conf.d and does not leave an empty config_path that
-# wins over the drop-in on some containerd versions.
-if [[ -f "$CONFIG_TOML" ]]; then
-  if ! grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" "$CONFIG_TOML"; then
-    if grep -qE '^\s*imports\s*=' "$CONFIG_TOML"; then
-      echo "Warning: $CONFIG_TOML has imports but not conf.d — add '/etc/containerd/conf.d/*.toml' manually." >&2
-    else
-      # Prepend imports near the top (after version if present).
-      tmp="$(mktemp)"
-      if head -1 "$CONFIG_TOML" | grep -qE '^\s*version\s*='; then
-        { head -1 "$CONFIG_TOML"; echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; tail -n +2 "$CONFIG_TOML"; } >"$tmp"
-      else
-        { echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; cat "$CONFIG_TOML"; } >"$tmp"
-      fi
-      mv "$tmp" "$CONFIG_TOML"
-      echo "Added imports for conf.d to $CONFIG_TOML"
-    fi
+ensure_conf_d_imports() {
+  local tmp
+  [[ -f "$CONFIG_TOML" ]] || return 0
+
+  if grep -qE "imports\s*=\s*\[.*/etc/containerd/conf\.d" "$CONFIG_TOML"; then
+    return 0
   fi
 
-  # Prefer a single certs.d path in the main registry section when present.
-  if grep -q "plugins.'io.containerd.cri.v1.images'.registry" "$CONFIG_TOML"; then
-    python3 - "$CONFIG_TOML" <<'PY' || true
+  # Empty imports = [] (common from containerd config dump / Docker CE).
+  if grep -qE '^\s*imports\s*=\s*\[\s*\]\s*$' "$CONFIG_TOML"; then
+    sed -i "s|^[[:space:]]*imports[[:space:]]*=[[:space:]]*\\[\\][[:space:]]*$|imports = ['/etc/containerd/conf.d/*.toml']|" "$CONFIG_TOML"
+    echo "Set imports to conf.d in $CONFIG_TOML"
+    return 0
+  fi
+
+  if grep -qE '^\s*imports\s*=' "$CONFIG_TOML"; then
+    # Non-empty imports without conf.d — replace the line so drop-ins load.
+    sed -i "s|^[[:space:]]*imports[[:space:]]*=.*$|imports = ['/etc/containerd/conf.d/*.toml']|" "$CONFIG_TOML"
+    echo "Replaced imports with conf.d in $CONFIG_TOML"
+    return 0
+  fi
+
+  tmp="$(mktemp)"
+  if head -1 "$CONFIG_TOML" | grep -qE '^\s*version\s*='; then
+    { head -1 "$CONFIG_TOML"; echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; tail -n +2 "$CONFIG_TOML"; } >"$tmp"
+  else
+    { echo "imports = ['\''/etc/containerd/conf.d/*.toml'\'']"; cat "$CONFIG_TOML"; } >"$tmp"
+  fi
+  mv "$tmp" "$CONFIG_TOML"
+  echo "Added imports for conf.d to $CONFIG_TOML"
+}
+
+set_registry_config_path() {
+  local path="$1"
+  python3 - "$path" <<'PY' || true
 import re, sys
 path = sys.argv[1]
-text = open(path).read()
-# Set config_path under the cri.v1.images.registry table only.
-pat = re.compile(
-    r"(\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\]\s*\n)(.*?)(?=\n\s*\[|\Z)",
-    re.S,
+orig = open(path).read()
+text = orig
+for sec in (
+    r"\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\]",
+    r'\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]',
+):
+    pat = re.compile(rf"({sec}\s*\n)(.*?)(?=\n\s*\[|\Z)", re.S)
+
+    def repl(m):
+        head, body = m.group(1), m.group(2)
+        if re.search(r"^\s*config_path\s*=", body, re.M):
+            body = re.sub(
+                r"^\s*config_path\s*=\s*.*$",
+                '      config_path = "/etc/containerd/certs.d"',
+                body,
+                count=1,
+                flags=re.M,
+            )
+        else:
+            body = '      config_path = "/etc/containerd/certs.d"\n' + body
+        return head + body
+
+    text = pat.sub(repl, text, count=1)
+
+text = re.sub(
+    r'^(\s*config_path\s*=\s*)(?:""|' + "''" + r')\s*$',
+    r'\1"/etc/containerd/certs.d"',
+    text,
+    flags=re.M,
 )
-def repl(m):
-    head, body = m.group(1), m.group(2)
-    if re.search(r"^\s*config_path\s*=", body, re.M):
-        body = re.sub(
-            r"^\s*config_path\s*=\s*.*$",
-            '      config_path = "/etc/containerd/certs.d"',
-            body,
-            count=1,
-            flags=re.M,
-        )
-    else:
-        body = '      config_path = "/etc/containerd/certs.d"\n' + body
-    return head + body
-new, n = pat.subn(repl, text, count=1)
-if n:
-    open(path, "w").write(new)
+if text != orig:
+    open(path, "w").write(text)
     print(f"Set registry config_path in {path}")
-else:
-    print(f"No cri.v1.images.registry section found in {path}", file=sys.stderr)
 PY
-  fi
+}
+
+if [[ -f "$CONFIG_TOML" ]]; then
+  ensure_conf_d_imports
+  set_registry_config_path "$CONFIG_TOML"
 fi
 
 systemctl restart containerd
