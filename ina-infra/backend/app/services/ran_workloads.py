@@ -838,14 +838,31 @@ def _write_upf(
                                             {
                                                 "sst": 1,
                                                 "sd": sd,
-                                                "dnnInfo": [
-                                                    {
-                                                        "name": _dnn(n),
-                                                        "sessionType": "ipv4",
-                                                        "dns": "1.1.1.1",
-                                                        "subnet": sl.dnn_cidr,
-                                                    }
-                                                ],
+                                                "dnnInfo": (
+                                                    [
+                                                        {
+                                                            "name": _dnn(n),
+                                                            "sessionType": "ipv4",
+                                                            "dns": "1.1.1.1",
+                                                            "subnet": sl.dnn_cidr,
+                                                        },
+                                                        {
+                                                            "name": "oai",
+                                                            "sessionType": "ipv4",
+                                                            "dns": "1.1.1.1",
+                                                            "subnet": sl.dnn_cidr,
+                                                        },
+                                                    ]
+                                                    if n == 1
+                                                    else [
+                                                        {
+                                                            "name": _dnn(n),
+                                                            "sessionType": "ipv4",
+                                                            "dns": "1.1.1.1",
+                                                            "subnet": sl.dnn_cidr,
+                                                        }
+                                                    ]
+                                                ),
                                             }
                                         ],
                                     }
@@ -908,9 +925,14 @@ def _write_upf(
                         {"name": "vpc-internal", "interfaces": ["n4"]},
                         {
                             "name": "vpc-internet",
-                            "dataNetworks": [
-                                {"name": _dnn(n), "pool": [{"prefix": sl.dnn_cidr}]}
-                            ],
+                            "dataNetworks": (
+                                [
+                                    {"name": _dnn(n), "pool": [{"prefix": sl.dnn_cidr}]},
+                                    {"name": "oai", "pool": [{"prefix": sl.dnn_cidr}]},
+                                ]
+                                if n == 1
+                                else [{"name": _dnn(n), "pool": [{"prefix": sl.dnn_cidr}]}]
+                            ),
                             "interfaces": ["n6"],
                         },
                         {"name": "vpc-ran", "interfaces": ["n3"]},

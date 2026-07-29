@@ -21,17 +21,24 @@ data:
     \      api_version: v1\n  nrf:\n    host: {{ conf['fqdn']['nrf'] }}\n    sbi:\n\
     \      port: 80\n      api_version: v1\n############## NF-specific configuration\n\
     smf:\n  ue_mtu: {{ conf['ueSettings']['mtu'] }}\n  support_features:\n    use_local_subscription_info:\
-    \ yes # Use infos from local_subscription_info or from UDM\n    use_local_pcc_rules:\
+    \ yes\n    use_local_pcc_rules:\
     \ yes # Use infos from local_pcc_rules or from PCF\n    discover_upf: no\n  #\
     \ Same structure as oai-slice-deployment / oai-cn; IPs are 10.1.140.* (ina).\n\
     \  # Inline sNssai (not YAML anchors) — required for SMF UPF selection by S-NSSAI+DNN.\n\
     \  upfs:\n    {% set n3_addrs = ['10.1.140.21', '10.1.140.22', '10.1.140.23',\
-    \ '10.1.140.24', '10.1.140.25'] %}\n    {% set slice_sds = ['000001', '000002',\
-    \ '000003', '000004', '000005'] %}\n    {%- for i in conf['upfs']|sort %}\n  \
-    \  - host: {{ i }}\n      config:\n        enable_usage_reporting: no\n      \
-    \  n3_local_ipv4: {{ n3_addrs[loop.index0] if loop.index0 < (n3_addrs|length)\
-    \ else n3_addrs[0] }}\n      upf_info:\n        sNssaiUpfInfoList:\n         \
-    \ - sNssai:\n              sst: 1\n              sd: \"{{ slice_sds[loop.index0]\
+    \ '10.1.140.24', '10.1.140.25'] %}\n    {% set n6_addrs = ['10.1.140.61', '10.1.140.62',\
+    \ '10.1.140.63', '10.1.140.64', '10.1.140.65'] %}\n    {% set slice_sds = ['000001',\
+    \ '000002', '000003', '000004', '000005'] %}\n    {%- for i in conf['upfs']|sort\
+    \ %}\n    - host: {{ i }}\n      config:\n        enable_usage_reporting: no\n\
+    \        enable_upf_wo_nf_discovery: yes\n        n3_local_ipv4: {{ n3_addrs[loop.index0]\
+    \ if loop.index0 < (n3_addrs|length) else n3_addrs[0] }}\n      upf_info:\n  \
+    \      interfaceUpfInfoList:\n          - interfaceType: \"N3\"\n            ipv4EndpointAddresses:\n\
+    \              - {{ n3_addrs[loop.index0] if loop.index0 < (n3_addrs|length) else\
+    \ n3_addrs[0] }}\n            networkInstance: \"access.oai.org\"\n          -\
+    \ interfaceType: \"N6\"\n            ipv4EndpointAddresses:\n              - {{\
+    \ n6_addrs[loop.index0] if loop.index0 < (n6_addrs|length) else n6_addrs[0] }}\n\
+    \            networkInstance: \"core.oai.org\"\n        sNssaiUpfInfoList:\n  \
+    \        - sNssai:\n              sst: 1\n              sd: \"{{ slice_sds[loop.index0]\
     \ if loop.index0 < (slice_sds|length) else slice_sds[0] }}\"\n            dnnUpfInfoList:\n\
     \              - dnn: oai{{ loop.index }}\n    {%- endfor %}\n  ue_dns:\n    primary_ipv4:\
     \ {{ conf['PLMN']['plmnInfo'][0]['nssai'][0]['dnnInfo'][0]['dns'] }}\n    primary_ipv6:\

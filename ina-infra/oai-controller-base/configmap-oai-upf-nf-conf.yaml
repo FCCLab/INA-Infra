@@ -7,6 +7,7 @@ data:
   upf.yaml: "############# Common configuration\n# Log level for all the NFs\nlog_level:\n\
     \  upf: {{ conf['logLevel'] }}\n# If you enable registration, the other NFs will\
     \ use the NRF discovery mechanism\nregister_nf:\n  upf: 'yes'\nhttp_version: 2\n\
+    http_request_timeout: 3000  # ms (v2.1+; v2.0.1 ignored ~100ms hardcode)\n\
     ## general single_nssai configuration\n## Defines YAML anchors, which are reused\
     \ in the config file\nsnssais:\n  {%- for i in conf['PLMN']['plmnInfo']%}\n  {%-\
     \ for s in i['nssai']%}\n  - &slice_{{ i['nssai'].index(s) }}\n    sst: {{ s['sst']\

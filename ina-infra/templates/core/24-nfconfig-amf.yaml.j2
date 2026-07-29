@@ -19,13 +19,6 @@ spec:
           mnc: '01'
         tac: 81
         nssai:
-        - sst: 1
-          sd: FFFFFF
-          dnnInfo:
-          - name: oai
-            sessionType: ipv4
-            dns: 1.1.1.1
-            subnet: 10.0.0.0/24
 {% for sl in slices %}
         - sst: 1
           sd: '{{ '%06d' % sl.n }}'

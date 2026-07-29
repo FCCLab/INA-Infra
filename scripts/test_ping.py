@@ -4,13 +4,16 @@ Ping from oai-ue-{N} pods (K8s oai-slice-deployment) toward mgmt-0.
 
 Default target: 10.1.132.200 (mgmt-0), via oaitun_ue*.
 Use --dnn for per-slice DNN GW {dnn_prefix}.{N}.1 instead (default prefix 10.1).
+Use --n6 for per-slice UPF N6 ({n6_prefix}.{n6_base+N} or legacy upf_slice_n6).
 
 Examples:
   ./scripts/test_ping.py
   ./scripts/test_ping.py --ue1 --ue3 --count 10
   ./scripts/test_ping.py --host 10.1.132.11 --ue1
   ./scripts/test_ping.py --dnn
+  ./scripts/test_ping.py --n6
   ./scripts/test_ping.py --ue-ns ina-infra --dnn --dnn-prefix 10.140
+  ./scripts/test_ping.py --ue-ns ina-infra --n6 --n6-prefix 10.1.140 --n6-base 60
   ./scripts/test_ping.py --tmux
   ./scripts/test_ping.py --tmux --ue1 --ue2 --session oai_ping
   ./scripts/test_ping.py --list-only
@@ -37,6 +40,8 @@ DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_COUNT = 5
 DEFAULT_HOST = os.environ.get("OAI_TEST_HOST", "10.1.132.200")  # mgmt-0
 DEFAULT_DNN_PREFIX = os.environ.get("DNN_PREFIX", "10.1")
+DEFAULT_N6_PREFIX = os.environ.get("N6_PREFIX", "")
+DEFAULT_N6_BASE = int(os.environ.get("N6_BASE", "60"))
 UE_LABEL_FMT = "app.kubernetes.io/name=oai-ue-{n}"
 OAITUN_CANDIDATES = ("oaitun_ue1", "oaitun_ue0")
 
@@ -83,6 +88,17 @@ def remote_kubectl(
 
 def dnn_gw(slice_n: int, prefix: str = DEFAULT_DNN_PREFIX) -> str:
     return f"{prefix}.{slice_n}.1"
+
+
+def n6_addr(slice_n: int, prefix: str = DEFAULT_N6_PREFIX, base: int = DEFAULT_N6_BASE) -> str:
+    if prefix:
+        return f"{prefix}.{base + slice_n}"
+    # Legacy oai-slice-deployment pool on 10.1.139.0/24
+    offset0 = int(os.environ.get("OAI_UPF_SLICE_OFFSET0", "10"))
+    macvlan_prefix = os.environ.get("OAI_MACVLAN_PREFIX", "10.1.139")
+    central_base = int(os.environ.get("OAI_MACVLAN_BASE_CENTRAL", "10"))
+    last = central_base + offset0 + (slice_n - 1) * 3 + 2
+    return f"{macvlan_prefix}.{last}"
 
 
 def list_ue_pods(
@@ -359,9 +375,25 @@ def main() -> int:
         help="Ping per-slice DNN GW {dnn_prefix}.N.1 instead of --host",
     )
     ap.add_argument(
+        "--n6",
+        action="store_true",
+        help="Ping per-slice UPF N6 ({n6_prefix}.{n6_base+N} or legacy pool)",
+    )
+    ap.add_argument(
         "--dnn-prefix",
         default=DEFAULT_DNN_PREFIX,
         help="DNN address prefix for --dnn (oai-slice: 10.1, ina-infra: 10.140)",
+    )
+    ap.add_argument(
+        "--n6-prefix",
+        default=DEFAULT_N6_PREFIX,
+        help="UPF N6 prefix for --n6 (ina-infra: 10.1.140; empty = legacy 10.1.139 pool)",
+    )
+    ap.add_argument(
+        "--n6-base",
+        type=int,
+        default=DEFAULT_N6_BASE,
+        help="Last-octet base for --n6 (ina-infra: 60 → slice1=10.1.140.61)",
     )
     ap.add_argument(
         "--count",
@@ -450,7 +482,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             continue
-        host = dnn_gw(idx, args.dnn_prefix) if args.dnn else args.host
+        host = (
+            n6_addr(idx, args.n6_prefix, args.n6_base)
+            if args.n6
+            else dnn_gw(idx, args.dnn_prefix)
+            if args.dnn
+            else args.host
+        )
         targets.append((idx, pod, iface, pdu, host))
         print(f"  ue{idx}: pod={pod} {iface}={pdu} -> {host}")
 

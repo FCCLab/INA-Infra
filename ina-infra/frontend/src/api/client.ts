@@ -489,6 +489,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  restoreProfileDefaults: (name: string) =>
+    request<ProfileRecord>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/restore-defaults`,
+      { method: "POST" },
+    ),
   deleteProfile: (name: string) =>
     request<{ ok: boolean; deleted: string; remaining: string[] }>(
       `/api/v1/profiles/${encodeURIComponent(name)}`,

@@ -353,6 +353,50 @@ def save_profile(rec: ProfileRecord) -> ProfileRecord:
     return _row_to_record(row)
 
 
+def restore_profile_defaults(name: str) -> ProfileRecord:
+    """Reset identity (except name), slices, and network to builtins; clear PL result."""
+    init_db()
+    existing = get_profile(name)
+    if existing is None:
+        raise ValueError(f"profile not found: {name}")
+    defs = pl_solver.profile_defaults()
+    network = defs.network or pl_solver.default_network_in()
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        conn.execute(
+            """
+            UPDATE profiles SET
+              subnet = ?,
+              max_slices = ?,
+              dnn_prefix = ?,
+              du_node = ?,
+              ue_node = ?,
+              slices_json = ?,
+              network_json = ?,
+              pl_result_json = NULL,
+              pl_result_file = NULL,
+              updated_at = ?
+            WHERE name = ?
+            """,
+            (
+                defs.profile.subnet,
+                defs.profile.max_slices,
+                defs.profile.dnn_prefix,
+                defs.profile.du_node,
+                defs.profile.ue_node,
+                json.dumps([s.model_dump() for s in defs.slices]),
+                json.dumps(network.model_dump(exclude_none=True)),
+                now,
+                name,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM profiles WHERE name = ?", (name,)
+        ).fetchone()
+    assert row is not None
+    return _row_to_record(row)
+
+
 def save_pl_result(
     name: str,
     result: PlSolveResponse,

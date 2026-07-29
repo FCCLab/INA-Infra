@@ -6,7 +6,7 @@ metadata:
 data:
   smf.yaml: "nad: \n  parent: 'enp7s0'\n  create: False\nnfInterfaces:\n  n4: 'n4'\n\
     \  sbi: 'eth0'\nports:\n  - name: 'n4'\n    port: 8805\n    protocol: UDP\n  -\
-    \ name: 'sbi'\n    port: 80\n    protocol: TCP\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-smf:v2.0.1'\n\
+    \ name: 'sbi'\n    port: 80\n    protocol: TCP\nlogLevel: debug\nimage: 'docker.io/oaisoftwarealliance/oai-smf:v2.2.1'\n\
     ueSettings:\n  mtu: 1500\n  secondary: 1.1.1.1\nfqdn:\n  nrf: '10.1.140.11'\n  udm:\
     \ 'oai-udm'\n  amf: 'oai-amf'\ncompute:\n  req:\n    cpu: '100m'\n    memory:\
     \ '512Mi'\n  limits:\n    cpu: '100m'\n    memory: '512Mi'\n"

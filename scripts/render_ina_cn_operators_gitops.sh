@@ -25,13 +25,19 @@ PROFILE_NS="${1:-ina-infra}"
 SMF_N4="${INA_SMF_N4:-10.1.140.12}"
 # Cross-cluster UPF→NRF Nnrf on Multus (same /24 as UPF N3/N4/N6).
 NRF_SBI="${INA_NRF_SBI_IP:-${INA_NRF_LB_IP:-${INA_NRF_LB:-$(ina_nrf_sbi_ip)}}}"
+# OAI CN5G NF container tag (oaisoftwarealliance/oai-*). Controllers stay on arorasagar :v2.0.1.
+OAI_IMAGE_TAG="${INA_OAI_IMAGE_TAG:-v2.2.1}"
+# SMF: custom image from lab registry (DNN fix). Other NFs keep OAI_IMAGE_TAG.
+# Bump INA_OAI_SMF_IMAGE_TAG (-2, -3, ...) after each rebuild/push.
+OAI_SMF_IMAGE_TAG="${INA_OAI_SMF_IMAGE_TAG:-v2.2.1-dnn-fix-3}"
+OAI_SMF_IMAGE="${INA_OAI_SMF_IMAGE:-10.1.132.30:5000/oaisoftwarealliance/oai-smf:${OAI_SMF_IMAGE_TAG}}"
 BASE_DIR="${INA_OAI_CONTROLLER_BASE:-$REPO_ROOT/ina-infra/oai-controller-base}"
 UTILS_DIR="${INA_OAI_UTILS_DIR:-$REPO_ROOT/ina-infra/oai-controller-utils}"
 FILE_PREFIX="70-"
 DROP_OPS_NS=("oai-cn-operators" "ina-cn-operators")
 
 python3 - "$REPOS_DIR" "$PROFILE_NS" "$SMF_N4" "$NRF_SBI" "$BASE_DIR" "$UTILS_DIR" "$FILE_PREFIX" \
-  "${DROP_OPS_NS[@]}" <<'PY'
+  "$OAI_IMAGE_TAG" "$OAI_SMF_IMAGE" "${DROP_OPS_NS[@]}" <<'PY'
 from __future__ import annotations
 
 import pathlib
@@ -49,6 +55,8 @@ import yaml
     base_dir_s,
     utils_dir_s,
     file_prefix,
+    oai_image_tag,
+    smf_image,
     *drop_ops_ns,
 ) = sys.argv[1:]
 repos = pathlib.Path(repos_s)
@@ -132,33 +140,48 @@ def quote_snssai_sd(tpl: str) -> str:
 
 
 def patch_smf_nf_conf(doc: dict) -> None:
-    """Match oai-slice / oai-cn: register_nf yes, discover_upf no, static upfs[].
+    """register_nf yes, discover_upf no, static upfs[] with wo_nf_discovery.
 
-    IPs are 10.1.140.* (ina). Inline sNssai required for UPF selection by S-NSSAI+DNN.
+    OAI SMF v2.2.1 needs enable_upf_wo_nf_discovery yes per static peer or it
+    never sends PFCP Association Setup (stays on NRF TIME-OUT only).
+    Core SBI NRF is ClusterIP ``oai-nrf`` (op-conf). Map N4→N3 by last octet.
     """
     tpl = doc["data"]["smf.yaml"]
-    tpl = tpl.replace(
-        "register_nf:\n  general: no",
+    tpl = re.sub(
+        r"register_nf:\n  general: \w+",
         "register_nf:\n  general: yes",
-        1,
+        tpl,
+        count=1,
     )
     tpl = quote_snssai_sd(tpl)
+    # Static upfs (oai-slice): NRF discovery cannot see off-central UPFs.
     tpl = tpl.replace("discover_upf: yes", "discover_upf: no")
     new = """  upfs:
-    {% set n3_addrs = ['10.1.140.21', '10.1.140.22', '10.1.140.23', '10.1.140.24', '10.1.140.25'] %}
-    {% set slice_sds = ['000001', '000002', '000003', '000004', '000005'] %}
+    {# N4 .4N ↔ N3 .2N ↔ N6 .6N; interfaceUpfInfoList required for SMF UPF graph N3 #}
     {%- for i in conf['upfs']|sort %}
+    {%- set octet = i.split('.')[3]|int %}
+    {%- set slice_n = octet - 40 %}
     - host: {{ i }}
       config:
         enable_usage_reporting: no
-        n3_local_ipv4: {{ n3_addrs[loop.index0] if loop.index0 < (n3_addrs|length) else n3_addrs[0] }}
+        enable_upf_wo_nf_discovery: yes
+        n3_local_ipv4: 10.1.140.{{ 20 + slice_n }}
       upf_info:
+        interfaceUpfInfoList:
+          - interfaceType: "N3"
+            ipv4EndpointAddresses:
+              - 10.1.140.{{ 20 + slice_n }}
+            networkInstance: "access.oai.org"
+          - interfaceType: "N6"
+            ipv4EndpointAddresses:
+              - 10.1.140.{{ 60 + slice_n }}
+            networkInstance: "core.oai.org"
         sNssaiUpfInfoList:
           - sNssai:
               sst: 1
-              sd: "{{ slice_sds[loop.index0] if loop.index0 < (slice_sds|length) else slice_sds[0] }}"
+              sd: "{{ '%06d'|format(slice_n) }}"
             dnnUpfInfoList:
-              - dnn: oai{{ loop.index }}
+              - dnn: oai{{ slice_n }}
     {%- endfor %}"""
     tpl, nsub = re.subn(
         r"  upfs:\n    \{%.*?\{%- endfor %\}",
@@ -169,38 +192,98 @@ def patch_smf_nf_conf(doc: dict) -> None:
     )
     if not nsub:
         raise SystemExit("SMF nf-conf upfs block not found/patched (oai-slice-style)")
+    tpl = re.sub(
+        r"use_local_subscription_info:\s*\w+",
+        "use_local_subscription_info: yes",
+        tpl,
+        count=1,
+    )
     doc["data"]["smf.yaml"] = tpl
 
 
 def patch_amf_nf_conf(doc: dict) -> None:
-    """NRF SMF selection (oai-cn / oai-slice): enable_smf_selection yes with SMF register_nf."""
+    """oai-slice / oai-cn: enable_smf_selection yes with SMF register_nf yes.
+
+    AMF fqdn.nrf must be ClusterIP ``oai-nrf`` (not Multus IP).
+    """
     tpl = quote_snssai_sd(doc["data"]["amf.yaml"])
-    tpl = tpl.replace(
-        "enable_smf_selection: no",
+    tpl = re.sub(
+        r"enable_smf_selection: \w+",
         "enable_smf_selection: yes",
-        1,
+        tpl,
+        count=1,
     )
     doc["data"]["amf.yaml"] = tpl
 
 
 def patch_upf_nf_conf(doc: dict) -> None:
-    """Quote SDs + register with NRF (matches working oai-upf / oai-slice stack)."""
+    """Enable UPF NRF registration (oai-slice style: register_nf.upf yes).
+
+    SMF still uses discover_upf: no + static upfs[] for PFCP; UPF registers
+    its profile with Multus Nnrf (fqdn.nrf = NRF_SBI).
+    """
     tpl = quote_snssai_sd(doc["data"]["upf.yaml"])
-    tpl = tpl.replace("register_nf:\n  upf: 'no'", "register_nf:\n  upf: 'yes'", 1)
+    tpl = re.sub(
+        r"register_nf:\n  upf: '[^']*'",
+        "register_nf:\n  upf: 'yes'",
+        tpl,
+        count=1,
+    )
+    # v2.1+: raise SBI client timeout (v2.0.1 hardcodes ~100ms and ignores this).
+    if "http_request_timeout:" not in tpl:
+        tpl = re.sub(
+            r"(http_version:\s*2\n)",
+            r"\1http_request_timeout: 3000\n",
+            tpl,
+            count=1,
+        )
     doc["data"]["upf.yaml"] = tpl
+
+
+def patch_op_conf_image_tag(doc: dict, key: str, tag: str) -> None:
+    """Pin oaisoftwarealliance/oai-* NF image tag in op-conf jinja blob."""
+    if key not in doc.get("data", {}):
+        return
+    raw = doc["data"][key]
+    raw2, n = re.subn(
+        r"(oaisoftwarealliance/oai-[^:']+):v?[0-9][^'\s]*",
+        rf"\1:{tag}",
+        raw,
+        count=1,
+    )
+    if n:
+        doc["data"][key] = raw2
+
+
+def patch_op_conf_image_ref(doc: dict, key: str, image: str) -> None:
+    """Set full container image ref in op-conf jinja blob (e.g. lab registry SMF)."""
+    if key not in doc.get("data", {}):
+        return
+    raw = doc["data"][key]
+    raw2, n = re.subn(
+        r"image: '[^']*'",
+        f"image: '{image}'",
+        raw,
+        count=1,
+    )
+    if not n:
+        raise SystemExit(f"op-conf {key}: image line not found")
+    doc["data"][key] = raw2
 
 
 def patch_upf_op_conf(doc: dict, smf: str, nrf: str, parent: str) -> None:
     raw = doc["data"]["upf.yaml"]
     raw = re.sub(r"smf: '[^']*'", f"smf: '{smf}'", raw)
     raw = re.sub(r"nrf: '[^']*'", f"nrf: '{nrf}'", raw)
+    # UPF SBI must use Multus n4 (10.1.140.0/24) to reach NRF at 10.1.140.11.
+    raw = re.sub(r"sbi: '[^']*'", "sbi: 'n4'", raw, count=1)
     # Auto-fill Multus parent NIC (enp7s0 on VMs, eno1 on bare-metal, …).
     raw = re.sub(r"parent: '[^']*'", f"parent: '{parent}'", raw, count=1)
     doc["data"]["upf.yaml"] = raw
 
 
-def patch_op_conf_nrf_ip(doc: dict, key: str, nrf: str) -> None:
-    """Point fqdn.nrf at Multus Nnrf IP (not DNS name oai-nrf)."""
+def patch_op_conf_nrf_host(doc: dict, key: str, nrf: str) -> None:
+    """Set fqdn.nrf (oai-nrf for core; Multus IP for UPF — same split as oai-slice)."""
     if key not in doc.get("data", {}):
         return
     raw = doc["data"][key]
@@ -212,13 +295,13 @@ def patch_op_conf_nrf_ip(doc: dict, key: str, nrf: str) -> None:
     )
     if not n:
         raw2, n = re.subn(
-            r"nrf:\s*oai-nrf\b",
+            r"nrf:\s*\S+",
             f"nrf: '{nrf}'",
             raw,
             count=1,
         )
     if not n:
-        raise SystemExit(f"op-conf {key}: fqdn.nrf not found to set Nnrf IP")
+        raise SystemExit(f"op-conf {key}: fqdn.nrf not found")
     doc["data"][key] = raw2
 
 
@@ -290,14 +373,28 @@ def write_utils_configmap(dest_ops: pathlib.Path, nf: str) -> None:
         print(f"  WARN missing utils {src}")
         return
     text = patch_utils_amd64(src.read_text())
-    # Init wait default: Multus Nnrf IP (same as fqdn.nrf in op-conf).
-    text = text.replace(
-        'nrf_svc = "oai-nrf" #default value',
-        f'nrf_svc = "{nrf_sbi}" #default value (Multus Nnrf)',
-    )
+    # Core init: oai-nrf (ClusterIP). UPF init: Multus Nnrf IP (off-central).
+    if nf == "upf":
+        text = text.replace(
+            'nrf_svc = "oai-nrf" #default value',
+            f'nrf_svc = "{nrf_sbi}" #default value (Multus Nnrf)',
+        )
+        text = text.replace(
+            'nrf_svc = "10.1.140.11" #default value (Multus Nnrf)',
+            f'nrf_svc = "{nrf_sbi}" #default value (Multus Nnrf)',
+        )
+    else:
+        text = text.replace(
+            f'nrf_svc = "{nrf_sbi}" #default value (Multus Nnrf)',
+            'nrf_svc = "oai-nrf" #default value',
+        )
+        text = text.replace(
+            'nrf_svc = "10.1.140.11" #default value (Multus Nnrf)',
+            'nrf_svc = "oai-nrf" #default value',
+        )
     text = text.replace(
         "until {URL}; do echo waiting for oai-nrf; sleep 1; done",
-        f"until {{URL}}; do echo waiting for nrf svc {{nrf_svc}}; sleep 1; done",
+        "until {URL}; do echo waiting for nrf svc {nrf_svc}; sleep 1; done",
     )
     dump(
         {
@@ -369,10 +466,17 @@ def copy_nf(dest_ops: pathlib.Path, nf: str, watch_ns: str, *, cluster: str) -> 
             patch_amf_nf_conf(doc)
         if nf == "upf" and kind == "nf-conf":
             patch_upf_nf_conf(doc)
+        if kind == "op-conf":
+            if nf == "smf" and smf_image:
+                patch_op_conf_image_ref(doc, f"{nf}.yaml", smf_image)
+            else:
+                patch_op_conf_image_tag(doc, f"{nf}.yaml", oai_image_tag)
         if nf == "upf" and kind == "op-conf":
+            # UPF peers: SMF N4 + Multus Nnrf IP (oai-slice uses MetalLB NRF IP).
             patch_upf_op_conf(doc, smf=smf_n4, nrf=nrf_sbi, parent=parent)
         if nf in ("amf", "smf", "ausf", "udm", "udr") and kind == "op-conf":
-            patch_op_conf_nrf_ip(doc, f"{nf}.yaml", nrf_sbi)
+            # Core SBI: ClusterIP DNS like oai-cn / oai-slice (not Multus IP).
+            patch_op_conf_nrf_host(doc, f"{nf}.yaml", "oai-nrf")
         if nf in ("amf", "smf", "nrf") and kind == "op-conf":
             key = f"{nf}.yaml"
             patch_nf_op_conf_parent(doc, key, parent)
@@ -448,7 +552,11 @@ drop_ops_dirs("central-repo")
 for nf in ALL_NFS:
     copy_nf(dest_central, nf, profile_ns, cluster="central")
     pin_crb_subject(repos / "central-repo" / "cluster", nf, ops_ns)
-print(f"Wrote controllers → {dest_central} (watch ns={profile_ns}, UPF nrf={nrf_sbi})")
+print(
+    f"Wrote controllers → {dest_central} "
+    f"(watch ns={profile_ns}, UPF nrf={nrf_sbi}, oai images={oai_image_tag}, "
+    f"smf={smf_image})"
+)
 
 # Drop accidental operator dump into namespaces/central (cluster name ≠ profile ns).
 if profile_ns != "central":
@@ -478,7 +586,7 @@ for site in ("regional", "edge"):
 print("Done.")
 print(
     f"Next: ./bringup/03_push_to_git_repos/push_git_repos.sh "
-    f"-m 'ina NRF Nnrf {nrf_sbi}; UPF peers use Multus' "
-    f"central regional edge"
+    f"-m 'ina SMF upf_info interfaceUpfInfoList N3/N6' "
+    f"central"
 )
 PY

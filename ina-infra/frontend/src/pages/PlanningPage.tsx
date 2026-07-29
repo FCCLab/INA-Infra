@@ -329,6 +329,72 @@ export default function PlanningPage() {
     setStatus(null);
   }
 
+  async function onRestoreProfileDefaults() {
+    if (!profileOk) {
+      setError("Profile name must be a valid K8s namespace");
+      return;
+    }
+    if (!isExisting || dirtyName) {
+      setError("Select a saved profile (unsaved name changes must be saved first)");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Restore builtin defaults for profile "${profile.name}"?\n\n` +
+          "Resets subnet, max slices, DNN prefix, RAN node, network settings, " +
+          "and 4-slice SLAs. Deploy status is kept. Clears the PL result.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const rec = await api.restoreProfileDefaults(profile.name);
+      applyRecord(rec);
+      setResult(null);
+      setStatus(`Restored profile defaults for “${rec.profile.name}”`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRestoreDefaultSlices() {
+    if (
+      !window.confirm(
+        "Restore the default 4-slice SLAs (CCTV / Physical AI / OTT / IoT)?\n\n" +
+          "Clears the current PL result.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const defs = await api.defaults();
+      setSlices(defs);
+      clearSolve();
+      if (profileOk && isExisting && !dirtyName) {
+        const rec = await api.saveProfile(profile.name, {
+          profile,
+          slices: defs,
+          network: networkIn,
+          updated_at: "",
+        });
+        applyRecord(rec);
+        setStatus(`Restored and saved default slice SLAs for “${profile.name}”`);
+      } else {
+        setStatus("Restored default slice SLAs — Save to persist");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSave() {
     if (!profileOk) {
       setError("Profile name must be a valid K8s namespace");
@@ -660,6 +726,14 @@ export default function PlanningPage() {
             <button type="button" disabled={busy} onClick={onSave}>
               {isExisting && !dirtyName ? "Update" : "Save"}
             </button>
+            <button
+              type="button"
+              disabled={busy || !isExisting || dirtyName || !profileOk}
+              onClick={() => void onRestoreProfileDefaults()}
+              title="Reset profile fields, network settings, and slice SLAs to builtins"
+            >
+              Restore profile defaults
+            </button>
             <button type="button" disabled={busy} onClick={onAddProfile}>
               Add profile
             </button>
@@ -821,6 +895,14 @@ export default function PlanningPage() {
             </span>
           </h2>
           <div className="actions">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onRestoreDefaultSlices()}
+              title="Reset to default 4-slice SLAs (CCTV / Physical AI / OTT / IoT)"
+            >
+              Restore slice defaults
+            </button>
             <button
               type="button"
               disabled={slices.length >= profile.max_slices}

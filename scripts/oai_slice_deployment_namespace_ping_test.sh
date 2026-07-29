@@ -8,12 +8,14 @@
 #
 # Default target: mgmt-0 10.1.132.200 (same as scripts/test_ping.py).
 # Use --dnn for per-slice DNN GW ${DNN_PREFIX}.{N}.1 (default DNN_PREFIX=10.1).
-# For ina-infra profile UEs, prefer ./scripts/ina-infra-ping-test.sh (ns + DNN defaults).
+# Use --n6 for per-slice UPF N6 (${N6_PREFIX}.$((N6_BASE+N)) or upf_slice_n6).
+# For ina-infra profile UEs, prefer ./scripts/ina-infra-ping-test.sh (ns + DNN/N6 defaults).
 #
 # Usage:
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --ue1 --ue3 --count 10
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --dnn
+#   ./scripts/oai_slice_deployment_namespace_ping_test.sh --n6
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --host 10.1.132.11
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --tmux   # forever panes via test_ping.py
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh -t       # same as --tmux
@@ -21,6 +23,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=cluster_lib.sh
+source "$SCRIPT_DIR/cluster_lib.sh"
 
 SSH_CFG="${SSH_CFG:-$REPO_ROOT/utils/ssh_config/config}"
 EDGE_HOST="${EDGE_HOST:-edge-0}"
@@ -29,7 +33,10 @@ SLICE_COUNT="${SLICE_COUNT:-${OAI_SLICE_COUNT:-5}}"
 DNN_PREFIX="${DNN_PREFIX:-10.1}"
 PING_COUNT="${PING_COUNT:-5}"
 PING_HOST="${PING_HOST:-${OAI_TEST_HOST:-10.1.132.200}}"
+N6_PREFIX="${N6_PREFIX:-}"
+N6_BASE="${N6_BASE:-60}"
 USE_DNN=0
+USE_N6=0
 TMUX_MODE=0
 SELECTED=()
 
@@ -41,10 +48,11 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage 0 ;;
-    --dnn) USE_DNN=1; shift ;;
+    --dnn) USE_DNN=1; USE_N6=0; shift ;;
+    --n6) USE_N6=1; USE_DNN=0; shift ;;
     -t|--tmux) TMUX_MODE=1; shift ;;
     --count) PING_COUNT="${2:?}"; shift 2 ;;
-    --host) PING_HOST="${2:?}"; USE_DNN=0; shift 2 ;;
+    --host) PING_HOST="${2:?}"; USE_DNN=0; USE_N6=0; shift 2 ;;
     --ue1|--ue2|--ue3|--ue4|--ue5)
       SELECTED+=("${1#--ue}")
       shift
@@ -61,7 +69,12 @@ done
 if [[ "$TMUX_MODE" == "1" ]]; then
   args=(--tmux --ue-ns "$SLICE_NS" --dnn-prefix "$DNN_PREFIX")
   [[ "$USE_DNN" == "1" ]] && args+=(--dnn)
-  [[ -n "${PING_HOST}" && "$USE_DNN" != "1" ]] && args+=(--host "$PING_HOST")
+  if [[ "$USE_N6" == "1" ]]; then
+    args+=(--n6)
+    [[ -n "$N6_PREFIX" ]] && args+=(--n6-prefix "$N6_PREFIX" --n6-base "$N6_BASE")
+  elif [[ -n "${PING_HOST}" && "$USE_DNN" != "1" ]]; then
+    args+=(--host "$PING_HOST")
+  fi
   for n in "${SELECTED[@]+"${SELECTED[@]}"}"; do
     args+=(--ue"$n")
   done
@@ -108,7 +121,13 @@ ue_oaitun() {
 
 target_for() {
   local n="$1"
-  if [[ "$USE_DNN" == "1" ]]; then
+  if [[ "$USE_N6" == "1" ]]; then
+    if [[ -n "$N6_PREFIX" ]]; then
+      printf '%s.%s' "$N6_PREFIX" "$((N6_BASE + n))"
+    else
+      upf_slice_n6 "$n"
+    fi
+  elif [[ "$USE_DNN" == "1" ]]; then
     printf '%s.%s.1' "$DNN_PREFIX" "$n"
   else
     printf '%s' "$PING_HOST"
@@ -116,7 +135,13 @@ target_for() {
 }
 
 echo "==> ping test (ns=${SLICE_NS} edge=${EDGE_HOST})"
-if [[ "$USE_DNN" == "1" ]]; then
+if [[ "$USE_N6" == "1" ]]; then
+  if [[ -n "$N6_PREFIX" ]]; then
+    echo "    target=UPF N6 ${N6_PREFIX}.$((N6_BASE+1))..${N6_PREFIX}.$((N6_BASE+SLICE_COUNT))  count=${PING_COUNT}"
+  else
+    echo "    target=UPF N6 upf_slice_n6(N)  count=${PING_COUNT}"
+  fi
+elif [[ "$USE_DNN" == "1" ]]; then
   echo "    target=DNN GW ${DNN_PREFIX}.{N}.1  count=${PING_COUNT}"
 else
   echo "    target=${PING_HOST}  count=${PING_COUNT}"

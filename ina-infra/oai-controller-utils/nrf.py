@@ -289,8 +289,45 @@ def create_deployment(name: str=None,
             ready = status['ready_replicas'] is not None and int(status['ready_replicas'])
             _type = status['conditions'][0]['type']
     except ApiException as e:
-        logger.error(f"Exception with reason {e.reason}, code {e.status} in creating deployment {name} in namespace {namespace}" )
-        raise kopf.PermanentError(f"Can not create Deployment {name} in namespace {namespace} reason {e.reason}")
+        if getattr(e, 'status', None) == 409 or getattr(e, 'reason', None) == 'Conflict':
+            logger.warning(f"Deployment {name} already exists in namespace {namespace}; reconciling")
+            existing = api.read_namespaced_deployment(name=name, namespace=namespace)
+            cur_image = None
+            for c in existing.spec.template.spec.containers:
+                if c.name == name:
+                    cur_image = c.image
+                    break
+            if cur_image is None:
+                cur_image = existing.spec.template.spec.containers[0].image
+            if cur_image != image:
+                logger.info(f"Updating deployment {name} image {cur_image} -> {image}")
+                for c in existing.spec.template.spec.containers:
+                    if c.name == name:
+                        c.image = image
+                        break
+                else:
+                    existing.spec.template.spec.containers[0].image = image
+                obj = api.replace_namespaced_deployment(
+                    name=name, namespace=namespace, body=existing
+                ).to_dict()
+            else:
+                obj = existing.to_dict()
+            status = obj['status']
+            creation_timestamp = obj['metadata']['creation_timestamp']
+            available_replicas = status.get('available_replicas')
+            if 'generation' in obj['metadata'].keys():
+                generation = obj['metadata']['generation']
+            observed_generation = status.get('observed_generation', 0)
+            if status.get('conditions') is not None and len(status['conditions']) > 0:
+                last_transition_time = status['conditions'][0]['last_transition_time']
+                message = status['conditions'][0]['message']
+                reason = status['conditions'][0]['reason']
+                _status = status['conditions'][0]['status']
+                ready = status.get('ready_replicas') is not None and int(status['ready_replicas'])
+                _type = status['conditions'][0]['type']
+        else:
+            logger.error(f"Exception with reason {e.reason}, code {e.status} in creating deployment {name} in namespace {namespace}" )
+            raise kopf.PermanentError(f"Can not create Deployment {name} in namespace {namespace} reason {e.reason}")
 
 
     output = {'last_transition_time': last_transition_time,

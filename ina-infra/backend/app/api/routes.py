@@ -196,6 +196,15 @@ def save_profile(name: str, body: ProfileRecord):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/profiles/{name}/restore-defaults", response_model=ProfileRecord)
+def restore_profile_defaults(name: str):
+    """Reset profile identity, slices, and network to builtins (keeps name + deploy state)."""
+    try:
+        return profile_store.restore_profile_defaults(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.delete("/profiles/{name}")
 def delete_profile(name: str):
     deleted = profile_store.delete_profile(name)
