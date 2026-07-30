@@ -136,6 +136,8 @@ Repeat per VM (stable MACs in `setup_mgmt_bridge.sh`). Site NICs: [`bringup/00_t
 | ue | `ue-0` | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | `https://10.1.132.240:30443` |
 | ue | `ue-1` | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | — |
 
+Physical edge workers (`edge-2` `.132`, `edge-3` `.133`, `usrp` `.134` on site L2; SSH off-`.132`): [ip.md](ip.md) · [docs/topology.md](../../docs/topology.md) · [`workloads/netplan/`](../../workloads/netplan/).
+
 K8s API (`:6443`) uses the **`.137`** address on control-plane nodes. Default route on all nodes: **`via 10.1.132.1`**. DNS: **`10.1.132.200`** (Pi-hole on `mgmt-0`).
 
 Full VIP and pool tables: [ip.md](ip.md). SSH aliases: [`utils/ssh_config/config`](../../utils/ssh_config/config).

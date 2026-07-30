@@ -71,7 +71,7 @@ Host gh82
     IdentityFile ~/.ssh/id_rsa
 
 Host usrp
-    HostName 10.1.132.13
+    HostName 10.1.101.19
     User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa

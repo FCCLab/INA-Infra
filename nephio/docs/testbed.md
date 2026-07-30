@@ -14,8 +14,10 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 | mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:30443` · fwd `:8443` | `http://10.1.132.11` | `mgmt@mgmt` | `~/.kube/config` |
 | central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:30443` · fwd `:8443` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
 | regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:30443` · fwd `:8443` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
-| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
+| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` (+ physical `edge-2`/`edge-3`/`usrp`) | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
 | ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:30443` · fwd `:8443` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
+
+**Physical edge workers** (VLAN 137; netplan [`workloads/netplan/*/55-k8s.yaml`](../../workloads/netplan/)): `edge-2` `10.1.137.132` (`eno1`), `edge-3` `10.1.137.133` (`ens12f0`), `usrp` `10.1.137.134` (`enp4s0f0`). SSH: see [`utils/ssh_config/config`](../../utils/ssh_config/config). Detail: [ip.md](ip.md) · [docs/topology.md](../../docs/topology.md).
 
 **Dashboard:** all clusters use GitOps **NodePort 30443** on the control-plane mgmt IP (no MetalLB VIP). Run `./scripts/kubectl_forward.sh` for `:8443` if NodePort is blocked. Render with `./scripts/render_dashboard_gitops.sh`; tokens: `./scripts/get_dashboard_key.sh`.
 

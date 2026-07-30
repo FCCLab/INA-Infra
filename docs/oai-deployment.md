@@ -112,7 +112,7 @@ Single monolithic gNodeB (`oai-gnb`) pinned to the physical `usrp` worker node o
 | gNB | `usrp` | N2/N3 | `10.1.139.114` | `enp4s0f0` |
 | UE | `ue-0` | RFsim | `10.1.139.161` | `enp7s0` |
 
-> **Important**: The `usrp` node (physical hardware) uses `enp4s0f0` for macvlan, while all VM nodes (`edge-0`, `regional-0`, `ue-0`) use `enp7s0`.
+> **Important**: The `usrp` node (physical hardware) uses `enp4s0f0` for site K8s (`10.1.137.134`) and macvlan, while all VM nodes (`edge-0`, `regional-0`, `ue-0`) use `enp7s0`. Netplan: [`workloads/netplan/usrp/55-k8s.yaml`](../workloads/netplan/usrp/55-k8s.yaml).
 
 ---
 

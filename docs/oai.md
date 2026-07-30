@@ -6,7 +6,7 @@ OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip.md]
 
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
-Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). For UPF N6 → mgmt (`10.1.132.0/24`), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on site CPs (**central-0**, **regional-0**, **edge-0**). Per-site GWs on shared L2: **`.1` / `.2` / `.3`**. Ping/throughput default to mgmt-0 **`10.1.132.200`**.
+Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). Node identity for **usrp** is site IP **`10.1.137.134/24`** on `enp4s0f0` ([`workloads/netplan/usrp/55-k8s.yaml`](../workloads/netplan/usrp/55-k8s.yaml)); not `10.1.137.13` (`br-int-ue`). For UPF N6 → mgmt (`10.1.132.0/24`), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on site CPs (**central-0**, **regional-0**, **edge-0**). Per-site GWs on shared L2: **`.1` / `.2` / `.3`**. Ping/throughput default to mgmt-0 **`10.1.132.200`**.
 
 **Cluster slices** (50 IPs each):
 

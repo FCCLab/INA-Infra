@@ -6,7 +6,7 @@ Related detail: [nephio/docs/mgmt.md](../nephio/docs/mgmt.md) · [nephio/docs/ip
 
 ## Overview
 
-Five Kubernetes clusters (mgmt + central + regional + edge + ue), each 2 nodes. Workload VMs sit on two L2 planes:
+Five Kubernetes clusters (mgmt + central + regional + edge + ue). Workload VMs are 2 nodes each; **edge** also has physical workers `edge-2`, `edge-3`, and `usrp`. Workload VMs sit on two L2 planes:
 
 | Plane | Guest NIC | Host bridge | Subnet(s) |
 |-------|-----------|-------------|-----------|
@@ -15,7 +15,7 @@ Five Kubernetes clusters (mgmt + central + regional + edge + ue), each 2 nodes. 
 
 Sites are chained by Alpine **vm-sw** L2 switch VMs over `br-ext-*`. Physical uplinks on **`eno1`** via **802.1Q VLANs**: **`eno1.132` → `br-mgmt`**, **`eno1.135` → `br-int-central`**, **`eno1.136` → `br-int-regional`**, **`eno1.137` → `br-int-edge`**. **`eno2`** is unused. **`br-int-ue`** stays host-only.
 
-### Physical NICs → bridges → VMs
+### Physical NICs → bridges → VMs / bare metal
 
 ```mermaid
 flowchart TB
@@ -55,6 +55,12 @@ flowchart TB
     SU["vm-sw-ue"]
   end
 
+  subgraph bare["Bare metal on VLAN 137 (upstream switch)"]
+    E2["edge-2<br/>eno1 .137.132<br/>SSH .101.18"]
+    E3["edge-3<br/>ens12f0 .137.133<br/>SSH 172.27.2.22"]
+    USRP["usrp<br/>enp4s0f0 .137.134<br/>SSH .101.19"]
+  end
+
   v132 --- BM
   v135 --- BC
   v136 --- BR
@@ -72,14 +78,18 @@ flowchart TB
   BU --- U
   BU --- SU
 
+  v137 -.->|same L2 via switch| E2
+  v137 -.->|same L2 via switch| E3
+  v137 -.->|same L2 via switch| USRP
+
   SC --- CR --- SR
   SR --- RE --- SE
   SE --- EU --- SU
 ```
 
 ```text
-                    EXTERNAL                              HYPERVISOR                         GUESTS
-                    --------                              ----------                         ------
+                    EXTERNAL                              HYPERVISOR                         GUESTS / BARE METAL
+                    --------                              ----------                         -------------------
 
   mgmt LAN .132 ──────── eno1.132 ── br-mgmt ──────────┬── mgmt-0/1      enp1s0
        GW .1 ─────────────┘ (VLAN 132)    │               ├── central-0/1  enp1s0
@@ -92,12 +102,17 @@ flowchart TB
   regional wire ──────── eno1.136 ── br-int-regional ───┬── regional-0/1 enp7s0
                                          │               └── vm-sw-regional
   edge wire ──────────── eno1.137 ── br-int-edge ───────┬── edge-0/1     enp7s0
-                                         │               └── vm-sw-edge
+       (VLAN 137) ──┬────┘               │               └── vm-sw-edge
+                    │
+                    ├── edge-2  eno1      .137.132   (SSH 10.1.101.18)
+                    ├── edge-3  ens12f0   .137.133   (SSH 172.27.2.22)
+                    └── usrp    enp4s0f0  .137.134   (SSH 10.1.101.19)
 
   (no physical NIC) ─────────────── br-int-ue ───────────┬── ue-0/1       enp7s0
                                                          └── vm-sw-ue
 
-  host WAN .101 ──────── eno3 ──────── (hypervisor default route only)
+  host WAN .101 ──────── eno3 ──────── (hypervisor default route only;
+                                        also SSH path for edge-2 / usrp)
 
   Site chain (L2 via vm-sw, host-only):
     vm-sw-central ── br-ext-cr ── vm-sw-regional ── br-ext-re ── vm-sw-edge ── br-ext-eu ── vm-sw-ue
@@ -105,14 +120,14 @@ flowchart TB
 
 Live bridge ports:
 
-| Bridge | Physical uplink | Libvirt ports (examples) |
-|--------|-----------------|--------------------------|
-| `br-mgmt` | **`eno1.132`** (VLAN 132) | all 10 Nephio `enp1s0` (`vnet221`…`vnet237`) |
-| `br-int-central` | **`eno1.135`** (VLAN 135) | Central-0/1 + `vm-sw-central` |
-| `br-int-regional` | **`eno1.136`** (VLAN 136) | Regional-0/1 + `vm-sw-regional` |
-| `br-int-edge` | **`eno1.137`** (VLAN 137) | Edge-0/1 + `vm-sw-edge` |
-| `br-int-ue` | — | UE-0/1 + `vm-sw-ue` |
-| `br-ext-cr` / `re` / `eu` | — | vm-sw peer links only |
+| Bridge | Physical uplink | Libvirt ports (examples) | VLAN peers (not on hypervisor) |
+|--------|-----------------|--------------------------|--------------------------------|
+| `br-mgmt` | **`eno1.132`** (VLAN 132) | all 10 Nephio `enp1s0` (`vnet221`…`vnet237`) | — |
+| `br-int-central` | **`eno1.135`** (VLAN 135) | Central-0/1 + `vm-sw-central` | — |
+| `br-int-regional` | **`eno1.136`** (VLAN 136) | Regional-0/1 + `vm-sw-regional` | — |
+| `br-int-edge` | **`eno1.137`** (VLAN 137) | Edge-0/1 + `vm-sw-edge` | **`edge-2`**, **`edge-3`**, **`usrp`** (site `.137`) |
+| `br-int-ue` | — | UE-0/1 + `vm-sw-ue` | — |
+| `br-ext-cr` / `re` / `eu` | — | vm-sw peer links only | — |
 
 ## Clusters and node IPs
 
@@ -129,9 +144,21 @@ Live bridge ports:
 | ue | CP | `ue-0` | `Nephio-UE-0` | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | API `.137:6443` · dash `.132:30443` |
 | ue | worker | `ue-1` | `Nephio-UE-1` | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | — |
 
-- Default route: `via 10.1.132.1` · DNS: `10.1.132.200` (Pi-hole on `mgmt-0`)
+### Physical edge workers (bare metal)
+
+Extra edge-cluster workers on VLAN 137 (same L2 as `br-int-edge`). Site netplan only under [`workloads/netplan/<host>/55-k8s.yaml`](../workloads/netplan/); bootstrap with [`workloads/wl_setup_ssh_mgmt_ip.sh`](../workloads/wl_setup_ssh_mgmt_ip.sh). SSH is via a separate NIC (not `10.1.132.0/24`).
+
+| Host | Role | SSH | Site / K8s NIC | Site `.137` | Netplan |
+|------|------|-----|----------------|-------------|---------|
+| `edge-2` | worker | `10.1.101.18` | `eno1` | `10.1.137.132` | [`edge-2/55-k8s.yaml`](../workloads/netplan/edge-2/55-k8s.yaml) |
+| `edge-3` | worker | `172.27.2.22` | `ens12f0` | `10.1.137.133` | [`edge-3/55-k8s.yaml`](../workloads/netplan/edge-3/55-k8s.yaml) |
+| `usrp` | worker (OAI CU-CP/DU/UEs) | `10.1.101.19` | `enp4s0f0` | `10.1.137.134` | [`usrp/55-k8s.yaml`](../workloads/netplan/usrp/55-k8s.yaml) |
+
+Do not confuse **`usrp` `10.1.137.134`** with hypervisor bridge **`br-int-ue` `10.1.137.13`**.
+
+- Default route (VMs): `via 10.1.132.1` · DNS: `10.1.132.200` (Pi-hole on `mgmt-0`)
 - SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config)
-- Netplan: [`scripts/setup_ip.sh`](../scripts/setup_ip.sh)
+- VM netplan: [`scripts/setup_ip.sh`](../scripts/setup_ip.sh)
 
 ## External interfaces (physical NICs)
 

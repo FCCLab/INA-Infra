@@ -109,7 +109,17 @@ Dashboard login token: [scripts/get_dashboard_key.sh](../../scripts/get_dashboar
 | ue | `ue-0` | 10.1.132.240 | 10.1.137.140 | 10.1.138.140 | [https://10.1.137.140:6443](https://10.1.137.140:6443) |
 | ue | `ue-1` | 10.1.132.241 | 10.1.137.141 | 10.1.138.141 | — |
 
-SSH aliases: [utils/ssh_config/config](../../utils/ssh_config/config) (mgmt `.132` addresses). Default route: `via 10.1.132.1`; DNS: `10.1.132.200`.
+**Physical edge workers** (bare metal; site NIC ≠ `enp7s0`; SSH not on `.132`):
+
+| Cluster | Host | SSH | Site NIC | Site / K8s (`.137`) | Netplan |
+|---------|------|-----|----------|---------------------|---------|
+| edge | `edge-2` | 10.1.101.18 | `eno1` | 10.1.137.132 | [workloads/netplan/edge-2/55-k8s.yaml](../../workloads/netplan/edge-2/55-k8s.yaml) |
+| edge | `edge-3` | 172.27.2.22 | `ens12f0` | 10.1.137.133 | [workloads/netplan/edge-3/55-k8s.yaml](../../workloads/netplan/edge-3/55-k8s.yaml) |
+| edge | `usrp` | 10.1.101.19 | `enp4s0f0` | 10.1.137.134 | [workloads/netplan/usrp/55-k8s.yaml](../../workloads/netplan/usrp/55-k8s.yaml) |
+
+`usrp` site IP is **`10.1.137.134`** (not `10.1.137.13` — that is `br-int-ue`). Macvlan for OAI still uses `enp4s0f0` on `10.1.139.0/24` ([oai.md](../../docs/oai.md)).
+
+SSH aliases: [utils/ssh_config/config](../../utils/ssh_config/config) (mgmt `.132` addresses; physical hosts use their SSH IPs above). Default route (VMs): `via 10.1.132.1`; DNS: `10.1.132.200`.
 
 Reach workload APIs on `10.1.137.0/24`, MetalLB VIPs on `10.1.138.0/24`, from the operator network via routing, or use dashboard port-forward on `10.1.132.x` ([scripts/kubectl_forward.sh](../../scripts/kubectl_forward.sh)).
 
@@ -140,7 +150,8 @@ Reach workload APIs on `10.1.137.0/24`, MetalLB VIPs on `10.1.138.0/24`, from th
 | Nephio WorkloadCluster registration | [configsync/setup_api_of_clusters.sh](../../configsync/setup_api_of_clusters.sh) |
 | OpenSpeedTest | [scripts/install_open_speed_test.sh](../../scripts/install_open_speed_test.sh) |
 | Dashboard bearer token | [scripts/get_dashboard_key.sh](../../scripts/get_dashboard_key.sh) |
-| Site / mgmt netplan | [scripts/setup_ip.sh](../../scripts/setup_ip.sh) |
+| Site / mgmt netplan (VMs) | [scripts/setup_ip.sh](../../scripts/setup_ip.sh) |
+| Physical worker netplan + SSH | [workloads/wl_setup_ssh_mgmt_ip.sh](../../workloads/wl_setup_ssh_mgmt_ip.sh) · [workloads/netplan/](../../workloads/netplan/) |
 | Reset clusters | [scripts/reset_clusters.sh](../../scripts/reset_clusters.sh) |
 | Passwordless sudo | [scripts/set_passwordless.sh](../../scripts/set_passwordless.sh) |
 | Docker registry (push/list) | [scripts/push-image-to-registry.sh](../../scripts/push-image-to-registry.sh) · [scripts/list-registry-images.sh](../../scripts/list-registry-images.sh) |
