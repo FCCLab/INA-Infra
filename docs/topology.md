@@ -10,26 +10,33 @@ Five Kubernetes clusters (mgmt + central + regional + edge + ue), each 2 nodes. 
 
 | Plane | Guest NIC | Host bridge | Subnet(s) |
 |-------|-----------|-------------|-----------|
-| **Mgmt** | `enp1s0` | `br-mgmt` (`eno1` uplink) | `10.1.132.0/24` — SSH, default route, DNS |
+| **Mgmt** | `enp1s0` | `br-mgmt` (`eno1.132` VLAN uplink) | `10.1.132.0/24` — SSH, default route, DNS |
 | **Site** | `enp7s0` | `br-int-<site>` | `10.1.137.0/24` (K8s) + `10.1.138.0/24` (MetalLB) |
 
-Sites are chained by Alpine **vm-sw** L2 switch VMs over `br-ext-*`. Physical uplinks: **`eno1` → `br-mgmt`**, **`eno2` → `br-int-edge`** (L2 bridge ports, not routed through a VM).
+Sites are chained by Alpine **vm-sw** L2 switch VMs over `br-ext-*`. Physical uplinks on **`eno1`** via **802.1Q VLANs**: **`eno1.132` → `br-mgmt`**, **`eno1.135` → `br-int-central`**, **`eno1.136` → `br-int-regional`**, **`eno1.137` → `br-int-edge`**. **`eno2`** is unused. **`br-int-ue`** stays host-only.
 
 ### Physical NICs → bridges → VMs
 
 ```mermaid
 flowchart TB
-  subgraph phy["Physical NICs"]
-    eno1["eno1<br/>mgmt uplink"]
-    eno2["eno2<br/>edge uplink"]
+  subgraph phy["Physical NIC eno1 (802.1Q)"]
+    eno1["eno1<br/>trunk parent"]
+    v132["eno1.132<br/>VLAN 132"]
+    v135["eno1.135<br/>VLAN 135"]
+    v136["eno1.136<br/>VLAN 136"]
+    v137["eno1.137<br/>VLAN 137"]
     eno3["eno3<br/>host WAN only<br/>10.1.101.0/24"]
+    eno1 --- v132
+    eno1 --- v135
+    eno1 --- v136
+    eno1 --- v137
   end
 
   subgraph bridges["Linux bridges on hypervisor"]
-    BM["br-mgmt<br/>10.1.132.10/24<br/>ports: eno1 + all VM enp1s0"]
-    BC["br-int-central<br/>10.1.137.10<br/>Central-0/1 + vm-sw-central"]
-    BR["br-int-regional<br/>10.1.137.11<br/>Regional-0/1 + vm-sw-regional"]
-    BE["br-int-edge<br/>10.1.137.12<br/>ports: eno2 + Edge-0/1 + vm-sw-edge"]
+    BM["br-mgmt<br/>10.1.132.10/24<br/>ports: eno1.132 + all VM enp1s0"]
+    BC["br-int-central<br/>10.1.137.10<br/>ports: eno1.135 + Central-0/1 + vm-sw-central"]
+    BR["br-int-regional<br/>10.1.137.11<br/>ports: eno1.136 + Regional-0/1 + vm-sw-regional"]
+    BE["br-int-edge<br/>10.1.137.12<br/>ports: eno1.137 + Edge-0/1 + vm-sw-edge"]
     BU["br-int-ue<br/>10.1.137.13<br/>UE-0/1 + vm-sw-ue"]
     CR["br-ext-cr .20"]
     RE["br-ext-re .21"]
@@ -48,8 +55,10 @@ flowchart TB
     SU["vm-sw-ue"]
   end
 
-  eno1 --- BM
-  eno2 --- BE
+  v132 --- BM
+  v135 --- BC
+  v136 --- BR
+  v137 --- BE
   eno3 -.->|not in Nephio bridges| eno3
 
   BM --- ALL
@@ -72,19 +81,19 @@ flowchart TB
                     EXTERNAL                              HYPERVISOR                         GUESTS
                     --------                              ----------                         ------
 
-  mgmt LAN .132 ──────── eno1 ──────── br-mgmt ──────────┬── mgmt-0/1      enp1s0
-       GW .1 ─────────────┘              │               ├── central-0/1  enp1s0
+  mgmt LAN .132 ──────── eno1.132 ── br-mgmt ──────────┬── mgmt-0/1      enp1s0
+       GW .1 ─────────────┘ (VLAN 132)    │               ├── central-0/1  enp1s0
                                          │               ├── regional-0/1 enp1s0
                                          │               ├── edge-0/1     enp1s0
                                          │               └── ue-0/1       enp1s0
 
-  edge cable ─────────── eno2 ──────── br-int-edge ──────┬── edge-0/1     enp7s0
-                                         │               └── vm-sw-edge   inf-internal
-                                         │                      │
-  (no physical NIC) ─────────────── br-int-central ──────┬── central-0/1  enp7s0
+  central wire ───────── eno1.135 ── br-int-central ────┬── central-0/1  enp7s0
                                          │               └── vm-sw-central
-  (no physical NIC) ─────────────── br-int-regional ─────┬── regional-0/1 enp7s0
+  regional wire ──────── eno1.136 ── br-int-regional ───┬── regional-0/1 enp7s0
                                          │               └── vm-sw-regional
+  edge wire ──────────── eno1.137 ── br-int-edge ───────┬── edge-0/1     enp7s0
+                                         │               └── vm-sw-edge
+
   (no physical NIC) ─────────────── br-int-ue ───────────┬── ue-0/1       enp7s0
                                                          └── vm-sw-ue
 
@@ -96,12 +105,12 @@ flowchart TB
 
 Live bridge ports:
 
-| Bridge | Physical | Libvirt ports (examples) |
-|--------|----------|--------------------------|
-| `br-mgmt` | **`eno1`** | all 10 Nephio `enp1s0` (`vnet221`…`vnet237`) |
-| `br-int-central` | — | Central-0/1 + `vm-sw-central` |
-| `br-int-regional` | — | Regional-0/1 + `vm-sw-regional` |
-| `br-int-edge` | **`eno2`** | Edge-0/1 + `vm-sw-edge` |
+| Bridge | Physical uplink | Libvirt ports (examples) |
+|--------|-----------------|--------------------------|
+| `br-mgmt` | **`eno1.132`** (VLAN 132) | all 10 Nephio `enp1s0` (`vnet221`…`vnet237`) |
+| `br-int-central` | **`eno1.135`** (VLAN 135) | Central-0/1 + `vm-sw-central` |
+| `br-int-regional` | **`eno1.136`** (VLAN 136) | Regional-0/1 + `vm-sw-regional` |
+| `br-int-edge` | **`eno1.137`** (VLAN 137) | Edge-0/1 + `vm-sw-edge` |
 | `br-int-ue` | — | UE-0/1 + `vm-sw-ue` |
 | `br-ext-cr` / `re` / `eu` | — | vm-sw peer links only |
 
@@ -126,83 +135,93 @@ Live bridge ports:
 
 ## External interfaces (physical NICs)
 
-Two physical uplinks leave the hypervisor; the rest of the lab stays on host-internal bridges.
+One trunk NIC (**`eno1`**) carries four VLAN uplinks; **`eno2`** is unused. Host WAN stays on **`eno3`**.
 
-| NIC | Bridge | External role | Live state |
-|-----|--------|---------------|------------|
-| **`eno1`** | `br-mgmt` | Mgmt LAN `10.1.132.0/24` (gateway `10.1.132.1`) | enslaved to `br-mgmt` |
-| **`eno2`** | `br-int-edge` | Optional edge site wire (same L2 as `.137`/`.138` on edge) | enslaved to `br-int-edge` |
-| **`eno3`** | — | Host internet / DHCP (`10.1.101.0/24`, default route) | **not** in the Nephio bridges |
-| `eno4` | — | unused for this topology | — |
+| NIC / VLAN | Bridge | External role | VLAN ID |
+|------------|--------|---------------|---------|
+| **`eno1.132`** | `br-mgmt` | Mgmt LAN `10.1.132.0/24` (gateway `10.1.132.1`) | 132 |
+| **`eno1.135`** | `br-int-central` | Central site L2 (`.137`/`.138`) | 135 |
+| **`eno1.136`** | `br-int-regional` | Regional site L2 | 136 |
+| **`eno1.137`** | `br-int-edge` | Edge site L2 | 137 |
+| **`eno1`** | — | Trunk parent (no IP, not a bridge port) | — |
+| **`eno2`** | — | Unused | — |
+| **`eno3`** | — | Host internet / DHCP (`10.1.101.0/24`, default route) | — |
 
 ```text
   EXTERNAL                         HOST                              GUEST
   --------                         ----                              -----
 
-  mgmt LAN 10.1.132.0/24  ── eno1 ── br-mgmt ── vnet* ── enp1s0   (SSH, default route, DNS)
+  mgmt LAN 10.1.132.0/24  ── eno1.132 ── br-mgmt ── vnet* ── enp1s0   (SSH, default route, DNS)
        GW 10.1.132.1 ───────┘
 
-  edge wire (optional)    ── eno2 ── br-int-edge ── vnet* ── enp7s0  (Edge K8s / MetalLB)
-                                      │
-                                 vm-sw-edge ── br-ext-* ── other sites (host-only)
+  central wire (VLAN 135) ── eno1.135 ── br-int-central ── vnet* ── enp7s0
+  regional wire (VLAN 136) ─ eno1.136 ── br-int-regional ── vnet* ── enp7s0
+  edge wire (VLAN 137)     ── eno1.137 ── br-int-edge ── vnet* ── enp7s0
 
   host WAN 10.1.101.0/24  ── eno3 ── (hypervisor only; VMs do not use this)
 ```
 
 ```mermaid
 flowchart LR
-  subgraph wire["Physical cables"]
-    MGMT_LAN["mgmt LAN<br/>10.1.132.0/24<br/>GW .1"]
-    EDGE_WIRE["edge site cable<br/>optional"]
-    WAN["host WAN<br/>eno3 / 10.1.101.0/24"]
+  subgraph wire["Physical trunk eno1"]
+    MGMT_LAN["mgmt LAN<br/>VLAN 132"]
+    CENTRAL["central site<br/>VLAN 135"]
+    REGIONAL["regional site<br/>VLAN 136"]
+    EDGE["edge site<br/>VLAN 137"]
+    WAN["host WAN<br/>eno3"]
   end
 
-  subgraph nics["Hypervisor NICs"]
-    eno1["eno1"]
-    eno2["eno2"]
-    eno3["eno3"]
+  subgraph vlans["802.1Q on eno1"]
+    v132["eno1.132"]
+    v135["eno1.135"]
+    v136["eno1.136"]
+    v137["eno1.137"]
   end
 
   subgraph brs["Linux bridges"]
-    BM["br-mgmt<br/>10.1.132.10"]
-    BE["br-int-edge<br/>10.1.137.12"]
+    BM["br-mgmt"]
+    BC["br-int-central"]
+    BR["br-int-regional"]
+    BE["br-int-edge"]
   end
 
   subgraph guests["Guests"]
     ALL["all VMs enp1s0"]
-    EDGE["Edge VMs enp7s0"]
+    SITE["site VMs enp7s0"]
   end
 
-  MGMT_LAN --- eno1 --- BM --- ALL
-  EDGE_WIRE --- eno2 --- BE --- EDGE
-  WAN --- eno3
+  MGMT_LAN --- v132 --- BM --- ALL
+  CENTRAL --- v135 --- BC --- SITE
+  REGIONAL --- v136 --- BR --- SITE
+  EDGE --- v137 --- BE --- SITE
+  WAN --- eno3["eno3"]
 ```
 
 **How VMs reach the outside world**
 
 1. Guest default route is `via 10.1.132.1` on `enp1s0`.
-2. That traffic hits `br-mgmt`, then leaves on **`eno1`** to the external mgmt switch/router.
-3. Site traffic (`enp7s0` / `.137`/`.138`) stays on the vm-sw fabric unless a peer is plugged into **`eno2`** (edge L2 only).
+2. That traffic hits `br-mgmt`, then leaves on **`eno1.132`** (VLAN 132) to the external mgmt switch/router.
+3. Site traffic (`enp7s0` / `.137`/`.138`) exits each site bridge on the matching **`eno1.{135,136,137}`** VLAN when wired externally.
 4. The hypervisor’s own internet path is **`eno3`** (`default via 10.1.101.1`) — separate from the Nephio VM path.
 
-Central / regional / UE site bridges have **no** physical NIC — they only interconnect through vm-sw + `br-ext-*` on the host.
+**`br-int-ue`** has no physical VLAN uplink — UE site traffic stays on the vm-sw fabric unless routed elsewhere.
 
-Scripts: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh) (`eno1` → `br-mgmt`), [`scripts/br-int-edge_2_eno2.sh`](../scripts/br-int-edge_2_eno2.sh) (`eno2` → `br-int-edge`).
+Scripts: [`scripts/setup_eno1_vlan_uplinks.sh`](../scripts/setup_eno1_vlan_uplinks.sh) (VLAN uplinks), [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh) (`eno1.132` → `br-mgmt` + VM mgmt NICs). Legacy **`eno2`** script: [`scripts/br-int-edge_2_eno2.sh`](../scripts/br-int-edge_2_eno2.sh) (deprecated).
 
 ## Host bridges
 
 | Bridge | Host IP | Physical uplink | Role |
 |--------|---------|-----------------|------|
-| `br-mgmt` | `10.1.132.10/24` | **`eno1`** | Mgmt L2 to external LAN |
-| `br-int-central` | `10.1.137.10/24` | — | Central site L2 |
-| `br-int-regional` | `10.1.137.11/24` | — | Regional site L2 |
-| `br-int-edge` | `10.1.137.12/24` | **`eno2`** (optional) | Edge site L2 |
-| `br-int-ue` | `10.1.137.13/24` | — | UE site L2 |
+| `br-mgmt` | `10.1.132.10/24` | **`eno1.132`** | Mgmt L2 to external LAN |
+| `br-int-central` | `10.1.137.10/24` | **`eno1.135`** | Central site L2 |
+| `br-int-regional` | `10.1.137.11/24` | **`eno1.136`** | Regional site L2 |
+| `br-int-edge` | `10.1.137.12/24` | **`eno1.137`** | Edge site L2 |
+| `br-int-ue` | `10.1.137.13/24` | — | UE site L2 (host-only) |
 | `br-ext-cr` | `10.1.137.20/24` | — | Central ↔ regional |
 | `br-ext-re` | `10.1.137.21/24` | — | Regional ↔ edge |
 | `br-ext-eu` | `10.1.137.22/24` | — | Edge ↔ UE |
 
-Bringup: [`testbed/`](../testbed/) / [`bringup/00_testbed/`](../bringup/00_testbed/). Mgmt bridge: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh).
+Bringup: [`bringup/00_testbed/readme.md`](../bringup/00_testbed/readme.md) · [`bringup/00_testbed/bringup_switches.sh`](../bringup/00_testbed/bringup_switches.sh). Mgmt: [`scripts/setup_mgmt_bridge.sh`](../scripts/setup_mgmt_bridge.sh).
 
 ## Site fabric (vm-sw)
 
@@ -220,36 +239,36 @@ central ── br-ext-cr ── regional ── br-ext-re ── edge ── br-
                  ↑ 10ms              ↑ 10ms              (no netem)
            central inf-lower    regional inf-lower
                                               │
-                                         eno2 (same L2 as edge)
+                                         eno1.137 (VLAN 137, edge L2)
 ```
 
 ### Latency matrix (site plane `.137`)
 
 Netem on **`inf-lower` only** (`vm-sw-central`, `vm-sw-regional`): configured **10 ms each way** → **~20 ms RTT** per hop. Edge↔UE has **no** netem. Details: [nephio/docs/testbed.md](../nephio/docs/testbed.md#interconnect-latency-netem).
 
-**`eno2` node** = external host plugged into the `eno2` cable → port on `br-int-edge` → **same L2 as Edge VMs** (not routed). Site RTTs match **edge**; no mgmt `.132` on that wire.
+**External peer on VLAN 137** = host on the upstream switch in VLAN **137** → same L2 as edge site (`.137`/`.138`). Use VLAN **132** for mgmt/SSH (`.132`).
 
 **Designed RTT (ms)**
 
-|  | central | regional | edge | ue | eno2 |
+|  | central | regional | edge | ue | VLAN 137 peer |
 |--|---------|----------|------|-----|------|
 | **central** | — | ~20 | ~40 | ~40 | ~40 |
 | **regional** | ~20 | — | ~20 | ~20 | ~20 |
 | **edge** | ~40 | ~20 | — | ~0 | ~0 |
 | **ue** | ~40 | ~20 | ~0 | — | ~0 |
-| **eno2** | ~40 | ~20 | ~0 | ~0 | — |
+| **VLAN 137 peer** | ~40 | ~20 | ~0 | ~0 | — |
 
-**Measured** (ping avg, `*-0` → `10.1.137.x`, 2026-07-28; `eno2` = same as edge by L2):
+**Measured** (ping avg, `*-0` → `10.1.137.x`, 2026-07-28; VLAN 137 peer ≈ edge by L2):
 
-|  | central | regional | edge | ue | eno2 |
+|  | central | regional | edge | ue | VLAN 137 peer |
 |--|---------|----------|------|-----|------|
 | **central** | — | 28 ms | 55 ms | 55 ms | ≈edge (~55 ms) |
 | **regional** | 21 ms | — | 29 ms | 29 ms | ≈edge (~29 ms) |
 | **edge** | 41 ms | 21 ms | — | 0.8 ms | ~0 ms |
 | **ue** | 42 ms | 21 ms | 0.9 ms | — | ~0 ms |
-| **eno2** | ≈edge | ≈edge | ~0 ms | ~0 ms | — |
+| **VLAN 137 peer** | ≈edge | ≈edge | ~0 ms | ~0 ms | — |
 
-Mgmt plane (`.132` / `br-mgmt` / `eno1`): **~0.6 ms** between Nephio sites (no netem). An **eno2-only** node is **not** on `.132`.
+Mgmt plane (`.132` / VLAN **132** / `br-mgmt`): **~0.6 ms** between Nephio sites (no netem).
 
 ## Storage
 
@@ -282,6 +301,8 @@ Worker nodes (`*-1`) have root only (no second disk).
 
 ```bash
 virsh list --all
+ip -d link show type vlan
+bridge link | grep eno1\.
 ip -br addr show br-mgmt br-int-central br-int-regional br-int-edge br-int-ue
 virsh domiflist Nephio-Central-0
 ssh -F utils/ssh_config/config central-0 'ip -br addr; df -h / /opt/local-path-provisioner'

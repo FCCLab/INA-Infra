@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Attach host NIC eno2 to Nephio edge site bridge br-int-edge (10.1.137.12/24).
+# DEPRECATED: use setup_eno1_vlan_uplinks.sh (eno1.137 -> br-int-edge) instead.
+#
+# Legacy: attach host NIC eno2 to Nephio edge site bridge br-int-edge (10.1.137.12/24).
 #
 # Edge workload VMs (Nephio-Edge-{0,1}) reach br-int-edge via libvirt vnet* on enp7s0.
 # Enslaving eno2 extends that L2 to the physical wire (parallel to eno1 -> br-mgmt).

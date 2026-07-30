@@ -12,6 +12,18 @@ Two subnets split **operator/mgmt** from **cluster/data** traffic:
 
 Definitions: [scripts/cluster_lib.sh](../../scripts/cluster_lib.sh). Netplan: [scripts/setup_ip.sh](../../scripts/setup_ip.sh). Topology: [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md).
 
+**Hypervisor VLAN uplinks** (`eno1` trunk) join clusters to external L2:
+
+| VLAN | Interface | Bridge | Cluster |
+|------|-----------|--------|---------|
+| 132 | `eno1.132` | `br-mgmt` | all (mgmt `enp1s0`) |
+| 135 | `eno1.135` | `br-int-central` | central (`enp7s0`) |
+| 136 | `eno1.136` | `br-int-regional` | regional |
+| 137 | `eno1.137` | `br-int-edge` | edge |
+| — | — | `br-int-ue` | ue (no external VLAN) |
+
+Bringup: [`bringup/00_testbed/bringup_switches.sh`](../../bringup/00_testbed/bringup_switches.sh) · [`scripts/setup_eno1_vlan_uplinks.sh`](../../scripts/setup_eno1_vlan_uplinks.sh)
+
 **MetalLB pools** (deploy via `./scripts/render_metallb_gitops.sh`; uninstall imperative install with [scripts/uninstall_metallb.sh](../../scripts/uninstall_metallb.sh))
 
 | Cluster type | Pool name | Range | Interface |

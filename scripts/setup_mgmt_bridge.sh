@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Nephio host mgmt bridge: br-mgmt with eno1 enslaved directly (no macvlan).
+# Nephio host mgmt bridge: br-mgmt with eno1.132 VLAN uplink (see setup_eno1_vlan_uplinks.sh).
 #
-# Single setup: prepare eno1 (L2 port), create br-mgmt, attach eno1 + VM NICs,
+# Single setup: prepare eno1.132 (L2 port), create br-mgmt, attach uplink + VM NICs,
 # assign host IP on br-mgmt, verify L2/routing.
 set -euo pipefail
 
@@ -9,7 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BRIDGE="${BRIDGE:-br-mgmt}"
-PARENT="${PARENT:-eno1}"
+PARENT="${PARENT:-eno1.132}"
+PHYSICAL_PARENT="${PHYSICAL_PARENT:-${PARENT%%.*}}"
 LEGACY_MACVLAN="${LEGACY_MACVLAN:-mcv-mgmt}"
 
 MGMT_CIDR="${MGMT_CIDR:-10.1.132.0/24}"
@@ -88,7 +89,7 @@ parent_ipv4_in_mgmt_subnet() {
 }
 
 parent_upper_count() {
-  ip -o link show | awk -v p="$PARENT" '$0 ~ "@" p ":" { c++ } END { print c+0 }'
+  ip -o link show | awk -v p="$PHYSICAL_PARENT" '$0 ~ "@" p ":" { c++ } END { print c+0 }'
 }
 
 configure_bridge_l2() {
@@ -134,8 +135,8 @@ prepare_parent() {
   local uppers
   uppers="$(parent_upper_count)"
   if (( uppers > 0 )); then
-    err "$PARENT has $uppers macvtap/macvlan child(ren) — detach direct $PARENT VM NICs first"
-    ip -o link show | awk -v p="$PARENT" '$0 ~ "@" p ":" { print "    " $2 }' >&2
+    err "$PHYSICAL_PARENT has $uppers macvtap/macvlan child(ren) — detach direct $PHYSICAL_PARENT VM NICs first"
+    ip -o link show | awk -v p="$PHYSICAL_PARENT" '$0 ~ "@" p ":" { print "    " $2 }' >&2
     exit 1
   fi
 

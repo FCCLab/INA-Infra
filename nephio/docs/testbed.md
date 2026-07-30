@@ -3,6 +3,8 @@
 
 Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` with two subnets on the same L2 (`br-int-*`): **`10.1.137.0/24`** (Kubernetes API, node traffic, Flannel) and **`10.1.138.0/24`** (MetalLB LoadBalancer VIPs). Configure with [`scripts/setup_ip.sh`](../../scripts/setup_ip.sh).
 
+**Physical uplinks:** hypervisor **`eno1`** carries **802.1Q VLANs** to join clusters to external L2 — **`eno1.132` → `br-mgmt`** (all clusters), **`eno1.135` → central**, **`eno1.136` → regional**, **`eno1.137` → edge**. **`br-int-ue`** has no VLAN uplink. See [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md) and [docs/topology.md](../../docs/topology.md).
+
 **Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
 **Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../../scripts/bringup_cluster.sh), dashboard via GitOps [`scripts/render_dashboard_gitops.sh`](../../scripts/render_dashboard_gitops.sh), operator access with [`scripts/kubectl_forward.sh`](../../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../../scripts/install_k9s.sh)):
@@ -134,7 +136,13 @@ Each site is laid out top to bottom: **VMs → internal bridge → site switch (
 | Step | Command | What happens |
 |------|---------|--------------|
 | 1 | `bringup_switches.sh up --bridges` | Create host `br-int-*` / `br-ext-*` + IPs |
+| 1b | `bringup_switches.sh up --uplinks` | `eno1.{132,135,136,137}` → `br-mgmt` / site bridges |
 | 2 | `bringup_switches.sh up --vms` | Start libvirt `vm-sw-*` VMs on those bridges |
+| — | `bringup_switches.sh up` | Steps 1 + 1b + 2 |
+| — | `attach_vm.sh attach` | Workload VM `enp7s0` → `br-int-*` |
+| — | `setup_mgmt_bridge.sh setup` | All VM `enp1s0` → `br-mgmt` (VLAN 132 path) |
+
+Use `--no-uplinks` on `up`/`down` for a host-only lab without external VLAN peering.
 
 **Step 2:** each `vm-sw-*` VM is a pure L2 switch (Alpine guest). Libvirt attaches virtio NICs as `eth0`/`eth1`/…; cloud-init renames them to `inf-internal` / `inf-upper` / `inf-lower` and bridges them on `br0`.
 
@@ -160,16 +168,18 @@ Each vm-sw also has **`inf-mgmt`** on libvirt’s **`default`** network (Virt-Ma
 ## Bring up bridges and vm-sw
 
 ```bash
-cd testbed
+cd bringup/00_testbed
 
-# Step 1 — host bridges + 10.1.137.x
+# Full — bridges + VLAN uplinks + vm-sw
+sudo ./bringup_switches.sh up
+
+# Staged
 sudo ./bringup_switches.sh up --bridges
-
-# Step 2 — libvirt vm-sw site switches
+sudo ./bringup_switches.sh up --uplinks     # eno1.132/135/136/137
 sudo ./bringup_switches.sh up --vms
 
-# Or both steps:
-sudo ./bringup_switches.sh up
+sudo ./attach_vm.sh attach                  # site NICs
+sudo ../../scripts/setup_mgmt_bridge.sh setup
 
 sudo ./bringup_switches.sh status
 sudo ./bringup_switches.sh down
