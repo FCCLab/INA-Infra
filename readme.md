@@ -25,7 +25,7 @@ On the **lab testbed** (Config Sync push target), register Gitea remotes once:
 ./scripts/setup_lab_git_remotes.sh
 ```
 
-Submodule layout: GitHub `FCCLab/INA-Infra-*` in `.gitmodules`; lab GitOps pushes to Gitea `nephio/*` via `push_git_repos.sh`.
+Submodule layout: GitHub `FCCLab/INA-Infra-*` in `.gitmodules`; lab GitOps pushes to Gitea `nephio/*` via `push_git_repos.sh`; mirror everything to GitHub with `./scripts/github/push_github.sh`.
 
 ---
 
