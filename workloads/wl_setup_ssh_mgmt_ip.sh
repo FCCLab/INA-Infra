@@ -13,6 +13,7 @@ IDENTITY_FILE="${IDENTITY_FILE:-}"
 declare -a NODE_NAMES=()
 declare -A NODE_INIT_HOST=()
 declare -A NODE_MGMT_IP=()
+declare -A NODE_MGMT_EXTERNAL=()
 declare -A NODE_USER=()
 declare -A NODE_PASSWORD=()
 
@@ -34,7 +35,7 @@ For each workload node:
   2. Install local SSH public key (passwordless login) via <ip>
   3. Set hostname to <name>
   4. Enable passwordless sudo
-  5. Upload netplan (${NETPLAN_FILE}: mgmt 10.1.132.x + k8s 10.1.137.x)
+  5. Upload netplan (${NETPLAN_FILE}; mgmt IP from default-route iface, or bootstrap <ip> if external)
   6. Pin DNS (netplan nameserver or 8.8.8.8) in resolv.conf + systemd-resolved
   7. Add/update utils/ssh_config/config to use mgmt IP from netplan
 
@@ -109,8 +110,28 @@ node_env_prefix() {
 }
 
 mgmt_ip_from_netplan() {
-  local file="$1"
-  grep -E '^[[:space:]]*-[[:space:]]*10\.1\.132\.' "$file" | head -1 | awk '{print $2}' | sed 's#/24##'
+  local file="$1" ip
+  # Mgmt IP = first static address on the interface that owns the default route.
+  ip="$(awk '
+    /^[[:space:]]{4}[A-Za-z0-9_.-]+:[[:space:]]*$/ {
+      if (has_default && addr != "") { print addr; exit }
+      has_default = 0
+      addr = ""
+    }
+    /^[[:space:]]+-[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\// {
+      line = $0
+      sub(/^[[:space:]]+-[[:space:]]+/, "", line)
+      split(line, parts, "/")
+      if (addr == "") addr = parts[1]
+    }
+    /to:[[:space:]]*default/ { has_default = 1 }
+    END { if (has_default && addr != "") print addr }
+  ' "$file")"
+  if [[ -n "$ip" ]]; then
+    printf '%s' "$ip"
+    return 0
+  fi
+  return 1
 }
 
 dns_from_netplan() {
@@ -326,7 +347,11 @@ deploy_netplan() {
   run_scp "$netplan_src" "$user" "$host" "$remote_tmp"
   run_ssh "$user" "$host" "sudo install -m 600 '$remote_tmp' '/etc/netplan/${NETPLAN_FILE}' && rm -f '$remote_tmp'"
   run_ssh "$user" "$host" "sudo netplan apply"
-  sync_resolv_conf "$user" "$host" "$netplan_src" || return 1
+  if [[ "${NODE_MGMT_EXTERNAL[$node]:-0}" == "1" ]]; then
+    info "skipping DNS sync (mgmt/WAN configured externally)"
+  else
+    sync_resolv_conf "$user" "$host" "$netplan_src" || return 1
+  fi
 
   run_ssh "$user" "$host" "sudo bash -lc \"
     if ! grep -qE '^${mgmt_ip}[[:space:]]+${node}\$' /etc/hosts; then
@@ -399,10 +424,13 @@ setup_node() {
     return 1
   fi
 
-  mgmt_ip="$(mgmt_ip_from_netplan "$netplan_src")"
+  mgmt_ip="$(mgmt_ip_from_netplan "$netplan_src" || true)"
   if [[ -z "$mgmt_ip" ]]; then
-    err "could not read mgmt IP from ${netplan_src}"
-    return 1
+    mgmt_ip="$init_ip"
+    NODE_MGMT_EXTERNAL[$node]=1
+    info "mgmt IP from bootstrap <ip> ${mgmt_ip} (netplan has no default route; e.g. eno3 external)"
+  else
+    NODE_MGMT_EXTERNAL[$node]=0
   fi
   NODE_MGMT_IP[$node]="$mgmt_ip"
 
