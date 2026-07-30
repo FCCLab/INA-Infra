@@ -81,6 +81,7 @@ remote_apply_netplan_mgmt() {
   echo "=== Applying mgmt netplan (default via ${MGMT_GATEWAY}) ==="
 
   install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
+  chmod 600 /etc/netplan/*.yaml 2>/dev/null || true
   netplan apply
   sync_resolv_conf "$mgmt_src"
 
@@ -122,6 +123,7 @@ remote_apply_netplan() {
 
   install -m 600 "$mgmt_src" "/etc/netplan/${NETPLAN_MGMT}"
   install -m 600 "$site_src" "/etc/netplan/${NETPLAN_SITE}"
+  chmod 600 /etc/netplan/*.yaml 2>/dev/null || true
   netplan apply
   sync_resolv_conf "$mgmt_src"
 

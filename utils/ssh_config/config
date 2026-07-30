@@ -65,7 +65,7 @@ Host gh81
     IdentityFile ~/.ssh/id_rsa
 
 Host gh82
-    HostName 10.1.132.12
+    HostName 10.1.101.212
     User tuannv
     Port 22
     IdentityFile ~/.ssh/id_rsa

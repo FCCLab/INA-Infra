@@ -303,6 +303,7 @@ set -euo pipefail
 echo "==> apply mgmt netplan (default via ${MGMT_GATEWAY})"
 sudo install -m 600 '${remote_file}' /etc/netplan/55-nephio-mgmt.yaml
 rm -f '${remote_file}'
+sudo bash -lc 'chmod 600 /etc/netplan/*.yaml 2>/dev/null || true'
 sudo netplan apply
 echo "==> verify default route"
 ip -4 route show default
@@ -326,6 +327,7 @@ set -euo pipefail
 echo "==> apply site netplan (${SITE_IFACE}, 10.1.137.0/24)"
 sudo install -m 600 '${remote_file}' /etc/netplan/${NETPLAN_SITE}
 rm -f '${remote_file}'
+sudo bash -lc 'chmod 600 /etc/netplan/*.yaml 2>/dev/null || true'
 sudo netplan apply
 ip -4 -br addr show ${SITE_IFACE} || true
 EOF

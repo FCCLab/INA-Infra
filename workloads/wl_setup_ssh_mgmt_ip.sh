@@ -346,6 +346,7 @@ deploy_netplan() {
 
   run_scp "$netplan_src" "$user" "$host" "$remote_tmp"
   run_ssh "$user" "$host" "sudo install -m 600 '$remote_tmp' '/etc/netplan/${NETPLAN_FILE}' && rm -f '$remote_tmp'"
+  run_ssh "$user" "$host" "sudo bash -lc 'chmod 600 /etc/netplan/*.yaml 2>/dev/null || true'"
   run_ssh "$user" "$host" "sudo netplan apply"
   if [[ "${NODE_MGMT_EXTERNAL[$node]:-0}" == "1" ]]; then
     info "skipping DNS sync (mgmt/WAN configured externally)"
