@@ -5,13 +5,4 @@ network:
     ens12f0:
       dhcp4: false
       addresses:
-        - 10.1.132.233/24
         - 10.1.137.133/24
-        - 10.1.138.133/24
-      routes:
-        - to: default
-          via: 10.1.132.1
-          metric: 1000
-      nameservers:
-        addresses:
-          - 8.8.8.8

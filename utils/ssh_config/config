@@ -88,7 +88,7 @@ Host edge-2
     IdentityFile ~/.ssh/id_rsa
 
 Host edge-3
-    HostName 10.1.132.233
+    HostName 172.27.2.22
     User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa
