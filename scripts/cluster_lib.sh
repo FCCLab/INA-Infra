@@ -57,7 +57,7 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.138.151
   [ue]=10.1.138.176
 )
-# OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in nephio/docs/ip.md.
+# OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
 OAI_MACVLAN_PREFIX="${OAI_MACVLAN_PREFIX:-10.1.139}"
 declare -A OAI_MACVLAN_BASE=(

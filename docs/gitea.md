@@ -88,7 +88,7 @@ kubectl --context mgmt@mgmt delete pvc -n gitea --all
 1. Config Sync repos + tokens: `./bringup/02_configsync/configsync.sh repos` then `tokens`
 2. Push GitOps content: `./bringup/03_push_to_git_repos/push_git_repos.sh`
 
-See [bringup/02_configsync/readme.md](../../bringup/02_configsync/readme.md) for the full Config Sync flow.
+See [bringup/02_configsync/readme.md](../bringup/02_configsync/readme.md) for the full Config Sync flow.
 
 ## Troubleshooting
 

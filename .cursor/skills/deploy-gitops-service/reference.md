@@ -4,7 +4,7 @@ Read from the deploy skill when choosing a script or stacking multiple renders.
 
 ## Recommended order
 
-From `nephio/docs/config_sync.md` (trim to what you need):
+From `docs/config_sync.md` (trim to what you need):
 
 ```bash
 ./scripts/render_flannel_gitops.sh

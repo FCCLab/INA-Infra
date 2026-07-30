@@ -56,7 +56,7 @@ repos/<name>/
 - CU-CP, DU, UEs, FlexRIC: **edge** (UEs on `usrp`)
 - Prefer `ue` cluster only when the user explicitly wants something there
 
-IPs / VIPs: `scripts/cluster_lib.sh`, `nephio/docs/ip.md`, `docs/oai.md`.
+IPs / VIPs: `scripts/cluster_lib.sh`, `docs/ip_plan.md`, `docs/oai.md`.
 
 ## Step 2 — Encode intent in a render script
 
@@ -125,8 +125,8 @@ For OAI, operators reconcile `NFDeployment` / `NFConfig` into pods. RAN pieces a
 
 ## Docs (read when needed)
 
-- `nephio/docs/config_sync.md` — GitOps bringup + render order
-- `nephio/docs/testbed.md` — topology / contexts
-- `nephio/docs/ip.md` — VIP/pools
+- `docs/config_sync.md` — GitOps bringup + render order
+- `docs/testbed.md` — topology / contexts
+- `docs/ip_plan.md` — VIP/pools
 - `docs/oai.md`, `docs/oai-deployment.md` — OAI placement
 - `.cursor/rules/nephio-testbed.mdc`, `.cursor/rules/nephio-gitops-scripts.mdc` — standing constraints

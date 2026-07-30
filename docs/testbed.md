@@ -1,13 +1,13 @@
 
 # Testbed topology
 
-Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` with two subnets on the same L2 (`br-int-*`): **`10.1.137.0/24`** (Kubernetes API, node traffic, Flannel) and **`10.1.138.0/24`** (MetalLB LoadBalancer VIPs). Configure with [`scripts/setup_ip.sh`](../../scripts/setup_ip.sh).
+Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` with two subnets on the same L2 (`br-int-*`): **`10.1.137.0/24`** (Kubernetes API, node traffic, Flannel) and **`10.1.138.0/24`** (MetalLB LoadBalancer VIPs). Configure with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
-**Physical uplinks:** hypervisor **`eno1`** carries **802.1Q VLANs** to join clusters to external L2 — **`eno1.132` → `br-mgmt`** (all clusters), **`eno1.135` → central**, **`eno1.136` → regional**, **`eno1.137` → edge**. **`br-int-ue`** has no VLAN uplink. See [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md) and [docs/topology.md](../../docs/topology.md).
+**Physical uplinks:** hypervisor **`eno1`** carries **802.1Q VLANs** to join clusters to external L2 — **`eno1.132` → `br-mgmt`** (all clusters), **`eno1.135` → central**, **`eno1.136` → regional**, **`eno1.137` → edge**. **`br-int-ue`** has no VLAN uplink. See [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md) and [docs/topology.md](topology.md).
 
 **Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
-**Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../../scripts/bringup_cluster.sh), dashboard via GitOps [`scripts/render_dashboard_gitops.sh`](../../scripts/render_dashboard_gitops.sh), operator access with [`scripts/kubectl_forward.sh`](../../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../../scripts/install_k9s.sh)):
+**Kubernetes clusters** (API and node identity on site `enp7s0`; bring up with [`scripts/bringup_cluster.sh`](../scripts/bringup_cluster.sh), dashboard via GitOps [`scripts/render_dashboard_gitops.sh`](../scripts/render_dashboard_gitops.sh), operator access with [`scripts/kubectl_forward.sh`](../scripts/kubectl_forward.sh), login token with [`scripts/get_dashboard_key.sh`](../scripts/get_dashboard_key.sh), terminal UI with [`scripts/install_k9s.sh`](../scripts/install_k9s.sh)):
 
 | Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, `.137`) | Dashboard (132) | OpenSpeedTest (`.138`) | Context | Kubeconfig |
 |---------|---------------|--------|------------|------------------------|-----------------|-------------------------|---------|------------|
@@ -17,7 +17,7 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 | edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` (+ physical `edge-2`/`edge-3`/`usrp`) | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
 | ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:30443` · fwd `:8443` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
 
-**Physical edge workers** (VLAN 137; netplan [`workloads/netplan/*/55-k8s.yaml`](../../workloads/netplan/)): `edge-2` `10.1.137.132` (`eno1`), `edge-3` `10.1.137.133` (`ens12f0`), `usrp` `10.1.137.134` (`enp4s0f0`). SSH: see [`utils/ssh_config/config`](../../utils/ssh_config/config). Detail: [ip.md](ip.md) · [docs/topology.md](../../docs/topology.md).
+**Physical edge workers** (VLAN 137; netplan [`workloads/netplan/*/55-k8s.yaml`](../workloads/netplan/)): `edge-2` `10.1.137.132` (`eno1`), `edge-3` `10.1.137.133` (`ens12f0`), `usrp` `10.1.137.134` (`enp4s0f0`). SSH: see [`utils/ssh_config/config`](../utils/ssh_config/config). Detail: [ip_plan.md](ip_plan.md) · [docs/topology.md](topology.md).
 
 **Dashboard:** all clusters use GitOps **NodePort 30443** on the control-plane mgmt IP (no MetalLB VIP). Run `./scripts/kubectl_forward.sh` for `:8443` if NodePort is blocked. Render with `./scripts/render_dashboard_gitops.sh`; tokens: `./scripts/get_dashboard_key.sh`.
 
@@ -39,9 +39,9 @@ export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:
 k9s --context central@central
 ```
 
-SSH host aliases match the node names (`central-0`, `regional-0`, …) in [`utils/ssh_config/config`](../../utils/ssh_config/config). Full VIP and pool list: [`ip.md`](ip.md).
+SSH host aliases match the node names (`central-0`, `regional-0`, …) in [`utils/ssh_config/config`](../utils/ssh_config/config). Full VIP and pool list: [ip_plan.md](ip_plan.md).
 
-**Site NIC:** attach a second virtio NIC per workload VM to `br-int-<site>`; the guest sees it as `enp7s0`. Netplan: [`55-nephio-mgmt.yaml`](../../utils/netplan/central-0/55-nephio-mgmt.yaml) (mgmt `enp1s0`, default via `10.1.132.1`) and [`60-nephio.yaml`](../../utils/netplan/central-0/60-nephio.yaml) (site: `.137` + `.138` on `enp7s0`). Deploy with [`scripts/setup_ip.sh`](../../scripts/setup_ip.sh).
+**Site NIC:** attach a second virtio NIC per workload VM to `br-int-<site>`; the guest sees it as `enp7s0`. Netplan: [`55-nephio-mgmt.yaml`](../utils/netplan/central-0/55-nephio-mgmt.yaml) (mgmt `enp1s0`, default via `10.1.132.1`) and [`60-nephio.yaml`](../utils/netplan/central-0/60-nephio.yaml) (site: `.137` + `.138` on `enp7s0`). Deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
 ```mermaid
 flowchart LR
@@ -181,7 +181,7 @@ sudo ./bringup_switches.sh up --uplinks     # eno1.132/135/136/137
 sudo ./bringup_switches.sh up --vms
 
 sudo ./attach_vm.sh attach                  # site NICs
-sudo ../../scripts/setup_mgmt_bridge.sh setup
+sudo ../scripts/setup_mgmt_bridge.sh setup
 
 sudo ./bringup_switches.sh status
 sudo ./bringup_switches.sh down
@@ -250,7 +250,7 @@ virsh domiflist vm-sw-central
 | UE-0 | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | `br-int-ue` |
 | UE-1 | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | `br-int-ue` |
 
-Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0` (`.137` for K8s, `.138` for node identity on the MetalLB subnet). Full address plan: [`ip.md`](ip.md). SSH aliases: [`utils/ssh_config/config`](../../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
+Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0` (`.137` for K8s, `.138` for node identity on the MetalLB subnet). Full address plan: [ip_plan.md](ip_plan.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
 
 vm-sw scripts and guest bridge setup: [`vm-sw/`](vm-sw/).
 

@@ -35,7 +35,7 @@ Submodule layout: GitHub `FCCLab/INA-Infra-*` in `.gitmodules`; lab GitOps pushe
 
 ---
 
-Current testbed IPs, MetalLB pools (`10.1.138.100`–`.199`), and VIPs: [nephio/docs/ip.md](nephio/docs/ip.md). Topology: [bringup/00_testbed/readme.md](bringup/00_testbed/readme.md).
+Current testbed IPs, MetalLB pools (`10.1.138.100`–`.199`), and VIPs: [docs/ip_plan.md](docs/ip_plan.md). Full doc index: [docs/readme.md](docs/readme.md). Topology: [bringup/00_testbed/readme.md](bringup/00_testbed/readme.md).
 
 GitOps components (render → push → Config Sync): Flannel, Multus, MetalLB, Kubernetes Dashboard (NodePort **30443**), OAI operators + core (**central** only), OpenSpeedTest MetalLB VIPs. See [bringup/02_configsync/readme.md](bringup/02_configsync/readme.md).
 
@@ -147,7 +147,7 @@ Gitea UI: [http://10.1.132.200:3000](http://10.1.132.200:3000) (node IP on mgmt 
 
 ## Central workload cluster
 
-Second kubeadm cluster on `10.1.101.22` (kubeconfig cluster name **central**). See [nephio/docs/new_cluster.md](nephio/docs/new_cluster.md).
+Second kubeadm cluster on `10.1.101.22` (kubeconfig cluster name **central**). See [docs/new_cluster.md](docs/new_cluster.md).
 
 ```bash
 export KUBECONFIG=$HOME/.kube/config:$HOME/.kube/config-central

@@ -2,7 +2,7 @@
 
 Live lab layout on the hypervisor (PowerEdge R730 / libvirt). Captured from running VMs and host bridges.
 
-Related detail: [nephio/docs/mgmt.md](../nephio/docs/mgmt.md) · [nephio/docs/ip.md](../nephio/docs/ip.md) · [nephio/docs/testbed.md](../nephio/docs/testbed.md) · [oai.md](oai.md)
+Related detail: [mgmt.md](mgmt.md) · [ip_plan.md](ip_plan.md) · [testbed.md](testbed.md) · [oai.md](oai.md)
 
 ## Overview
 
@@ -271,7 +271,7 @@ central ── br-ext-cr ── regional ── br-ext-re ── edge ── br-
 
 ### Latency matrix (site plane `.137`)
 
-Netem on **`inf-lower` only** (`vm-sw-central`, `vm-sw-regional`): configured **10 ms each way** → **~20 ms RTT** per hop. Edge↔UE has **no** netem. Details: [nephio/docs/testbed.md](../nephio/docs/testbed.md#interconnect-latency-netem).
+Netem on **`inf-lower` only** (`vm-sw-central`, `vm-sw-regional`): configured **10 ms each way** → **~20 ms RTT** per hop. Edge↔UE has **no** netem. Details: [testbed.md](testbed.md#interconnect-latency-netem).
 
 **External peer on VLAN 137** = host on the upstream switch in VLAN **137** → same L2 as edge site (`.137`/`.138`). Use VLAN **132** for mgmt/SSH (`.132`).
 

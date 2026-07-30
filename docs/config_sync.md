@@ -47,7 +47,7 @@ Run all three:
 | edge     | `nephio/edge-repo`    | `repos/edge-repo`     | `edge-repo`    | `edge-repo-access-token-configsync`     |
 | ue       | `nephio/ue-repo`      | `repos/ue-repo`       | `ue-repo`      | `ue-repo-access-token-configsync`       |
 
-**Clone (GitHub):** submodules use `https://github.com/FCCLab/INA-Infra-*.git` in [`.gitmodules`](../../.gitmodules). Clusters still reconcile from **Gitea** `nephio/*` (unchanged RootSync URLs).
+**Clone (GitHub):** submodules use `https://github.com/FCCLab/INA-Infra-*.git` in [`.gitmodules`](../.gitmodules). Clusters still reconcile from **Gitea** `nephio/*` (unchanged RootSync URLs).
 
 Option A — recursive clone:
 
@@ -105,6 +105,6 @@ Verify:
 ./scripts/check-configsync.sh
 ```
 
-OAI operators and core NFs run on **central** only (`render_oai_*` scripts reject other clusters). NRF/UDR use `ClusterIP`; AMF/UPF use fixed MetalLB VIPs on central (see [ip.md](ip.md)).
+OAI operators and core NFs run on **central** only (`render_oai_*` scripts reject other clusters). NRF/UDR use `ClusterIP`; AMF/UPF use fixed MetalLB VIPs on central (see [ip_plan.md](ip_plan.md)).
 
-IP pools, VIPs, and node addresses: [ip.md](ip.md).
+IP pools, VIPs, and node addresses: [ip_plan.md](ip_plan.md).

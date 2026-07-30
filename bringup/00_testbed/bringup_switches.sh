@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Nephio testbed: per-site Linux bridges + vm-sw site switches + eno1 VLAN uplinks.
-# Topology: docs/topology.md · nephio/docs/testbed.md
+# Topology: docs/topology.md · docs/testbed.md
 #
 #   step 1: host bridges (br-int-* / br-ext-* + 10.1.137.x)
 #   step 1b: eno1.{132,135,136,137} -> br-mgmt / br-int-{central,regional,edge}
@@ -34,6 +34,14 @@ BR_INT_UE_IP="10.1.137.13"
 BR_EXT_CR_IP="10.1.137.20"
 BR_EXT_RE_IP="10.1.137.21"
 BR_EXT_EU_IP="10.1.137.22"
+
+# GPU bare-metal K8s workers (site L2 on VLAN 137; not bridge addresses above)
+GPU_WORKER_IP_FIRST="10.1.137.150"
+GPU_WORKER_IP_LAST="10.1.137.159"
+GH82_SITE_IP="10.1.137.152"   # gh82 → central cluster
+GH81_SITE_IP="10.1.137.151"   # gh81 → edge cluster
+GH82_MGMT_IP="10.1.101.212"   # SSH only (enP2s2f0np0); not site .137
+GH81_MGMT_IP="10.1.101.211"   # SSH only (aerial02); not site .137
 
 SW_CENTRAL="vm-sw-central"
 SW_REGIONAL="vm-sw-regional"

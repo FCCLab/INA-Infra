@@ -19,12 +19,12 @@ Multi-cluster Nephio lab for 5G network slicing with GitOps (Config Sync + Gitea
 
 Combine kubeconfigs: `export KUBECONFIG=~/.kube/config:~/.kube/config-central:...`
 
-IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `nephio/docs/ip.md`. SSH aliases: `utils/ssh_config/config`.
+IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `docs/ip_plan.md`. SSH aliases: `utils/ssh_config/config`.
 
 ## Repo layout
 
 - `bringup/` — staged install: Gitea (`01_gitea`), Config Sync (`02_configsync`), git push (`03_push_to_git_repos`); Nephio packages under `bringup/nephio/`
-- `nephio/docs/` — K8s / Nephio platform docs (testbed, IPs, Config Sync, Gitea)
+- `docs/` — platform + OAI docs (testbed, IPs, Config Sync, Gitea, topology)
 - `docs/` — OAI / network-slicing docs (`oai.md`, `oai-deployment.md`)
 - `repos/` — **Gitea submodules** per cluster (`mgmt`, `central-repo`, `regional-repo`, `edge-repo`, `ue-repo`); init with `git submodule update --init --recursive`
 - `scripts/` — render GitOps manifests, cluster bringup, diagnostics (`check-configsync.sh`, `bringup_cluster.sh`)
@@ -33,7 +33,7 @@ IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `nephio/docs/
 ## GitOps workflow
 
 1. Ensure submodules: `git submodule update --init --recursive`
-2. Render manifests: `./scripts/render_*_gitops.sh` (order matters — see `nephio/docs/config_sync.md`)
+2. Render manifests: `./scripts/render_*_gitops.sh` (order matters — see `docs/config_sync.md`)
 3. Push to Gitea (pull-first inside each submodule): `./bringup/03_push_to_git_repos/push_git_repos.sh`
 4. Verify: `./scripts/check-configsync.sh`
 
@@ -44,4 +44,4 @@ OAI: core on **central**, CU-CP on **edge**, DU/UEs on **edge `usrp`**. Per-slic
 - Bash scripts: `set -euo pipefail`, source `scripts/cluster_lib.sh` for cluster/IP helpers
 - Gitea creds (lab): `nephio` / `secret` at `http://10.1.132.200:3000`
 - Minimize scope; match existing script style; do not commit unless asked
-- Primary docs: `readme.md`, `nephio/docs/testbed.md`, `nephio/docs/config_sync.md`
+- Primary docs: `readme.md`, `docs/testbed.md`, `docs/config_sync.md`

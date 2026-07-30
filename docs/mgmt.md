@@ -2,7 +2,7 @@
 
 Operator and cluster **mgmt** traffic uses **`10.1.132.0/24`** on guest **`enp1s0`**. Workload VMs reach that L2 via host bridge **`br-mgmt`**, with physical uplink **`eno1.132`** (VLAN **132** on trunk **`eno1`**).
 
-Site / Kubernetes traffic stays on **`br-int-*`** via a second virtio NIC (`enp7s0`), each site bridge with its own VLAN uplink (**135** central, **136** regional, **137** edge). See [ip.md](ip.md), [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md), and [docs/topology.md](../../docs/topology.md).
+Site / Kubernetes traffic stays on **`br-int-*`** via a second virtio NIC (`enp7s0`), each site bridge with its own VLAN uplink (**135** central, **136** regional, **137** edge). See [ip_plan.md](ip_plan.md), [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md), and [docs/topology.md](topology.md).
 
 ## Host topology
 
@@ -53,7 +53,7 @@ flowchart TB
   vnets --- UE1
 ```
 
-**Mgmt MetalLB VIPs** on the same L2 (`10.1.132.10`–`.99` pool): registry `.30`, OpenSpeedTest `.11`, Gitea `.200`, Nephio Web UI `.52`. See [ip.md](ip.md).
+**Mgmt MetalLB VIPs** on the same L2 (`10.1.132.10`–`.99` pool): registry `.30`, OpenSpeedTest `.11`, Gitea `.200`, Nephio Web UI `.52`. See [ip_plan.md](ip_plan.md).
 
 Each workload VM has **two** libvirt NICs:
 
@@ -62,13 +62,13 @@ Each workload VM has **two** libvirt NICs:
 | `enp1s0` | bridge | `br-mgmt` | `10.1.132.210/24` — SSH, default route, DNS, dashboard `:30443` |
 | `enp7s0` | bridge | `br-int-<site>` | `10.1.137.110/24` + `10.1.138.110/24` — K8s API `:6443`, Flannel, MetalLB |
 
-Inside the guest, mgmt is configured by [`utils/netplan/*/55-nephio-mgmt.yaml`](../../utils/netplan/central-0/55-nephio-mgmt.yaml) (`enp1s0`, default `via 10.1.132.1`, DNS `10.1.132.200`). Deploy with [`scripts/setup_ip.sh`](../../scripts/setup_ip.sh).
+Inside the guest, mgmt is configured by [`utils/netplan/*/55-nephio-mgmt.yaml`](../utils/netplan/central-0/55-nephio-mgmt.yaml) (`enp1s0`, default `via 10.1.132.1`, DNS `10.1.132.200`). Deploy with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
 ## VLAN uplink on `eno1.132`
 
 Physical **`eno1`** is a **trunk** (no IP, not a bridge port). **`eno1.132`** (802.1Q VLAN **132**) is the **bridge port** on **`br-mgmt`**. VM mgmt NICs use libvirt **`bridge`** → `br-mgmt`, not **`direct`** → `eno1`.
 
-**Requirement:** `eno1` must have **no macvtap/macvlan children**. VLAN subinterfaces are created by [`scripts/setup_eno1_vlan_uplinks.sh`](../../scripts/setup_eno1_vlan_uplinks.sh) (also run from [`bringup/00_testbed/bringup_switches.sh`](../../bringup/00_testbed/bringup_switches.sh) step 1b).
+**Requirement:** `eno1` must have **no macvtap/macvlan children**. VLAN subinterfaces are created by [`scripts/setup_eno1_vlan_uplinks.sh`](../scripts/setup_eno1_vlan_uplinks.sh) (also run from [`bringup/00_testbed/bringup_switches.sh`](../bringup/00_testbed/bringup_switches.sh) step 1b).
 
 | Host object | Role |
 |-------------|------|
@@ -89,7 +89,7 @@ sudo ./bringup_switches.sh up --uplinks
 # or full testbed:
 sudo ./bringup_switches.sh up
 
-cd ../../scripts
+cd ../scripts
 
 # Attach all VM enp1s0 to br-mgmt
 sudo ./setup_mgmt_bridge.sh setup
@@ -119,7 +119,7 @@ virsh attach-interface Nephio-Central-0 \
   --live
 ```
 
-Repeat per VM (stable MACs in `setup_mgmt_bridge.sh`). Site NICs: [`bringup/00_testbed/attach_vm.sh`](../../bringup/00_testbed/attach_vm.sh).
+Repeat per VM (stable MACs in `setup_mgmt_bridge.sh`). Site NICs: [`bringup/00_testbed/attach_vm.sh`](../bringup/00_testbed/attach_vm.sh).
 
 ## Node addresses (mgmt / `enp1s0`)
 
@@ -136,11 +136,11 @@ Repeat per VM (stable MACs in `setup_mgmt_bridge.sh`). Site NICs: [`bringup/00_t
 | ue | `ue-0` | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | `https://10.1.132.240:30443` |
 | ue | `ue-1` | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | — |
 
-Physical edge workers (`edge-2` `.132`, `edge-3` `.133`, `usrp` `.134` on site L2; SSH off-`.132`): [ip.md](ip.md) · [docs/topology.md](../../docs/topology.md) · [`workloads/netplan/`](../../workloads/netplan/).
+Physical edge workers (`edge-2` `.132`, `edge-3` `.133`, `usrp` `.134` on site L2; SSH off-`.132`): [ip_plan.md](ip_plan.md) · [docs/topology.md](topology.md) · [`workloads/netplan/`](../workloads/netplan/).
 
 K8s API (`:6443`) uses the **`.137`** address on control-plane nodes. Default route on all nodes: **`via 10.1.132.1`**. DNS: **`10.1.132.200`** (Pi-hole on `mgmt-0`).
 
-Full VIP and pool tables: [ip.md](ip.md). SSH aliases: [`utils/ssh_config/config`](../../utils/ssh_config/config).
+Full VIP and pool tables: [ip_plan.md](ip_plan.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config).
 
 ## Verify
 
@@ -208,11 +208,11 @@ Libvirt `--config` attachments survive reboot once bridges and VLANs exist.
 
 | Script | Purpose |
 |--------|---------|
-| [bringup/00_testbed/bringup_switches.sh](../../bringup/00_testbed/bringup_switches.sh) | Bridges + VLAN uplinks + vm-sw |
-| [scripts/setup_eno1_vlan_uplinks.sh](../../scripts/setup_eno1_vlan_uplinks.sh) | `eno1.{132,135,136,137}` create/attach |
-| [scripts/setup_mgmt_bridge.sh](../../scripts/setup_mgmt_bridge.sh) | `br-mgmt` + VM `enp1s0` |
-| [scripts/setup_ip.sh](../../scripts/setup_ip.sh) | Push mgmt + site netplan to guests |
-| [scripts/bringup_cluster.sh](../../scripts/bringup_cluster.sh) | Kubernetes bootstrap (mgmt on `enp1s0`) |
-| [bringup/00_testbed/attach_vm.sh](../../bringup/00_testbed/attach_vm.sh) | Attach site NIC to `br-int-*` |
+| [bringup/00_testbed/bringup_switches.sh](../bringup/00_testbed/bringup_switches.sh) | Bridges + VLAN uplinks + vm-sw |
+| [scripts/setup_eno1_vlan_uplinks.sh](../scripts/setup_eno1_vlan_uplinks.sh) | `eno1.{132,135,136,137}` create/attach |
+| [scripts/setup_mgmt_bridge.sh](../scripts/setup_mgmt_bridge.sh) | `br-mgmt` + VM `enp1s0` |
+| [scripts/setup_ip.sh](../scripts/setup_ip.sh) | Push mgmt + site netplan to guests |
+| [scripts/bringup_cluster.sh](../scripts/bringup_cluster.sh) | Kubernetes bootstrap (mgmt on `enp1s0`) |
+| [bringup/00_testbed/attach_vm.sh](../bringup/00_testbed/attach_vm.sh) | Attach site NIC to `br-int-*` |
 
-Legacy (deprecated): [scripts/br-int-edge_2_eno2.sh](../../scripts/br-int-edge_2_eno2.sh) — direct `eno2` uplink replaced by **`eno1.137`**.
+Legacy (deprecated): [scripts/br-int-edge_2_eno2.sh](../scripts/br-int-edge_2_eno2.sh) — direct `eno2` uplink replaced by **`eno1.137`**.

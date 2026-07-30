@@ -2,7 +2,7 @@
 
 Physical **802.1Q VLANs** on hypervisor **`eno1`** join each Nephio cluster to external L2. Site fabric (**vm-sw**, `br-ext-*`) simulates WAN latency between clusters on the host.
 
-Related: [nephio/docs/testbed.md](../../nephio/docs/testbed.md) · [docs/topology.md](../../docs/topology.md) · [nephio/docs/mgmt.md](../../nephio/docs/mgmt.md) · [nephio/docs/ip.md](../../nephio/docs/ip.md)
+Related: [docs/testbed.md](../../docs/testbed.md) · [docs/topology.md](../../docs/topology.md) · [docs/mgmt.md](../../docs/mgmt.md) · [docs/ip_plan.md](../../docs/ip_plan.md)
 
 ## VLAN uplinks — join clusters to external L2
 

@@ -1,8 +1,8 @@
 # Bring up central cluster (kubeadm)
 
-> **Note:** This guide uses legacy lab IPs (`10.1.101.x`). The multi-site testbed uses **`10.1.132.0/24`** (mgmt) and **`10.1.137.0/24` / `10.1.138.0/24`** (site). See [bringup/00_testbed/readme.md](../../bringup/00_testbed/readme.md) and [ip.md](ip.md).
+> **Note:** This guide uses legacy lab IPs (`10.1.101.x`). The multi-site testbed uses **`10.1.132.0/24`** (mgmt) and **`10.1.137.0/24` / `10.1.138.0/24`** (site). See [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md) and [ip_plan.md](ip_plan.md).
 
-Second Kubernetes cluster for OAI / workload workloads. The **management** cluster stays on `10.1.101.10` (see [readme.md](../../readme.md)). This guide builds the **central** cluster on **`10.1.101.22`**.
+Second Kubernetes cluster for OAI / workload workloads. The **management** cluster stays on `10.1.101.10` (see [readme.md](../readme.md)). This guide builds the **central** cluster on **`10.1.101.22`**.
 
 | Cluster | User | Context | File |
 |---------|------|---------|------|
@@ -180,4 +180,4 @@ kubectl --context=central@central get pods -A
 
 - This only creates Kubernetes on **central** (`10.1.101.22`); it does not install Nephio, Porch, or Gitea (those stay on **mgmt** unless you choose to deploy more there).
 - Register **central** with Nephio (e.g. `WorkloadCluster`, Git repo, Config Sync) separately when you wire mgmt → central GitOps.
-- **Mgmt** init reference: `sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=10.1.101.10` in [readme.md](../../readme.md).
+- **Mgmt** init reference: `sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=10.1.101.10` in [readme.md](../readme.md).

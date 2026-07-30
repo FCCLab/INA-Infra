@@ -58,15 +58,16 @@ Host ue-1
     Port 22
     IdentityFile ~/.ssh/id_rsa
 
+# Bare metal: SSH via mgmt/WAN only (.101.x). Site .137 is K8s node-ip, not SSH.
 Host gh81
-    HostName 10.1.132.11
-    User tuannv
+    HostName 10.1.101.211
+    User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa
 
 Host gh82
     HostName 10.1.101.212
-    User tuannv
+    User fcp
     Port 22
     IdentityFile ~/.ssh/id_rsa
 

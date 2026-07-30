@@ -433,6 +433,10 @@ setup_node() {
   else
     NODE_MGMT_EXTERNAL[$node]=0
   fi
+  if [[ "${NODE_MGMT_EXTERNAL[$node]:-0}" == "1" ]]; then
+    # External mgmt (WAN/.101): SSH stays on bootstrap IP; site .137 is kubelet only.
+    mgmt_ip="$init_ip"
+  fi
   NODE_MGMT_IP[$node]="$mgmt_ip"
 
   read_node_credentials "$node" "$init_ip"
