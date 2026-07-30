@@ -6,7 +6,7 @@
 #   ./scripts/push_smf.sh --build --tag v2.2.1-dnn-fix-2
 #
 # Build first (on this host):
-#   ./network-slicing/nws/build_scripts/build_smf.sh --tag v2.2.1-dnn-fix-1
+#   ./scripts/push_smf.sh --build --tag v2.2.1-dnn-fix-1
 #
 # Then update ina-infra SMF op-conf image to:
 #   10.1.132.30:5000/oaisoftwarealliance/oai-smf:<tag>
@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=cluster_lib.sh
+source "$SCRIPT_DIR/cluster_lib.sh"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
 IMAGE_TAG="${IMAGE_TAG:-v2.2.1-dnn-fix-3}"
 REPO_NAME="oaisoftwarealliance/oai-smf"
@@ -104,7 +106,7 @@ for candidate in \
 done
 
 if [[ "${DO_BUILD}" -eq 1 ]]; then
-  BUILD_SMF="${REPO_ROOT}/network-slicing/nws/build_scripts/build_smf.sh"
+  BUILD_SMF="${REPO_ROOT}/${OAI_SLICE_DIR}/nws/build_scripts/build_smf.sh"
   if [[ ! -x "${BUILD_SMF}" ]]; then
     echo "Error: build script not found or not executable: ${BUILD_SMF}" >&2
     exit 1
@@ -119,7 +121,7 @@ if [[ -z "${LOCAL_IMAGE}" ]]; then
 Error: no local oai-smf image found for tag '${IMAGE_TAG}'.
 
 Build on this host:
-  ${REPO_ROOT}/network-slicing/nws/build_scripts/build_smf.sh --tag ${IMAGE_TAG}
+  ${REPO_ROOT}/${OAI_SLICE_DIR}/nws/build_scripts/build_smf.sh --tag ${IMAGE_TAG}
 
 Or push with build:
   $(basename "$0") --build --tag ${IMAGE_TAG}

@@ -98,7 +98,7 @@ write_doc({
     "spec": {"config": json.dumps(nad_config)},
 }, prefix="12-")
 
-# 106 PRB RAN from network-slicing/nws/gnb.sa.band78.106prb.rfsim.oai.yaml
+# 106 PRB RAN from INA-Infra-oai-slice-implementation/nws/gnb.sa.band78.106prb.rfsim.oai.yaml
 # AMF/IPs rewritten for Nephio OAI core + macvlan.
 gnb_conf = f"""Active_gNBs = ( "gnb-rfsim");
 Asn1_verbosity = "none";
@@ -114,7 +114,7 @@ gNBs =
     min_rxtxtime = 6;
     servingCellConfigCommon = (
     {{
-      # Match network-slicing/nws/gnb.sa.band78.106prb.rfsim.oai.yaml
+      # Match INA-Infra-oai-slice-implementation/nws/gnb.sa.band78.106prb.rfsim.oai.yaml
       # Do NOT set ra_ResponseWindow: OAI auto-selects sl20 (mu=1); sl10 (4) is too
       # short for Msg2 under RFsim/TDD (exceeded RA window / RAR failed).
       physCellId = 0;

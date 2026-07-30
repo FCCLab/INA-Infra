@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# For each repos/* Gitea submodule: cd → pull → commit (if dirty) → push.
+# For each repos/* submodule: pull from lab Gitea, push Gitea + mirror GitHub origin.
 # Exits immediately on merge conflict or any git failure.
 set -euo pipefail
 
@@ -36,22 +36,23 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options] [cluster ...]
 
-For each repos/<gitea-repo>/ submodule: pull, then push. Exit on conflict.
+For each repos/<cluster-repo>/ submodule: pull from Gitea, push Gitea, mirror GitHub.
 Default (no args): mgmt, central, regional, edge, ue.
 
-repos/* are git submodules. After cloning the parent:
-  git submodule update --init --recursive
+Clone parent from GitHub, then on the testbed run:
+  ./scripts/setup_lab_git_remotes.sh
 
 Per repo:
   1. cd repos/<name>
-  2. git pull (exit on conflict)
+  2. git pull gitea/<branch>
   3. git add -A && commit if dirty
-  4. git pull again (exit on conflict)
-  5. git push
+  4. git pull gitea again
+  5. git push gitea
+  6. git push origin (GitHub mirror)
 
 Options:
   -m, --message MSG   Commit message
-  -p, --pull-only     Pull only (no commit/push)
+  -p, --pull-only     Pull from Gitea only (no commit/push)
   -n, --dry-run       Print actions only
   -h, --help          Show this help
 
@@ -75,63 +76,110 @@ repo_source_dir() {
   printf '%s/%s' "$REPOS_DIR" "$(cluster_gitea_repo_name "$cluster")"
 }
 
-git_url_for_repo() {
-  local repo_name="$1"
-  printf 'http://%s:%s/%s/%s.git' \
-    "$GITEA_HOST" "$GITEA_PORT" "$GITEA_ORG" "$repo_name"
+gitea_url_for_cluster() {
+  local cluster="$1"
+  gitea_repo_url "$(cluster_gitea_repo_name "$cluster")"
 }
 
-# Pull origin/<branch>. On conflict: abort merge and exit the whole script.
-pull_or_exit() {
-  local branch="$1"
-  local label="$2"
+github_url_for_cluster() {
+  local cluster="$1"
+  github_repo_url "$(github_gitops_repo_name "$cluster")"
+}
 
-  echo "    pulling origin/${branch} ..."
-  if git_auth pull --no-edit --no-rebase origin "$branch"; then
+# Pull remote/<branch>. On conflict: abort merge and exit the whole script.
+pull_or_exit() {
+  local remote="$1"
+  local branch="$2"
+  local label="$3"
+
+  echo "    pulling ${remote}/${branch} ..."
+  if [[ "$remote" == "gitea" ]]; then
+    if git_auth pull --no-edit --no-rebase "$remote" "$branch"; then
+      return 0
+    fi
+  elif git pull --no-edit --no-rebase "$remote" "$branch"; then
     return 0
   fi
 
-  echo "error: [${label}] pull conflict with origin/${branch}; exiting" >&2
+  echo "error: [${label}] pull conflict with ${remote}/${branch}; exiting" >&2
   echo "    conflicted files:" >&2
   git diff --name-only --diff-filter=U | sed 's/^/      /' >&2 || true
   git merge --abort 2>/dev/null || true
   exit 1
 }
 
+ensure_remotes() {
+  local cluster="$1"
+  local gitea_url github_url
+
+  gitea_url="$(gitea_url_for_cluster "$cluster")"
+  github_url="$(github_url_for_cluster "$cluster")"
+
+  if git remote get-url gitea >/dev/null 2>&1; then
+    git remote set-url gitea "$gitea_url"
+  else
+    git remote add gitea "$gitea_url"
+  fi
+
+  if git remote get-url origin >/dev/null 2>&1; then
+    git remote set-url origin "$github_url"
+  else
+    git remote add origin "$github_url"
+  fi
+}
+
 ensure_on_branch() {
   local branch="$1"
-  local url="$2"
+  local cluster="$2"
 
-  git remote set-url origin "$url" 2>/dev/null || git remote add origin "$url"
-  git_auth fetch origin "$branch"
+  ensure_remotes "$cluster"
+  git_auth fetch gitea "$branch"
+  git fetch origin "$branch" 2>/dev/null || true
 
   if git show-ref --verify --quiet "refs/heads/${branch}"; then
     git checkout -q "$branch"
-  else
+  elif git show-ref --verify --quiet "refs/remotes/gitea/${branch}"; then
+    git checkout -q -B "$branch" "gitea/${branch}"
+  elif git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
     git checkout -q -B "$branch" "origin/${branch}"
+  else
+    git checkout -q -B "$branch"
   fi
-  git branch -q --set-upstream-to="origin/${branch}" "$branch" 2>/dev/null || true
+  git branch -q --set-upstream-to="gitea/${branch}" "$branch" 2>/dev/null || true
+}
+
+mirror_github() {
+  local cluster="$1"
+  local branch="$2"
+
+  echo "    mirroring origin/${branch} (GitHub) ..."
+  if git push origin "HEAD:${branch}"; then
+    return 0
+  fi
+  echo "warning: [${cluster}] GitHub mirror push failed (Gitea push succeeded)" >&2
+  return 0
 }
 
 push_cluster_repo() {
   local cluster="$1"
-  local repo_name src_dir safe_url rel_path msg
+  local repo_name src_dir gitea_url github_url rel_path msg
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   src_dir="$(repo_source_dir "$cluster")"
   rel_path="repos/${repo_name}"
-  safe_url="$(git_url_for_repo "$repo_name")"
+  gitea_url="$(gitea_url_for_cluster "$cluster")"
+  github_url="$(github_url_for_cluster "$cluster")"
 
   if [[ "$PULL_ONLY" == "1" ]]; then
-    echo "==> [${cluster}] pull ${src_dir}"
+    echo "==> [${cluster}] pull ${src_dir} (gitea)"
   else
-    echo "==> [${cluster}] pull+push ${src_dir}"
+    echo "==> [${cluster}] pull+push ${src_dir} (gitea → GitHub)"
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "    dry-run: cd ${src_dir} && git pull origin ${GIT_BRANCH}"
+    echo "    dry-run: cd ${src_dir} && git pull gitea ${GIT_BRANCH}"
     if [[ "$PULL_ONLY" != "1" ]]; then
-      echo "    dry-run: commit if dirty && git pull && git push"
+      echo "    dry-run: commit if dirty && git pull gitea && git push gitea && git push origin"
     fi
     return 0
   fi
@@ -140,7 +188,8 @@ push_cluster_repo() {
     echo "    initializing submodule ${rel_path} ..."
     (
       cd "$REPO_ROOT"
-      git_auth submodule update --init -- "$rel_path"
+      git submodule update --init -- "$rel_path"
+      ./scripts/setup_lab_git_remotes.sh "$cluster" 2>/dev/null || true
     ) || die "[${cluster}] submodule init failed for ${rel_path}"
   fi
 
@@ -148,11 +197,18 @@ push_cluster_repo() {
 
   cd "$src_dir"
 
-  ensure_on_branch "$GIT_BRANCH" "$safe_url"
-  echo "    at $(git rev-parse --short HEAD) on ${GIT_BRANCH}"
+  if ! git remote get-url gitea >/dev/null 2>&1; then
+    echo "    hint: run ./scripts/setup_lab_git_remotes.sh (missing gitea remote)" >&2
+    die "[${cluster}] gitea remote not configured"
+  fi
 
-  # 1) Pull first
-  pull_or_exit "$GIT_BRANCH" "$cluster"
+  ensure_on_branch "$GIT_BRANCH" "$cluster"
+  echo "    at $(git rev-parse --short HEAD) on ${GIT_BRANCH}"
+  echo "    gitea:  ${gitea_url}"
+  echo "    github: ${github_url}"
+
+  # 1) Pull from Gitea first
+  pull_or_exit gitea "$GIT_BRANCH" "$cluster"
 
   if [[ "$PULL_ONLY" == "1" ]]; then
     echo "    pull-only done @$(git rev-parse --short HEAD)"
@@ -168,24 +224,25 @@ push_cluster_repo() {
     msg="${COMMIT_MSG:-Update ${repo_name} ($(date -u +%Y-%m-%dT%H:%M:%SZ))}"
     git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
       commit -m "$msg"
-    # 3) Pull again before push (exit on conflict)
-    pull_or_exit "$GIT_BRANCH" "$cluster"
+    pull_or_exit gitea "$GIT_BRANCH" "$cluster"
   fi
 
-  # 4) Push
-  if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/${GIT_BRANCH}")" ]]; then
-    echo "    nothing to push"
+  # 3) Push to Gitea (Config Sync source of truth)
+  if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "gitea/${GIT_BRANCH}" 2>/dev/null || echo "")" ]]; then
+    echo "    nothing to push to gitea"
   else
-    echo "    pushing origin/${GIT_BRANCH} ..."
-    git_auth push origin "HEAD:${GIT_BRANCH}" \
-      || die "[${cluster}] push failed"
+    echo "    pushing gitea/${GIT_BRANCH} ..."
+    git_auth push gitea "HEAD:${GIT_BRANCH}" \
+      || die "[${cluster}] gitea push failed"
   fi
 
-  # Refresh parent gitlink (stage only)
+  # 4) Mirror to GitHub
+  mirror_github "$cluster" "$GIT_BRANCH"
+
   cd "$REPO_ROOT"
   git add "$rel_path" 2>/dev/null || true
 
-  echo "    done ${safe_url}@$(git -C "$src_dir" rev-parse --short HEAD)"
+  echo "    done gitea@${gitea_url} github@${github_url} @$(git -C "$src_dir" rev-parse --short HEAD)"
   echo "    Dashboard:   https://$(dashboard_mgmt_ip "$cluster"):$(dashboard_nodeport)"
   echo "    OpenSpeedTest: http://$(openspeedtest_vip "$cluster")"
 }
@@ -232,9 +289,9 @@ fi
 command -v git >/dev/null 2>&1 || die "git not found in PATH"
 
 if [[ "$PULL_ONLY" == "1" ]]; then
-  echo "Pull repos/ submodules (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+  echo "Pull repos/ from Gitea (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
 else
-  echo "Pull+push repos/ submodules (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
+  echo "Pull+push repos/ Gitea → GitHub (${GITEA_HOST}:${GITEA_PORT}): ${clusters[*]}"
 fi
 echo
 

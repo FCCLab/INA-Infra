@@ -851,7 +851,7 @@ smf_refs = [
     }
 ]
 nssai_list = []
-# Match network-slicing/nws/5gc/oai/conf/config.yaml: embb (no SD) + sd 0x01..0x05
+# Match INA-Infra-oai-slice-implementation/nws/5gc/oai/conf/config.yaml: embb (no SD) + sd 0x01..0x05
 nssai_list.append(
     {
         "sst": 1,

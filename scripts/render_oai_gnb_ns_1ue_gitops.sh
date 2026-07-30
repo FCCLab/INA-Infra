@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render oai-gnb-ns-1ue nrUE (RFsim client) into repos/ for Config Sync on the ue cluster.
 # Reuses the already-running mono gNB on edge/usrp (10.1.139.113:4043).
-# UICC from network-slicing/nws/nrue1.uicc.yaml; RF matches running gNB (51 PRB).
+# UICC from INA-Infra-oai-slice-implementation/nws/nrue1.uicc.yaml; RF matches running gNB (51 PRB).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

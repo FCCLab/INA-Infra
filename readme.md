@@ -1,5 +1,22 @@
 # Bring up Nephio
 
+## Clone
+
+```bash
+git clone --recurse-submodules https://github.com/FCCLab/INA-Infra.git
+cd INA-Infra
+```
+
+On the **lab testbed** (Config Sync push target), register Gitea remotes once:
+
+```bash
+./scripts/setup_lab_git_remotes.sh
+```
+
+Submodule layout: GitHub `FCCLab/INA-Infra-*` in `.gitmodules`; lab GitOps pushes to Gitea `nephio/*` via `push_git_repos.sh`.
+
+---
+
 Current testbed IPs, MetalLB pools (`10.1.138.100`–`.199`), and VIPs: [nephio/docs/ip.md](nephio/docs/ip.md). Topology: [bringup/00_testbed/readme.md](bringup/00_testbed/readme.md).
 
 GitOps components (render → push → Config Sync): Flannel, Multus, MetalLB, Kubernetes Dashboard (NodePort **30443**), OAI operators + core (**central** only), OpenSpeedTest MetalLB VIPs. See [bringup/02_configsync/readme.md](bringup/02_configsync/readme.md).

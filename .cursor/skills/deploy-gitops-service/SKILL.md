@@ -31,11 +31,11 @@ Deploy progress:
 
 | Cluster | Local tree (submodule) | Gitea | Context |
 |---------|------------------------|-------|---------|
-| mgmt | `repos/mgmt/` | `nephio/mgmt` | `mgmt@mgmt` |
-| central | `repos/central-repo/` | `nephio/central-repo` | `central@central` |
-| regional | `repos/regional-repo/` | `nephio/regional-repo` | `regional@regional` |
-| edge | `repos/edge-repo/` | `nephio/edge-repo` | `edge@edge` |
-| ue | `repos/ue-repo/` | `nephio/ue-repo` | `ue@ue` |
+| mgmt | `repos/mgmt/` | Gitea `nephio/mgmt` · GitHub `FCCLab/INA-Infra-mgmt` | `mgmt@mgmt` |
+| central | `repos/central-repo/` | Gitea `nephio/central-repo` · GitHub `FCCLab/INA-Infra-central-repo` | `central@central` |
+| regional | `repos/regional-repo/` | Gitea `nephio/regional-repo` · GitHub `FCCLab/INA-Infra-regional-repo` | `regional@regional` |
+| edge | `repos/edge-repo/` | Gitea `nephio/edge-repo` · GitHub `FCCLab/INA-Infra-edge-repo` | `edge@edge` |
+| ue | `repos/ue-repo/` | Gitea `nephio/ue-repo` · GitHub `FCCLab/INA-Infra-ue-repo` | `ue@ue` |
 
 `repos/*` are Gitea submodules (`.gitmodules`). Init: `git submodule update --init --recursive`.
 

@@ -47,13 +47,16 @@ Run all three:
 | edge     | `nephio/edge-repo`    | `repos/edge-repo`     | `edge-repo`    | `edge-repo-access-token-configsync`     |
 | ue       | `nephio/ue-repo`      | `repos/ue-repo`       | `ue-repo`      | `ue-repo-access-token-configsync`       |
 
-`repos/*` are **git submodules** pointing at those Gitea remotes (see `.gitmodules`). After cloning this parent repo:
+**Clone (GitHub):** submodules use `https://github.com/FCCLab/INA-Infra-*.git` in [`.gitmodules`](../../.gitmodules). Clusters still reconcile from **Gitea** `nephio/*` (unchanged RootSync URLs).
 
 ```bash
+git clone --recurse-submodules https://github.com/FCCLab/INA-Infra.git
+cd INA-Infra
 git submodule update --init --recursive
+./scripts/setup_lab_git_remotes.sh   # testbed only: adds gitea remote on repos/*
 ```
 
-Render scripts write into the submodule working trees; `push_git_repos.sh` pulls from Gitea first, then commits and pushes inside each submodule (never pushes before a successful pull/merge).
+Render scripts write into the submodule working trees; `push_git_repos.sh` pulls from **Gitea**, pushes Gitea, then mirrors **GitHub** `origin`.
 
 Gitea: [http://10.1.132.200:3000](http://10.1.132.200:3000) (`nephio` / `secret`).
 

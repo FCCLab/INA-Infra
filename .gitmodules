@@ -1,23 +1,24 @@
-[submodule "network-slicing"]
-	path = network-slicing
-	url = https://github.com/FCCLab/network-slicing.git
+[submodule "INA-Infra-oai-slice-implementation"]
+	path = INA-Infra-oai-slice-implementation
+	url = https://github.com/FCCLab/INA-Infra-oai-slice-implementation.git
+	branch = main
 [submodule "repos/mgmt"]
 	path = repos/mgmt
-	url = http://10.1.132.200:3000/nephio/mgmt.git
+	url = https://github.com/FCCLab/INA-Infra-mgmt.git
 	branch = main
 [submodule "repos/central-repo"]
 	path = repos/central-repo
-	url = http://10.1.132.200:3000/nephio/central-repo.git
+	url = https://github.com/FCCLab/INA-Infra-central-repo.git
 	branch = main
 [submodule "repos/regional-repo"]
 	path = repos/regional-repo
-	url = http://10.1.132.200:3000/nephio/regional-repo.git
+	url = https://github.com/FCCLab/INA-Infra-regional-repo.git
 	branch = main
 [submodule "repos/edge-repo"]
 	path = repos/edge-repo
-	url = http://10.1.132.200:3000/nephio/edge-repo.git
+	url = https://github.com/FCCLab/INA-Infra-edge-repo.git
 	branch = main
 [submodule "repos/ue-repo"]
 	path = repos/ue-repo
-	url = http://10.1.132.200:3000/nephio/ue-repo.git
+	url = https://github.com/FCCLab/INA-Infra-ue-repo.git
 	branch = main

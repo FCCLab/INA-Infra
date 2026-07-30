@@ -396,6 +396,20 @@ gitea_repo_url() {
   printf 'http://%s:%s/%s/%s.git' "$host" "$port" "$org" "$repo_name"
 }
 
+# GitHub repo name under FCCLab/INA-Infra-<suffix> (public clone + mirror).
+github_gitops_repo_name() {
+  local cluster="$1"
+  printf 'INA-Infra-%s' "$(cluster_gitea_repo_name "$cluster")"
+}
+
+github_repo_url() {
+  local repo_name="$1"
+  printf 'https://github.com/FCCLab/%s.git' "$repo_name"
+}
+
+# OAI slice submodule directory (was network-slicing).
+OAI_SLICE_DIR="${OAI_SLICE_DIR:-INA-Infra-oai-slice-implementation}"
+
 cluster_site_type() {
   local cluster="$1"
   printf '%s' "${CLUSTER_SITE_TYPE[$cluster]}"
