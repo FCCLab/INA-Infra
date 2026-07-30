@@ -19,6 +19,12 @@ git submodule update --init --recursive
 
 Both commands fetch all submodules from GitHub (`FCCLab/INA-Infra-*`). Option A is equivalent to Option B.
 
+**Already cloned — pull latest:**
+
+```bash
+./scripts/github/pull_github.sh
+```
+
 On the **lab testbed** (Config Sync push target), register Gitea remotes once:
 
 ```bash
