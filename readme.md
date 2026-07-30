@@ -2,10 +2,22 @@
 
 ## Clone
 
+**Option A — recursive clone (one step):**
+
 ```bash
 git clone --recurse-submodules https://github.com/FCCLab/INA-Infra.git
 cd INA-Infra
 ```
+
+**Option B — clone, then init submodules:**
+
+```bash
+git clone https://github.com/FCCLab/INA-Infra.git
+cd INA-Infra
+git submodule update --init --recursive
+```
+
+Both commands fetch all submodules from GitHub (`FCCLab/INA-Infra-*`). Option A is equivalent to Option B.
 
 On the **lab testbed** (Config Sync push target), register Gitea remotes once:
 

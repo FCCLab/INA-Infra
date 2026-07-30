@@ -49,8 +49,17 @@ Run all three:
 
 **Clone (GitHub):** submodules use `https://github.com/FCCLab/INA-Infra-*.git` in [`.gitmodules`](../../.gitmodules). Clusters still reconcile from **Gitea** `nephio/*` (unchanged RootSync URLs).
 
+Option A — recursive clone:
+
 ```bash
 git clone --recurse-submodules https://github.com/FCCLab/INA-Infra.git
+cd INA-Infra
+```
+
+Option B — clone, then init submodules:
+
+```bash
+git clone https://github.com/FCCLab/INA-Infra.git
 cd INA-Infra
 git submodule update --init --recursive
 ./scripts/setup_lab_git_remotes.sh   # testbed only: adds gitea remote on repos/*
