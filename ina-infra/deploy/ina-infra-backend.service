@@ -9,10 +9,11 @@ User=fcp
 Group=fcp
 WorkingDirectory=/home/fcp/nephio-network-slicing/ina-infra
 Environment=HOME=/home/fcp
+Environment=INA_INFRA_ROOT=/home/fcp/nephio-network-slicing/ina-infra
 Environment=INA_SRC=/home/fcp/nephio-network-slicing/algorithm/new_implementation
-Environment=REPO_ROOT=/home/fcp/nephio-network-slicing
 Environment=REPOS_DIR=/home/fcp/nephio-network-slicing/repos
-Environment=PUSH_SCRIPT=/home/fcp/nephio-network-slicing/bringup/03_push_to_git_repos/push_git_repos.sh
+Environment=PUSH_SCRIPT=/home/fcp/nephio-network-slicing/ina-infra/backend/scripts/push_git_repos.sh
+Environment=SSH_CFG=/home/fcp/nephio-network-slicing/ina-infra/backend/scripts/ssh_config
 Environment=GRB_LICENSE_FILE=/home/fcp/gurobi.lic
 Environment=PYTHONPATH=/home/fcp/nephio-network-slicing/ina-infra/backend
 Environment=INA_DB_PATH=/home/fcp/nephio-network-slicing/ina-infra/data/profiles.db

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from app.api.routes import router
 from app.services import profile_store
@@ -18,15 +19,71 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+OPENAPI_TAGS = [
+    {
+        "name": "System",
+        "description": "Process health and diagnostics.",
+    },
+    {
+        "name": "Network",
+        "description": "PlanningLayer substrate model (capacities, PRBs, weights).",
+    },
+    {
+        "name": "Slices",
+        "description": "Slice SLA templates used as profile defaults.",
+    },
+    {
+        "name": "Profiles",
+        "description": (
+            "Saved deployment profiles (name = K8s namespace). "
+            "SQLite under `INA_DB_PATH`."
+        ),
+    },
+    {
+        "name": "Clusters",
+        "description": "Live cluster discovery and per-profile workload status.",
+    },
+    {
+        "name": "Rollout",
+        "description": (
+            "Staged restart of NFs after Apply "
+            "(NRF → UPF → SMF → PFCP → RAN)."
+        ),
+    },
+    {
+        "name": "Planning (PL)",
+        "description": (
+            "PlanningLayer: solve placement + Multus IP plan, "
+            "apply/undeploy GitOps to Gitea."
+        ),
+    },
+    {
+        "name": "Medium (PM)",
+        "description": "Medium-term layer (stub — not implemented yet).",
+    },
+    {
+        "name": "Short (PS)",
+        "description": "Short-term PRB layer (stub — not implemented yet).",
+    },
+]
+
 app = FastAPI(
     title="INA-Infra API",
     description=(
-        "PlanningLayer (PL) REST API for multi-site slice placement. "
-        "Profiles persist in SQLite (INA_DB_PATH). "
-        "Solve SLAs → Multus IP plan → apply GitOps templates. "
-        "PM/PS endpoints are stubs for a later phase."
+        "Multi-timescale **INA** control plane for the Nephio lab.\n\n"
+        "Typical flow:\n"
+        "1. **Profiles** — create/save Multus subnet + slice SLAs\n"
+        "2. **Planning (PL)** — `solve` → `apply` (GitOps)\n"
+        "3. **Rollout** — staged NF restart / PFCP wait\n"
+        "4. **Clusters** — watch Deployment readiness\n\n"
+        "**Swagger UI:** [/docs](/docs) · **ReDoc:** [/redoc](/redoc) · "
+        "**OpenAPI:** [/openapi.json](/openapi.json)"
     ),
     version="0.2.0",
+    openapi_tags=OPENAPI_TAGS,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     lifespan=lifespan,
 )
 
@@ -41,11 +98,18 @@ app.add_middleware(
 app.include_router(router)
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root():
+    """Send browsers to Swagger UI."""
+    return RedirectResponse(url="/docs", status_code=307)
+
+
+@app.get("/api", include_in_schema=False)
+def api_index():
     return {
         "service": "ina-infra",
-        "docs": "/docs",
+        "swagger": "/docs",
+        "redoc": "/redoc",
         "openapi": "/openapi.json",
         "health": "/api/v1/health",
         "profiles": "/api/v1/profiles",

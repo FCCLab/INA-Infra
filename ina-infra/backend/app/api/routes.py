@@ -1,4 +1,4 @@
-"""REST routes for INA-Infra."""
+"""REST routes for INA-Infra (grouped OpenAPI tags)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,19 @@ def _sse_response(gen):
     )
 
 
-@router.get("/health")
+# ── System ───────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/health",
+    tags=["System"],
+    summary="Health check",
+    description=(
+        "Liveness probe for the host backend process. "
+        "Returns service name and absolute path to the SQLite profile DB "
+        "(`INA_DB_PATH`)."
+    ),
+)
 def health():
     return {
         "status": "ok",
@@ -59,30 +71,85 @@ def health():
     }
 
 
-@router.get("/network", response_model=NetworkOut)
+# ── Network ──────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/network",
+    response_model=NetworkOut,
+    tags=["Network"],
+    summary="Get substrate network defaults",
+    description=(
+        "Return the PlanningLayer substrate model used for PL solve: "
+        "site compute/radio capacities, PRB pool (`b_total`), and cost weights. "
+        "Values come from the in-process Network defaults (not per-profile)."
+    ),
+)
 def get_network():
     return pl_solver.network_to_out()
 
 
-@router.put("/network", response_model=NetworkOut)
+@router.put(
+    "/network",
+    response_model=NetworkOut,
+    tags=["Network"],
+    summary="Preview network overrides",
+    description=(
+        "Apply optional field overrides on top of substrate defaults and return "
+        "the merged Network view. **Stateless** — does not persist; use profile "
+        "`network` on Save / PL solve to keep overrides with a profile."
+    ),
+)
 def put_network(body: NetworkIn):
-    """Return network with overrides applied (stateless preview)."""
     net = pl_solver._build_network(body)
     return pl_solver.network_to_out(net)
 
 
-@router.get("/slices/defaults", response_model=list[SliceIn])
+# ── Slices ───────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/slices/defaults",
+    response_model=list[SliceIn],
+    tags=["Slices"],
+    summary="Default slice SLA templates",
+    description=(
+        "Builtin demo slice list (CCTV / Physical AI / OTT / IoT) with "
+        "`t_bar`, `d_bar`, `h_s`, `eta_t0`. Used when creating a profile "
+        "without an explicit slice list."
+    ),
+)
 def get_default_slices():
     return pl_solver.default_slices()
 
 
-@router.get("/profiles/default", response_model=ProfileDefaultsOut)
+# ── Profiles ─────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/profiles/default",
+    response_model=ProfileDefaultsOut,
+    tags=["Profiles"],
+    summary="Builtin profile seed",
+    description=(
+        "Return the builtin profile identity + default slices + network used "
+        "to seed an empty DB. Prefer `GET /profiles` for saved profiles."
+    ),
+)
 def get_profile_defaults():
-    """Builtin defaults (also used to seed empty DB). Prefer GET /profiles."""
     return pl_solver.profile_defaults()
 
 
-@router.get("/profiles", response_model=ProfileListOut)
+@router.get(
+    "/profiles",
+    response_model=ProfileListOut,
+    tags=["Profiles"],
+    summary="List saved profiles",
+    description=(
+        "List all profiles in SQLite, including last PL result metadata and "
+        "deploy flags. `names` is a convenience list of profile name strings."
+    ),
+)
 def list_profiles():
     records = profile_store.list_profiles()
     return ProfileListOut(
@@ -91,67 +158,18 @@ def list_profiles():
     )
 
 
-@router.get("/profiles/{name}", response_model=ProfileRecord)
-def get_profile(name: str):
-    rec = profile_store.get_profile(name)
-    if rec is None:
-        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
-    return rec
-
-
-@router.get("/clusters/edge/nodes", response_model=EdgeNodesOut)
-def get_edge_nodes():
-    """List edge cluster nodes (auto-detected) for DU / UE placement."""
-    try:
-        return cluster_status.list_edge_nodes()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.get("/profiles/{name}/cluster-status", response_model=ProfileClusterStatusOut)
-def get_profile_cluster_status(name: str):
-    """Deployment readiness for the profile namespace on central."""
-    try:
-        raw = cluster_status.profile_cluster_status(name)
-        return ProfileClusterStatusOut.model_validate(raw)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
 @router.post(
-    "/profiles/{name}/rollout",
-    response_model=ProfileRolloutResponse,
+    "/profiles",
+    response_model=ProfileRecord,
+    status_code=201,
+    tags=["Profiles"],
+    summary="Create profile",
+    description=(
+        "Create a new profile (K8s namespace name). Optionally `copy_from` "
+        "another profile for slices/network. If slices/network omitted, "
+        "builtins are used. Returns **409** if the name already exists."
+    ),
 )
-def post_profile_rollout(name: str, body: ProfileRolloutRequest | None = None):
-    """Staged pod restart: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs."""
-    try:
-        return profile_rollout.run_profile_rollout(name, body or ProfileRolloutRequest())
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.post("/profiles/{name}/rollout/stream")
-def post_profile_rollout_stream(
-    name: str, body: ProfileRolloutRequest | None = None
-):
-    """SSE: live stdout/stderr from staged profile rollout."""
-    return _sse_response(
-        profile_rollout.iter_profile_rollout_sse(
-            name, body or ProfileRolloutRequest()
-        )
-    )
-
-
-@router.post(
-    "/profiles/{name}/rollout/stop",
-    response_model=ProfileRolloutStopResponse,
-)
-def post_profile_rollout_stop(name: str):
-    """Stop an in-progress staged profile rollout (kills script + ssh children)."""
-    return profile_rollout.stop_profile_rollout(name)
-
-
-@router.post("/profiles", response_model=ProfileRecord, status_code=201)
 def create_profile(body: ProfileCreateRequest):
     slices = list(body.slices)
     network = body.network
@@ -178,9 +196,36 @@ def create_profile(body: ProfileCreateRequest):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.put("/profiles/{name}", response_model=ProfileRecord)
+@router.get(
+    "/profiles/{name}",
+    response_model=ProfileRecord,
+    tags=["Profiles"],
+    summary="Get profile",
+    description=(
+        "Load one saved profile: identity (`name`, Multus `subnet`, DNN prefix, "
+        "DU/UE nodes), slice SLAs, network overrides, and last successful PL "
+        "result / deploy state if any."
+    ),
+)
+def get_profile(name: str):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    return rec
+
+
+@router.put(
+    "/profiles/{name}",
+    response_model=ProfileRecord,
+    tags=["Profiles"],
+    summary="Save / upsert profile",
+    description=(
+        "Create or update profile identity + slices + network. Path `{name}` "
+        "must match `body.profile.name`. Slices must be non-empty. Does **not** "
+        "push GitOps — use Planning → Apply for that."
+    ),
+)
 def save_profile(name: str, body: ProfileRecord):
-    """Create or update profile (identity + slices + network)."""
     if body.profile.name != name:
         raise HTTPException(
             status_code=400,
@@ -196,16 +241,34 @@ def save_profile(name: str, body: ProfileRecord):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/profiles/{name}/restore-defaults", response_model=ProfileRecord)
+@router.post(
+    "/profiles/{name}/restore-defaults",
+    response_model=ProfileRecord,
+    tags=["Profiles"],
+    summary="Restore profile defaults",
+    description=(
+        "Reset profile identity fields, slices, and network to builtins while "
+        "keeping the profile **name** and deploy-related state. Returns **404** "
+        "if the profile does not exist."
+    ),
+)
 def restore_profile_defaults(name: str):
-    """Reset profile identity, slices, and network to builtins (keeps name + deploy state)."""
     try:
         return profile_store.restore_profile_defaults(name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/profiles/{name}")
+@router.delete(
+    "/profiles/{name}",
+    tags=["Profiles"],
+    summary="Delete profile",
+    description=(
+        "Remove a profile from SQLite. If the DB would be empty, the builtin "
+        "`ina-infra` profile is re-seeded. Does **not** undeploy cluster "
+        "workloads — call Planning → Undeploy first if needed."
+    ),
+)
 def delete_profile(name: str):
     deleted = profile_store.delete_profile(name)
     if not deleted:
@@ -218,7 +281,121 @@ def delete_profile(name: str):
     }
 
 
-@router.post("/pl/solve", response_model=PlSolveResponse)
+# ── Clusters ─────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/clusters/edge/nodes",
+    response_model=EdgeNodesOut,
+    tags=["Clusters"],
+    summary="List edge cluster nodes",
+    description=(
+        "Discover nodes on the **edge** cluster (kubectl) for DU / UE "
+        "`kubernetes.io/hostname` placement. Includes Ready state, Multus "
+        "parent label when present, and suggested `default_du` / `default_ue`."
+    ),
+)
+def get_edge_nodes():
+    try:
+        return cluster_status.list_edge_nodes()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{name}/cluster-status",
+    response_model=ProfileClusterStatusOut,
+    tags=["Clusters"],
+    summary="Profile workload status",
+    description=(
+        "Best-effort Deployment readiness for the profile namespace across "
+        "central / regional / edge. Reads live cluster state and placement "
+        "hints from `ina-pl-placement` when present."
+    ),
+)
+def get_profile_cluster_status(name: str):
+    try:
+        raw = cluster_status.profile_cluster_status(name)
+        return ProfileClusterStatusOut.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Rollout ──────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/profiles/{name}/rollout",
+    response_model=ProfileRolloutResponse,
+    tags=["Rollout"],
+    summary="Staged NF rollout (blocking)",
+    description=(
+        "Run the staged restart script for the profile namespace: "
+        "NRF → UPF → SMF → PFCP wait → CU-CP → CU-UP → DU → UEs. "
+        "Blocks until the script finishes. Prefer `/rollout/stream` for UI logs."
+    ),
+)
+def post_profile_rollout(name: str, body: ProfileRolloutRequest | None = None):
+    try:
+        return profile_rollout.run_profile_rollout(name, body or ProfileRolloutRequest())
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/profiles/{name}/rollout/stream",
+    tags=["Rollout"],
+    summary="Staged NF rollout (SSE)",
+    description=(
+        "Same staged rollout as `/rollout`, but streams stdout/stderr as "
+        "**Server-Sent Events** (`text/event-stream`) for live UI progress."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from the rollout script",
+        }
+    },
+)
+def post_profile_rollout_stream(
+    name: str, body: ProfileRolloutRequest | None = None
+):
+    return _sse_response(
+        profile_rollout.iter_profile_rollout_sse(
+            name, body or ProfileRolloutRequest()
+        )
+    )
+
+
+@router.post(
+    "/profiles/{name}/rollout/stop",
+    response_model=ProfileRolloutStopResponse,
+    tags=["Rollout"],
+    summary="Stop in-progress rollout",
+    description=(
+        "Kill an in-progress staged rollout for this profile (script process "
+        "and SSH children). Safe to call when no rollout is running."
+    ),
+)
+def post_profile_rollout_stop(name: str):
+    return profile_rollout.stop_profile_rollout(name)
+
+
+# ── Planning (PL) ────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/pl/solve",
+    response_model=PlSolveResponse,
+    tags=["Planning (PL)"],
+    summary="Solve placement + Multus IP plan",
+    description=(
+        "Run PlanningLayer (Gurobi): place CU / UPF / APP per slice from SLAs, "
+        "allocate Multus IPs on the profile subnet "
+        "(`host = base[role] + n`, shared Nnrf at `.11`). "
+        "Persists the result on the profile and under `backend/results/`."
+    ),
+)
 def pl_solve(body: PlSolveRequest):
     try:
         return pl_solver.solve_pl(body)
@@ -226,7 +403,18 @@ def pl_solve(body: PlSolveRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/pl/apply", response_model=PlApplyResponse)
+@router.post(
+    "/pl/apply",
+    response_model=PlApplyResponse,
+    tags=["Planning (PL)"],
+    summary="Apply profile to GitOps (blocking)",
+    description=(
+        "Purge+rewrite `repos/{central,regional,edge}-repo/namespaces/<profile>/` "
+        "from templates (NADs, IP ConfigMaps, dedicated core, UPF/CU-UP/RAN), "
+        "render OAI controllers with Multus Nnrf from the IP plan, then push "
+        "to Gitea. Set `dry_run` to render without push. Blocks until push ends."
+    ),
+)
 def pl_apply(body: PlApplyRequest):
     try:
         return gitea_apply.apply_to_gitea(body)
@@ -234,13 +422,36 @@ def pl_apply(body: PlApplyRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/pl/apply/stream")
+@router.post(
+    "/pl/apply/stream",
+    tags=["Planning (PL)"],
+    summary="Apply profile to GitOps (SSE)",
+    description=(
+        "Same as `/pl/apply` but streams Gitea push output as "
+        "**Server-Sent Events** for the Deploy UI."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from render + git push",
+        }
+    },
+)
 def pl_apply_stream(body: PlApplyRequest):
-    """SSE: live Gitea push output for deploy / dry-deploy."""
     return _sse_response(gitea_apply.iter_apply_sse(body))
 
 
-@router.post("/pl/undeploy", response_model=PlUndeployResponse)
+@router.post(
+    "/pl/undeploy",
+    response_model=PlUndeployResponse,
+    tags=["Planning (PL)"],
+    summary="Undeploy profile from GitOps (blocking)",
+    description=(
+        "Remove `namespaces/<profile>/` from cluster GitOps repos, push to "
+        "Gitea (Config Sync prune), and best-effort force-delete stuck "
+        "namespaces / OAI finalizers on the clusters."
+    ),
+)
 def pl_undeploy(body: PlUndeployRequest):
     try:
         return gitea_apply.undeploy_from_gitea(body)
@@ -248,13 +459,38 @@ def pl_undeploy(body: PlUndeployRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/pl/undeploy/stream")
+@router.post(
+    "/pl/undeploy/stream",
+    tags=["Planning (PL)"],
+    summary="Undeploy profile from GitOps (SSE)",
+    description=(
+        "Same as `/pl/undeploy` with live **SSE** logs for push and cluster "
+        "cleanup."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from undeploy",
+        }
+    },
+)
 def pl_undeploy_stream(body: PlUndeployRequest):
-    """SSE: live Gitea push + cleanup output for undeploy."""
     return _sse_response(gitea_apply.iter_undeploy_sse(body))
 
 
-@router.post("/pm/solve", status_code=501)
+# ── Medium / Short (stubs) ───────────────────────────────────────────────────
+
+
+@router.post(
+    "/pm/solve",
+    status_code=501,
+    tags=["Medium (PM)"],
+    summary="Medium-layer solve (stub)",
+    description=(
+        "**Not implemented.** MediumLayer (PM) will re-allocate compute with "
+        "placement fixed from PL. Returns HTTP **501**."
+    ),
+)
 def pm_solve():
     raise HTTPException(
         status_code=501,
@@ -262,7 +498,16 @@ def pm_solve():
     )
 
 
-@router.post("/ps/solve", status_code=501)
+@router.post(
+    "/ps/solve",
+    status_code=501,
+    tags=["Short (PS)"],
+    summary="Short-layer solve (stub)",
+    description=(
+        "**Not implemented.** ShortLayer (PS) will allocate PRBs "
+        "(`b_min` / `b_ded`) on a short timescale. Returns HTTP **501**."
+    ),
+)
 def ps_solve():
     raise HTTPException(
         status_code=501,

@@ -3,8 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-UNIT_SRC="$REPO_ROOT/ina-infra/deploy/ina-infra-backend.service"
+INA_INFRA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+UNIT_SRC="$INA_INFRA_ROOT/deploy/ina-infra-backend.service"
 UNIT_DST=/etc/systemd/system/ina-infra-backend.service
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -14,7 +14,7 @@ fi
 
 # Ensure Python deps for the service user
 sudo -u fcp bash -lc "
-  pip3 install --user -q -r '$REPO_ROOT/ina-infra/backend/requirements.txt'
+  pip3 install --user -q -r '$INA_INFRA_ROOT/backend/requirements.txt'
 "
 
 install -m 644 "$UNIT_SRC" "$UNIT_DST"

@@ -173,7 +173,7 @@ if should_run_step 3; then
   "$SCRIPT_DIR/ina-infra-ping-restart-smf.sh" --no-ping --ns "$NS" --context "$SMF_CTX" \
     --timeout "$TIMEOUT"
   NRF_WAIT_SEC="$NRF_WAIT_SEC" NRF_LOG_SINCE="$NRF_LOG_SINCE" \
-    "$SCRIPT_DIR/ina-infra-wait-smf-nrf.sh" --ns "$NS" --context "$SMF_CTX" \
+    "$SCRIPT_DIR/profile/profile_wait_smf_nrf.sh" "$NS" --context "$SMF_CTX" \
     --timeout "$NRF_WAIT_SEC" --since "$NRF_LOG_SINCE"
 fi
 
@@ -181,7 +181,7 @@ if should_run_step 4; then
   echo
   echo "==> [4/5] Wait SMF↔UPF PFCP"
   PFCP_WAIT_SEC="$PFCP_WAIT_SEC" \
-    "$SCRIPT_DIR/ina-infra-wait-smf-pfcp-upfs.sh" --ns "$NS" --context "$SMF_CTX" \
+    "$SCRIPT_DIR/profile/profile_wait_smf_pfcp_upfs.sh" "$NS" --context "$SMF_CTX" \
     --timeout "$PFCP_WAIT_SEC" --since "$NRF_LOG_SINCE" "${slice_args[@]}"
 fi
 

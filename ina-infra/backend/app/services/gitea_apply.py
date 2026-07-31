@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List, Tuple
 
@@ -15,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from app.schemas import IpPlan, PlApplyRequest, PlApplyResponse, PlSolveResponse, Profile, PlUndeployRequest, PlUndeployResponse
 from app.services import ip_allocator
 from app.services import multus_iface
+from app.services import paths as ina_paths
 from app.services import ran_workloads
 from app.services.cmd_stream import (
     CmdResult,
@@ -35,31 +35,19 @@ CLUSTER_TO_REPO = {
 }
 
 def _repo_root() -> Path:
-    env = os.environ.get("REPO_ROOT")
-    if env:
-        return Path(env).resolve()
-    return Path(__file__).resolve().parents[4]
+    return ina_paths.repo_root()
 
 
 def _repos_dir() -> Path:
-    env = os.environ.get("REPOS_DIR")
-    if env:
-        return Path(env).resolve()
-    return _repo_root() / "repos"
+    return ina_paths.repos_dir()
 
 
 def _templates_dir() -> Path:
-    env = os.environ.get("INA_TEMPLATES")
-    if env:
-        return Path(env).resolve()
-    return _repo_root() / "ina-infra" / "templates"
+    return ina_paths.templates_dir()
 
 
 def _push_script() -> Path:
-    env = os.environ.get("PUSH_SCRIPT")
-    if env:
-        return Path(env).resolve()
-    return _repo_root() / "bringup" / "03_push_to_git_repos" / "push_git_repos.sh"
+    return ina_paths.push_script()
 
 
 def _jinja_env() -> Environment:
@@ -72,11 +60,12 @@ def _jinja_env() -> Environment:
 
 
 def _rel(path: Path) -> str:
-    root = _repo_root()
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
+    for root in (_repos_dir(), ina_paths.ina_infra_root(), _repo_root()):
+        try:
+            return str(path.relative_to(root))
+        except ValueError:
+            continue
+    return str(path)
 
 
 def _write(path: Path, content: str, written: List[str]) -> None:
@@ -126,10 +115,18 @@ def _gw_for_cluster(ip_plan: IpPlan, cluster: str) -> str:
     }.get(cluster, s.gw_central)
 
 
+def _stable_pl_message(message: str | None) -> str:
+    """Strip ephemeral persist/warn suffixes so GitOps YAML stays bit-stable."""
+    msg = (message or "").strip()
+    for sep in ("; saved to ", "; wrote ", "; warn:"):
+        if sep in msg:
+            msg = msg.split(sep, 1)[0].rstrip()
+    return msg
+
+
 def _summary_txt(ip_plan: IpPlan, result: PlSolveResponse) -> str:
     lines = [
         f"# INA-Infra profile={ip_plan.profile.name} subnet={ip_plan.subnet}",
-        f"# generated_at={datetime.now(timezone.utc).isoformat()}",
         f"# N={ip_plan.n_slices}  formula: host = base[role] + n",
         "#",
         "# slice | CU | UPF | APP | UPF_N3 | CUUP_N3 | UE_RF | DNN",
@@ -164,7 +161,6 @@ def _placement_payload(
     slices_payload: list,
 ) -> dict:
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
         "cluster": cluster,
         "profile": profile.model_dump(),
         "note": (
@@ -174,7 +170,7 @@ def _placement_payload(
             "IP formula host=base[role]+n."
         ),
         "ok": result.ok,
-        "message": result.message,
+        "message": _stable_pl_message(result.message),
         "slices_input": slices_payload,
         "deploy_map": {k: v.model_dump() for k, v in result.deploy_map.items()},
         "resources": {k: v.model_dump() for k, v in result.resources.items()},
@@ -193,12 +189,36 @@ def _clusters_for_apply(req: PlApplyRequest) -> List[str]:
     return clusters
 
 
-def _mysql_init_configmap(namespace: str) -> str:
-    """Wrap shared oai_db SQL in a ConfigMap for the profile namespace."""
+def _am_nssai_sql_literal(n_slices: int) -> str:
+    """SQL string literal for AM defaultSingleNssais (slices 1..N).
+
+    OAI UDR v2.2.1 looks up ``ueid='00101' AND servingPlmnid=''`` and returns
+    this list to AMF. Must match the profile's AMF ``plmn_support_list`` NSSAI
+    count — a 4-slice seed on an N=1 profile blocks Registration Accept.
+    """
+    import json
+
+    n = max(int(n_slices), 1)
+    payload = {
+        "defaultSingleNssais": [
+            {"sst": 1, "sd": f"{i:06d}"} for i in range(1, n + 1)
+        ]
+    }
+    # Match oai_db-basic.sql style: single-quoted JSON with \" escapes.
+    return json.dumps(payload, separators=(", ", ": ")).replace('"', '\\"')
+
+
+def _mysql_init_configmap(namespace: str, n_slices: int) -> str:
+    """Wrap oai_db SQL in a ConfigMap; pin AM NSSAI to profile slice count."""
     sql_path = _templates_dir() / "core" / "mysql" / "oai_db-basic.sql"
     if not sql_path.is_file():
         raise FileNotFoundError(f"MySQL init SQL missing: {sql_path}")
     sql = sql_path.read_text(encoding="utf-8")
+    if "INA_AM_NSSAI" not in sql:
+        raise ValueError(
+            f"{sql_path}: missing INA_AM_NSSAI placeholder for profile AM NSSAI"
+        )
+    sql = sql.replace("INA_AM_NSSAI", _am_nssai_sql_literal(n_slices))
     # YAML literal block; indent each SQL line by 4 spaces under the key.
     indented = "\n".join(("    " + line) if line else "" for line in sql.splitlines())
     return (
@@ -252,7 +272,11 @@ def _write_dedicated_core(
         _render(env, "core/05-deployment-mysql.yaml.j2", namespace=namespace),
         written,
     )
-    _write(ns_dir / "05-configmap-mysql-initialization.yaml", _mysql_init_configmap(namespace), written)
+    _write(
+        ns_dir / "05-configmap-mysql-initialization.yaml",
+        _mysql_init_configmap(namespace, n_slices),
+        written,
+    )
 
     for name, tmpl in (
         ("21-nfdeployment-ausf.yaml", "core/21-nfdeployment-ausf.yaml.j2"),
@@ -636,34 +660,33 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
         _render_profile_oai_controllers(
             namespace=ns,
             smf_n4=shared.smf_n4,
+            nrf_sbi=shared.nrf_sbi,
         )
     )
 
     return written, clusters, master_note
 
 
-def _render_profile_oai_controllers(*, namespace: str, smf_n4: str) -> List[str]:
+def _render_profile_oai_controllers(
+    *, namespace: str, smf_n4: str, nrf_sbi: str
+) -> List[str]:
     """Render OAI controllers into namespaces/<profile>/ (70-*); drop oai-cn-operators."""
-    script = _repo_root() / "scripts" / "render_ina_cn_operators_gitops.sh"
+    script = ina_paths.render_oai_controllers_script()
     if not script.is_file():
         raise FileNotFoundError(f"OAI controller render script missing: {script}")
 
-    env = os.environ.copy()
-    env["REPOS_DIR"] = str(_repos_dir())
-    env["REPO_ROOT"] = str(_repo_root())
+    env = ina_paths.script_env()
     env["INA_SMF_N4"] = smf_n4
-    # UPF op-conf NRF peer: Multus Nnrf on profile subnet (not MetalLB .138 / oai-cn .100).
-    env["INA_NRF_SBI_IP"] = os.environ.get(
-        "INA_NRF_SBI_IP",
-        os.environ.get("INA_NRF_LB_IP", os.environ.get("INA_NRF_LB", "10.1.140.11")),
-    )
-    env["INA_NRF_LB_IP"] = env["INA_NRF_SBI_IP"]
+    # UPF op-conf / init wait: Multus Nnrf from this profile's IP plan (not
+    # host env INA_NRF_* which defaults to ina-infra .140.11).
+    env["INA_NRF_SBI_IP"] = nrf_sbi
+    env["INA_NRF_LB_IP"] = nrf_sbi
     # Do not point UPFs at oai-cn NRF.
     env.pop("OAI_NRF_LB_IP", None)
 
     proc = subprocess.run(
         ["bash", str(script), namespace],
-        cwd=str(_repo_root()),
+        cwd=str(ina_paths.ina_infra_root()),
         env=env,
         capture_output=True,
         text=True,
@@ -672,7 +695,7 @@ def _render_profile_oai_controllers(*, namespace: str, smf_n4: str) -> List[str]
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
         raise RuntimeError(
-            f"render_ina_cn_operators_gitops.sh failed (rc={proc.returncode}): {detail}"
+            f"render_oai_controllers.sh failed (rc={proc.returncode}): {detail}"
         )
 
     written: List[str] = []
@@ -736,17 +759,15 @@ def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
         req.commit_message,
         *clusters,
     ]
-    env = os.environ.copy()
+    env = ina_paths.script_env()
     env.setdefault("GITEA_HOST", "10.1.132.200")
     env.setdefault("GITEA_PORT", "3000")
     env.setdefault("GITEA_USER", "nephio")
     env.setdefault("GITEA_PASS", "secret")
-    env["REPOS_DIR"] = str(_repos_dir())
-    env["REPO_ROOT"] = str(_repo_root())
 
     proc = subprocess.run(
         cmd,
-        cwd=str(_repo_root()),
+        cwd=str(ina_paths.ina_infra_root()),
         env=env,
         capture_output=True,
         text=True,
@@ -754,6 +775,7 @@ def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
     )
     ok = proc.returncode == 0
     saved = None
+    mysql_note = ""
     if ok and profile_name:
         saved = profile_store.save_deploy_state(
             profile_name,
@@ -762,6 +784,13 @@ def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
             deploy_clusters=clusters,
             pl_result=req.result if req.result.ok else None,
         )
+        # PVC MySQL keeps old AM NSSAI across Apply — sync live DB to profile N.
+        n_slices = 0
+        if req.result.ip_plan is not None:
+            n_slices = int(req.result.ip_plan.n_slices or 0)
+        if n_slices < 1 and req.result.slices:
+            n_slices = len(req.result.slices)
+        mysql_note = _patch_profile_mysql_live(profile_name, n_slices or 1)
     elif profile_name:
         # Still record attempted file list; leave deployed flag unchanged.
         prior = profile_store.get_profile(profile_name)
@@ -772,14 +801,17 @@ def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
             deploy_clusters=clusters,
             pl_result=req.result if req.result.ok else None,
         )
+    msg = (
+        f"Deployed to Gitea (Multus parents [{master_note}])"
+        if ok
+        else f"Deploy failed (exit {proc.returncode})"
+    )
+    if mysql_note:
+        msg = f"{msg}; {mysql_note}"
     return PlApplyResponse(
         ok=ok,
         dry_run=False,
-        message=(
-            f"Deployed to Gitea (Multus parents [{master_note}])"
-            if ok
-            else f"Deploy failed (exit {proc.returncode})"
-        ),
+        message=msg,
         written_files=written,
         push_stdout=proc.stdout,
         push_stderr=proc.stderr,
@@ -787,6 +819,27 @@ def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
         deployed=bool(saved.deployed) if saved else False,
         profile=saved,
     )
+
+
+def _patch_profile_mysql_live(namespace: str, n_slices: int) -> str:
+    """Best-effort live MySQL AM/SM patch for profile N (existing PVC)."""
+    script = ina_paths.profile_patch_mysql_script()
+    if not script.is_file():
+        return f"mysql patch skipped (missing {script.name})"
+    proc = subprocess.run(
+        ["bash", str(script), namespace, "--slices", str(max(int(n_slices), 1))],
+        cwd=str(ina_paths.ina_infra_root()),
+        env=ina_paths.script_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if proc.returncode == 0:
+        return f"mysql AM NSSAI synced to N={max(int(n_slices), 1)}"
+    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    tail = detail[-1] if detail else f"rc={proc.returncode}"
+    return f"mysql patch warn: {tail}"
 
 
 def _force_delete_profile_ns(cluster: str, ns: str) -> str:
@@ -997,18 +1050,15 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
             removed_paths=removed,
         )
 
+    env = ina_paths.script_env()
+    env["GITEA_HOST"] = os.environ.get("GITEA_HOST", "10.1.132.200")
+    env["GITEA_PORT"] = os.environ.get("GITEA_PORT", "3000")
+    env["GITEA_USER"] = os.environ.get("GITEA_USER", "nephio")
+    env["GITEA_PASS"] = os.environ.get("GITEA_PASS", "secret")
     proc = subprocess.run(
         ["bash", str(script), "-m", req.commit_message, *clusters],
-        cwd=str(_repo_root()),
-        env={
-            **os.environ,
-            "GITEA_HOST": os.environ.get("GITEA_HOST", "10.1.132.200"),
-            "GITEA_PORT": os.environ.get("GITEA_PORT", "3000"),
-            "GITEA_USER": os.environ.get("GITEA_USER", "nephio"),
-            "GITEA_PASS": os.environ.get("GITEA_PASS", "secret"),
-            "REPOS_DIR": str(_repos_dir()),
-            "REPO_ROOT": str(_repo_root()),
-        },
+        cwd=str(ina_paths.ina_infra_root()),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -1046,13 +1096,11 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
 
 
 def _gitea_push_env() -> Dict[str, str]:
-    env = os.environ.copy()
+    env = ina_paths.script_env()
     env.setdefault("GITEA_HOST", "10.1.132.200")
     env.setdefault("GITEA_PORT", "3000")
     env.setdefault("GITEA_USER", "nephio")
     env.setdefault("GITEA_PASS", "secret")
-    env["REPOS_DIR"] = str(_repos_dir())
-    env["REPO_ROOT"] = str(_repo_root())
     return env
 
 
@@ -1120,7 +1168,9 @@ def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
     cmd = ["bash", str(script), "-m", req.commit_message, *clusters]
     yield status_event(f"$ {' '.join(cmd)}")
     cmd_result: CmdResult | None = None
-    for item in stream_cmd(cmd, cwd=str(_repo_root()), env=_gitea_push_env()):
+    for item in stream_cmd(
+        cmd, cwd=str(ina_paths.ina_infra_root()), env=_gitea_push_env()
+    ):
         if isinstance(item, CmdResult):
             cmd_result = item
         else:
@@ -1130,6 +1180,7 @@ def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
     assert cmd_result is not None
     ok = cmd_result.returncode == 0
     saved = None
+    mysql_note = ""
     if ok and profile_name:
         saved = profile_store.save_deploy_state(
             profile_name,
@@ -1138,6 +1189,16 @@ def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
             deploy_clusters=clusters,
             pl_result=req.result if req.result.ok else None,
         )
+        n_slices = 0
+        if req.result.ip_plan is not None:
+            n_slices = int(req.result.ip_plan.n_slices or 0)
+        if n_slices < 1 and req.result.slices:
+            n_slices = len(req.result.slices)
+        yield status_event(
+            f"Syncing MySQL AM NSSAI to N={max(n_slices, 1)}…"
+        )
+        mysql_note = _patch_profile_mysql_live(profile_name, n_slices or 1)
+        yield status_event(mysql_note)
     elif profile_name:
         prior = profile_store.get_profile(profile_name)
         saved = profile_store.save_deploy_state(
@@ -1148,15 +1209,18 @@ def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
             pl_result=req.result if req.result.ok else None,
         )
 
+    msg = (
+        f"Deployed to Gitea (Multus parents [{master_note}])"
+        if ok
+        else f"Deploy failed (exit {cmd_result.returncode})"
+    )
+    if mysql_note:
+        msg = f"{msg}; {mysql_note}"
     yield result_event(
         PlApplyResponse(
             ok=ok,
             dry_run=False,
-            message=(
-                f"Deployed to Gitea (Multus parents [{master_note}])"
-                if ok
-                else f"Deploy failed (exit {cmd_result.returncode})"
-            ),
+            message=msg,
             written_files=written,
             push_stdout=cmd_result.stdout,
             push_stderr=cmd_result.stderr,
@@ -1269,7 +1333,9 @@ def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
     cmd = ["bash", str(script), "-m", req.commit_message, *clusters]
     yield status_event(f"$ {' '.join(cmd)}")
     cmd_result: CmdResult | None = None
-    for item in stream_cmd(cmd, cwd=str(_repo_root()), env=_gitea_push_env()):
+    for item in stream_cmd(
+        cmd, cwd=str(ina_paths.ina_infra_root()), env=_gitea_push_env()
+    ):
         if isinstance(item, CmdResult):
             cmd_result = item
         else:

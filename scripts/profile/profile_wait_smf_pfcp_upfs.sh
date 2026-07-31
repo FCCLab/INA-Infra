@@ -2,4 +2,4 @@
 # Compatibility wrapper — canonical script lives under ina-infra.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-exec "$ROOT/ina-infra/backend/scripts/push_git_repos.sh" "$@"
+exec "$ROOT/ina-infra/backend/scripts/profile_wait_smf_pfcp_upfs.sh" "$@"

@@ -49,6 +49,34 @@ if SVC_TYPE not in ['ClusterIP', 'LoadBalancer', 'NodePort']:
     print(f"SVC_TYPE is case sensitive are you spelling {SVC_TYPE} correct?")
     sys.exit('-1')
 
+def _nrf_sbi_from_ip_plan(namespace: str, logger=None):
+    """Resolve Multus Nnrf from Apply IP plan ConfigMap ``ina-core-ips``.
+
+    Prefer ``data.nrf_sbi``; else derive ``<subnet-prefix>.11`` from ``data.subnet``.
+    """
+    if not namespace:
+        return None
+    try:
+        api = kubernetes.client.CoreV1Api()
+        cm = api.read_namespaced_config_map("ina-core-ips", namespace)
+        data = cm.data or {}
+        nrf = (data.get("nrf_sbi") or "").strip()
+        if nrf:
+            return nrf
+        subnet = (data.get("subnet") or "").strip()
+        if subnet:
+            network = subnet.split("/", 1)[0]
+            parts = network.split(".")
+            if len(parts) == 4:
+                return f"{parts[0]}.{parts[1]}.{parts[2]}.11"
+    except Exception as exc:  # noqa: BLE001
+        if logger is not None:
+            logger.warning(
+                f"ina-core-ips NRF lookup failed in ns={namespace}: {exc}"
+            )
+    return None
+
+
 def create_deployment(name: str=None, 
                     namespace: str=None, 
                     compute: dict=None, 
@@ -109,7 +137,18 @@ def create_deployment(name: str=None,
             }
             )
     if nrf_svc is None:
-        nrf_svc = "10.1.140.11" #default value (Multus Nnrf)
+        # Multus Nnrf from profile IP plan (ina-core-ips), never a baked subnet IP.
+        nrf_svc = _nrf_sbi_from_ip_plan(namespace, logger=logger)
+    if nrf_svc is None:
+        nrf_svc = os.getenv("INA_NRF_SBI_IP") or os.getenv("INA_NRF_LB_IP")
+    if not nrf_svc:
+        msg = (
+            f"UPF create_deployment: nrf_svc unset and ina-core-ips missing "
+            f"nrf_sbi/subnet in namespace {namespace}"
+        )
+        if kopf is not None:
+            raise kopf.PermanentError(msg)
+        raise RuntimeError(msg)
     URL = f"curl --connect-timeout 1 --head -X GET http://{nrf_svc}/nnrf-nfm/v1/nf-instances?nf-type='NRF' --http2-prior-knowledge"
     deployment = {
                   "apiVersion": "apps/v1",

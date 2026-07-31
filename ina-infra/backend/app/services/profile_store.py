@@ -15,13 +15,9 @@ from app.services import pl_solver
 
 
 def _default_db_path() -> Path:
-    env = os.environ.get("INA_DB_PATH")
-    if env:
-        return Path(env).expanduser().resolve()
-    repo = os.environ.get("REPO_ROOT")
-    if repo:
-        return Path(repo).resolve() / "ina-infra" / "data" / "profiles.db"
-    return Path(__file__).resolve().parents[3] / "data" / "profiles.db"
+    from app.services import paths as ina_paths
+
+    return ina_paths.default_db_path()
 
 
 def db_path() -> Path:

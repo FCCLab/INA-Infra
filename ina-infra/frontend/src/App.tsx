@@ -30,7 +30,7 @@ export default function App() {
             Short (PS)
           </button>
           <a className="docs-link" href="/docs" target="_blank" rel="noreferrer">
-            API docs
+            Swagger
           </a>
         </nav>
       </header>

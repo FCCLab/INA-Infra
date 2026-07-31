@@ -16,13 +16,17 @@ def ensure_ina_on_path() -> Path:
     candidates.append(Path("/app/ina_src"))
 
     here = Path(__file__).resolve()
-    # Local checkout: .../ina-infra/backend/app/services → repo/algorithm/new_implementation
+    # Prefer vendored copy under ina-infra, then sibling monorepo algorithm/.
     try:
-        candidates.append(here.parents[4] / "algorithm" / "new_implementation")
+        candidates.append(here.parents[3] / "algorithm" / "new_implementation")
     except IndexError:
         pass
     try:
         candidates.append(here.parents[3].parent / "algorithm" / "new_implementation")
+    except IndexError:
+        pass
+    try:
+        candidates.append(here.parents[4] / "algorithm" / "new_implementation")
     except IndexError:
         pass
 
@@ -33,6 +37,6 @@ def ensure_ina_on_path() -> Path:
                 sys.path.insert(0, sp)
             return path
     raise RuntimeError(
-        "Cannot find algorithm/new_implementation/ina. "
-        "Set INA_SRC to that directory (in Docker: /app/ina_src)."
+        "Cannot find ina package. Set INA_SRC to algorithm/new_implementation "
+        "(or place it at ina-infra/algorithm/new_implementation)."
     )

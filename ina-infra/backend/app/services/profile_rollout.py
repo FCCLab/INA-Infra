@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 from typing import Dict, Iterator, Optional
@@ -12,6 +11,7 @@ from app.schemas import (
     ProfileRolloutResponse,
     ProfileRolloutStopResponse,
 )
+from app.services import paths as ina_paths
 from app.services.cmd_stream import (
     CmdResult,
     log_event,
@@ -25,27 +25,16 @@ _lock = threading.Lock()
 _cancel_events: Dict[str, threading.Event] = {}
 
 
-def _repo_root() -> Path:
-    env = os.environ.get("REPO_ROOT")
-    if env:
-        return Path(env).resolve()
-    return Path(__file__).resolve().parents[4]
-
-
 def _rollout_script() -> Path:
-    env = os.environ.get("INA_ROLLOUT_SCRIPT")
-    if env:
-        return Path(env).resolve()
-    return _repo_root() / "scripts" / "ina_profile_namespace_rollout.sh"
+    return ina_paths.profile_rollout_script()
 
 
 def _rollout_env(
     profile_name: str,
     req: ProfileRolloutRequest,
 ) -> dict:
-    env = os.environ.copy()
+    env = ina_paths.script_env()
     env["PROFILE_NS"] = profile_name
-    env["REPO_ROOT"] = str(_repo_root())
     if req.slice_count is not None and req.slice_count > 0:
         env["SLICE_COUNT"] = str(req.slice_count)
     env["SKIP_UES"] = "1" if req.skip_ues else "0"
@@ -133,7 +122,7 @@ def iter_profile_rollout_sse(
     try:
         for item in stream_cmd(
             cmd,
-            cwd=str(_repo_root()),
+            cwd=str(ina_paths.ina_infra_root()),
             env=_rollout_env(profile_name, req),
             timeout=float(wall),
             cancel_event=cancel_event,

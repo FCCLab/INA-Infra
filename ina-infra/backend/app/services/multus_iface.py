@@ -31,18 +31,10 @@ _lock = threading.Lock()
 _cache: Dict[str, str] = {}
 
 
-def _repo_root() -> Path:
-    env = os.environ.get("REPO_ROOT")
-    if env:
-        return Path(env).resolve()
-    return Path(__file__).resolve().parents[4]
-
-
 def _ssh_cfg() -> Path:
-    env = os.environ.get("SSH_CFG")
-    if env:
-        return Path(env)
-    return _repo_root() / "utils" / "ssh_config" / "config"
+    from app.services import paths as ina_paths
+
+    return ina_paths.ssh_config()
 
 
 def _detect_enabled() -> bool:

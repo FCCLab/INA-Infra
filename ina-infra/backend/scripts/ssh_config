@@ -1,0 +1,95 @@
+Host mgmt-0
+    HostName 10.1.132.200
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host mgmt-1
+    HostName 10.1.132.201
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host central-0
+    HostName 10.1.132.210
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host central-1
+    HostName 10.1.132.211
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host regional-0
+    HostName 10.1.132.220
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host regional-1
+    HostName 10.1.132.221
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host edge-0
+    HostName 10.1.132.230
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host edge-1
+    HostName 10.1.132.231
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host ue-0
+    HostName 10.1.132.240
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host ue-1
+    HostName 10.1.132.241
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+# Bare metal: SSH via mgmt/WAN only (.101.x). Site .137 is K8s node-ip, not SSH.
+Host gh81
+    HostName 10.1.101.211
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host gh82
+    HostName 10.1.101.212
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host usrp
+    HostName 10.1.101.19
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host github-ntt
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/ntt
+
+Host edge-2
+    HostName 10.1.101.18
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+Host edge-3
+    HostName 172.27.2.22
+    User fcp
+    Port 22
+    IdentityFile ~/.ssh/id_rsa

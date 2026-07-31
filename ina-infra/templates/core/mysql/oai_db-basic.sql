@@ -348,8 +348,9 @@ INSERT INTO `SessionManagementSubscriptionData` (`ueid`, `servingPlmnid`, `singl
 ('001010000000112', '00101', '{\"sst\": 1, \"sd\": \"16777215\"}','{\"oai\":{\"pduSessionTypes\":{ \"defaultSessionType\": \"IPV4\"},\"sscModes\": {\"defaultSscMode\": \"SSC_MODE_1\"},\"5gQosProfile\": {\"5qi\": 6,\"arp\":{\"priorityLevel\": 1,\"preemptCap\": \"NOT_PREEMPT\",\"preemptVuln\":\"NOT_PREEMPTABLE\"},\"priorityLevel\":1},\"sessionAmbr\":{\"uplink\":\"1000Mbps\", \"downlink\":\"1000Mbps\"}}}');
 
 -- AMF /nudm-sdm/.../nssai via UDR am-data (OAI UDR v2.2.1: ueid=PLMN prefix, servingPlmnid='')
+-- INA_AM_NSSAI is replaced at Apply with defaultSingleNssais for profile N slices only.
 INSERT INTO `AccessAndMobilitySubscriptionData` (`ueid`, `servingPlmnid`, `nssai`) VALUES
-('00101', '', '{\"defaultSingleNssais\": [{\"sst\": 1, \"sd\": \"000001\"}, {\"sst\": 1, \"sd\": \"000002\"}, {\"sst\": 1, \"sd\": \"000003\"}, {\"sst\": 1, \"sd\": \"000004\"}]}');
+('00101', '', 'INA_AM_NSSAI');
 
 
 

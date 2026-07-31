@@ -13,9 +13,10 @@ services:
       - "8082:8082"
     environment:
       INA_SRC: /app/ina_src
-      REPO_ROOT: /repo
+      INA_INFRA_ROOT: /app/ina-infra
       REPOS_DIR: /repo/repos
-      PUSH_SCRIPT: /repo/bringup/03_push_to_git_repos/push_git_repos.sh
+      PUSH_SCRIPT: /app/ina-infra/backend/scripts/push_git_repos.sh
+      SSH_CFG: /app/ina-infra/backend/scripts/ssh_config
       GRB_LICENSE_FILE: /opt/gurobi/gurobi.lic
       GITEA_HOST: ${GITEA_HOST:-10.1.132.200}
       GITEA_PORT: ${GITEA_PORT:-3000}
@@ -24,7 +25,8 @@ services:
       GITEA_ORG: ${GITEA_ORG:-nephio}
     volumes:
       - ../algorithm/new_implementation:/app/ina_src:ro
-      - ..:/repo
+      - .:/app/ina-infra
+      - ../repos:/repo/repos
       - ${GUROBI_LIC:-${HOME}/gurobi.lic}:/opt/gurobi/gurobi.lic:ro
     restart: unless-stopped
 

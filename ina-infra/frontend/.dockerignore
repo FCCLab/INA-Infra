@@ -1,0 +1,5 @@
+node_modules
+dist
+neuroran-ui-ux
+.git
+*.md
