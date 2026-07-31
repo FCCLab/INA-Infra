@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Iterator, List, Tuple
 
+import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from app.schemas import (
@@ -19,6 +20,7 @@ from app.schemas import (
     PlPushResponse,
     PlSolveResponse,
     Profile,
+    ProfileRecord,
     PlUndeployRequest,
     PlUndeployResponse,
 )
@@ -1037,6 +1039,74 @@ def _profile_ns_clusters(ns: str, clusters: List[str]) -> List[str]:
     return out
 
 
+# Platform fallback when no profile SA remains on a shared OAI operator CRB.
+_CRB_FALLBACK_NS = "oai-cn-operators"
+
+
+def _clear_profile_crb_subjects(ns: str, clusters: List[str]) -> List[str]:
+    """Drop profile SA subjects from shared cluster/ ClusterRoleBindings.
+
+    Profile Apply used to replace the single CRB subject with the active
+    profile, which broke multi-profile and left dead ina-infra* subjects after
+    Clear. Clear/Undeploy removes this profile's subjects; if none remain,
+    restore the oai-cn-operators placeholder (RAN CRBs are left alone).
+    """
+    repos = _repos_dir()
+    touched: List[str] = []
+    for cluster in clusters:
+        repo = CLUSTER_TO_REPO.get(cluster)
+        if not repo:
+            continue
+        cluster_dir = repos / repo / "cluster"
+        if not cluster_dir.is_dir():
+            continue
+        for path in sorted(
+            cluster_dir.glob(
+                "clusterrolebinding-oai-*-operator-rolebinding-cluster.yaml"
+            )
+        ):
+            # Leave RAN operator CRB on oai-slice-deployment.
+            if "oai-ran-operator" in path.name:
+                continue
+            try:
+                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            if not isinstance(doc, dict) or doc.get("kind") != "ClusterRoleBinding":
+                continue
+            subjects = list(doc.get("subjects") or [])
+            kept = [s for s in subjects if s.get("namespace") != ns]
+            if kept == subjects:
+                continue
+            if not kept:
+                # Infer SA name from remaining role naming convention.
+                sa = None
+                for s in subjects:
+                    if s.get("name"):
+                        sa = s["name"]
+                        break
+                if not sa:
+                    # oai-amf-operator-rolebinding-cluster → oai-amf-operator
+                    stem = path.name.replace("clusterrolebinding-", "").replace(
+                        "-rolebinding-cluster.yaml", ""
+                    )
+                    sa = stem
+                kept = [
+                    {
+                        "kind": "ServiceAccount",
+                        "name": sa,
+                        "namespace": _CRB_FALLBACK_NS,
+                    }
+                ]
+            doc["subjects"] = kept
+            path.write_text(
+                yaml.safe_dump(doc, sort_keys=False, default_flow_style=False),
+                encoding="utf-8",
+            )
+            touched.append(_rel(path))
+    return touched
+
+
 def _remove_profile_ns_dirs(ns: str, clusters: List[str]) -> List[str]:
     repos = _repos_dir()
     removed: List[str] = []
@@ -1045,6 +1115,7 @@ def _remove_profile_ns_dirs(ns: str, clusters: List[str]) -> List[str]:
         if ns_dir.exists():
             shutil.rmtree(ns_dir)
             removed.append(_rel(ns_dir))
+    removed.extend(_clear_profile_crb_subjects(ns, clusters))
     return removed
 
 
@@ -1059,6 +1130,19 @@ def _list_profile_ns_files(ns: str, clusters: List[str]) -> List[str]:
             if path.is_file():
                 files.append(_rel(path))
     return files
+
+
+def attach_local_deploy_files(rec: ProfileRecord) -> ProfileRecord:
+    """Prefer on-disk namespaces/<profile>/ as the source of generated files.
+
+    Keeps Clear/Push enabled after Generate even if SQLite deploy_files was
+    cleared or never written (e.g. profile created outside the UI).
+    """
+    ns = rec.profile.name
+    files = _list_profile_ns_files(ns, _profile_ns_clusters(ns, []))
+    if files == list(rec.deploy_files):
+        return rec
+    return rec.model_copy(update={"deploy_files": files})
 
 
 def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:

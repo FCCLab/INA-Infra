@@ -117,7 +117,38 @@ def create_deployment(name: str=None,
             )
     if nrf_svc is None:
         nrf_svc = "10.1.140.11" #default value (Multus Nnrf)
-    URL = f"curl --connect-timeout 1 --head -X GET http://{nrf_svc}/nnrf-nfm/v1/nf-instances?nf-type='NRF' --http2-prior-knowledge"
+    # Wait for the rest of the dedicated 5GC before AMF starts (NRF + CP peers + DB).
+    # ClusterIP DNS names match op-conf fqdn / mysql Service in the profile ns.
+    init_script = f"""
+set -eu
+wait_tcp() {{
+  label="$1"; host="$2"; port="$3"
+  echo "waiting for ${{label}} tcp://${{host}}:${{port}}"
+  # Prefer nc only — curl telnet:// can hang and block the || fallback.
+  until nc -z -w2 "$host" "$port" >/dev/null 2>&1; do
+    sleep 1
+  done
+  echo "  ${{label}} ready"
+}}
+wait_nrf() {{
+  host="$1"
+  url="http://${{host}}/nnrf-nfm/v1/nf-instances?nf-type=NRF"
+  echo "waiting for nrf ${{host}} (NFM)"
+  until curl --connect-timeout 1 --head -X GET "$url" --http2-prior-knowledge >/dev/null 2>&1; do
+    sleep 1
+  done
+  echo "  nrf ready"
+}}
+echo "AMF dependency wait: mysql + 5GC CP"
+wait_tcp mysql mysql 3306
+wait_nrf "{nrf_svc}"
+# OAI SBI often returns empty reply on GET / — TCP (nc) only.
+wait_tcp oai-udr oai-udr 80
+wait_tcp oai-udm oai-udm 80
+wait_tcp oai-ausf oai-ausf 80
+wait_tcp oai-smf oai-smf 80
+echo "all 5GC dependencies ready — starting AMF"
+""".strip()
     deployment = {
                   "apiVersion": "apps/v1",
                   "kind": "Deployment",
@@ -148,13 +179,13 @@ def create_deployment(name: str=None,
                         },
                         "imagePullSecrets":image_pull_secrets,
                         "initContainers": [{
-                            "name": 'init',
+                            "name": 'wait-5gc',
                             "image": "docker.io/alpine/curl:3.14",
                             "imagePullPolicy": "IfNotPresent",
                             "command": [
                             'sh', 
                             '-c', 
-                            f"until {URL}; do echo waiting for nrf svc {nrf_svc}; sleep 1; done"
+                            init_script
                             ]
                         }],
                         "containers": [

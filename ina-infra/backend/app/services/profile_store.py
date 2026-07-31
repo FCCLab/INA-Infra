@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator, List, Optional
 
 from app.schemas import NetworkIn, PlSolveResponse, Profile, ProfileRecord, SliceIn
-from app.services import pl_solver
+from app.services import ip_allocator, pl_solver
 
 
 def _default_db_path() -> Path:
@@ -114,7 +114,45 @@ def init_db() -> Path:
         row = conn.execute("SELECT COUNT(*) AS c FROM profiles").fetchone()
         if int(row["c"]) == 0:
             _upsert_conn(conn, _seed_record())
+        else:
+            _persist_healed_identity(conn)
     return db_path()
+
+
+def _persist_healed_identity(conn: sqlite3.Connection) -> None:
+    """Write healed profile identity (from PL result) back to SQLite columns."""
+    now = datetime.now(timezone.utc).isoformat()
+    for row in conn.execute("SELECT * FROM profiles").fetchall():
+        rec = _row_to_record(row)
+        p = rec.profile
+        keys = row.keys()
+        du = row["du_node"] if "du_node" in keys and row["du_node"] else "usrp"
+        ue = row["ue_node"] if "ue_node" in keys and row["ue_node"] else "usrp"
+        if (
+            p.subnet == row["subnet"]
+            and int(p.max_slices) == int(row["max_slices"])
+            and p.dnn_prefix == row["dnn_prefix"]
+            and p.du_node == du
+            and p.ue_node == ue
+        ):
+            continue
+        conn.execute(
+            """
+            UPDATE profiles SET
+              subnet = ?, max_slices = ?, dnn_prefix = ?,
+              du_node = ?, ue_node = ?, updated_at = ?
+            WHERE name = ?
+            """,
+            (
+                p.subnet,
+                int(p.max_slices),
+                p.dnn_prefix,
+                p.du_node,
+                p.ue_node,
+                now,
+                p.name,
+            ),
+        )
 
 
 def _seed_record() -> ProfileRecord:
@@ -189,13 +227,45 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
     deploy_clusters = _parse_str_list(
         row["deploy_clusters_json"] if "deploy_clusters_json" in keys else "[]"
     )
+    subnet = str(row["subnet"])
+    max_slices = int(row["max_slices"])
+    dnn_prefix = str(row["dnn_prefix"])
+    du_node = (
+        str(row["du_node"]) if "du_node" in keys and row["du_node"] else "usrp"
+    )
+    ue_node = (
+        str(row["ue_node"]) if "ue_node" in keys and row["ue_node"] else "usrp"
+    )
+    # Heal stale identity columns from the last successful PL result.
+    if pl_result is not None and getattr(pl_result, "ok", False):
+        plan_subnet = None
+        if pl_result.ip_plan is not None and pl_result.ip_plan.subnet:
+            plan_subnet = str(pl_result.ip_plan.subnet)
+        pl_prof = pl_result.profile
+        if pl_prof is not None:
+            if not plan_subnet and pl_prof.subnet:
+                plan_subnet = str(pl_prof.subnet)
+            if pl_prof.max_slices:
+                max_slices = int(pl_prof.max_slices)
+            if pl_prof.dnn_prefix:
+                dnn_prefix = str(pl_prof.dnn_prefix)
+            if pl_prof.du_node:
+                du_node = str(pl_prof.du_node)
+            if pl_prof.ue_node:
+                ue_node = str(pl_prof.ue_node)
+        if plan_subnet and plan_subnet != subnet:
+            try:
+                subnet = ip_allocator.normalize_multus_subnet(plan_subnet)
+            except ValueError:
+                subnet = plan_subnet
+
     profile = Profile(
         name=row["name"],
-        subnet=row["subnet"],
-        max_slices=int(row["max_slices"]),
-        dnn_prefix=row["dnn_prefix"],
-        du_node=(row["du_node"] if "du_node" in keys and row["du_node"] else "usrp"),
-        ue_node=(row["ue_node"] if "ue_node" in keys and row["ue_node"] else "usrp"),
+        subnet=subnet,
+        max_slices=max_slices,
+        dnn_prefix=dnn_prefix,
+        du_node=du_node,
+        ue_node=ue_node,
     )
     return ProfileRecord(
         profile=profile,
@@ -413,7 +483,87 @@ def save_pl_result(
         updates["slices"] = slices
     if network is not None:
         updates["network"] = network
+    # Profile identity (Multus subnet, max slices, DNN prefix, RAN nodes)
+    # must stay aligned with the values used for this PL / IP plan.
+    if result.profile is not None:
+        patch = result.profile.model_dump(exclude={"name"}, exclude_none=True)
+        if result.ip_plan is not None and result.ip_plan.subnet:
+            patch.setdefault("subnet", result.ip_plan.subnet)
+        # Keep the profile name from the DB row (path param).
+        updates["profile"] = rec.profile.model_copy(update=patch)
+    elif result.ip_plan is not None and result.ip_plan.subnet:
+        updates["profile"] = rec.profile.model_copy(
+            update={"subnet": result.ip_plan.subnet}
+        )
     return save_profile(rec.model_copy(update=updates))
+
+
+def used_multus_subnets(*, exclude_name: Optional[str] = None) -> List[str]:
+    """Multus /24s already claimed by saved profiles."""
+    out: List[str] = []
+    for rec in list_profiles():
+        if exclude_name and rec.profile.name == exclude_name:
+            continue
+        try:
+            out.append(ip_allocator.normalize_multus_subnet(rec.profile.subnet))
+        except ValueError:
+            continue
+    return out
+
+
+def used_dnn_prefixes(*, exclude_name: Optional[str] = None) -> List[str]:
+    """DNN prefixes already claimed by saved profiles."""
+    out: List[str] = []
+    for rec in list_profiles():
+        if exclude_name and rec.profile.name == exclude_name:
+            continue
+        pfx = (rec.profile.dnn_prefix or "").strip()
+        if pfx:
+            out.append(pfx)
+    return out
+
+
+def allocate_multus_subnet_for_create(requested: str) -> str:
+    """Keep ``requested`` if free; otherwise next free Multus /24."""
+    used = used_multus_subnets()
+    try:
+        cand = ip_allocator.normalize_multus_subnet(requested)
+    except ValueError:
+        return ip_allocator.next_multus_subnet(used)
+    if cand not in used:
+        return cand
+    return ip_allocator.next_multus_subnet(used)
+
+
+def allocate_dnn_prefix_for_create(requested: str, subnet: str) -> str:
+    """Keep ``requested`` if free; else Multus-aligned ``10.N``, else next free."""
+    used = used_dnn_prefixes()
+    req = (requested or "").strip()
+    if req and req not in used:
+        return req
+    try:
+        aligned = ip_allocator.dnn_prefix_from_multus(subnet)
+        if aligned not in used:
+            return aligned
+    except ValueError:
+        pass
+    return ip_allocator.next_dnn_prefix(used)
+
+
+def allocate_profile_identity_for_create(profile: Profile) -> Profile:
+    """Assign free Multus /24 + DNN prefix for a new profile (copy-safe)."""
+    subnet = allocate_multus_subnet_for_create(profile.subnet)
+    dnn = allocate_dnn_prefix_for_create(profile.dnn_prefix, subnet)
+    du = (profile.du_node or profile.ue_node or "usrp").strip() or "usrp"
+    ue = (profile.ue_node or profile.du_node or du).strip() or du
+    return profile.model_copy(
+        update={
+            "subnet": subnet,
+            "dnn_prefix": dnn,
+            "du_node": du,
+            "ue_node": ue,
+        }
+    )
 
 
 def save_deploy_state(

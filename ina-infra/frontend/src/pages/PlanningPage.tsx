@@ -115,6 +115,9 @@ export default function PlanningPage() {
   const [slices, setSlices] = useState<SliceIn[]>(DEFAULT_SLICES);
   const [networkIn, setNetworkIn] = useState<NetworkIn>(DEFAULT_NETWORK);
   const [profileNames, setProfileNames] = useState<string[]>([]);
+  const [profileSubnets, setProfileSubnets] = useState<Record<string, string>>(
+    {},
+  );
   const [selectedName, setSelectedName] = useState<string>("");
   const [savedAt, setSavedAt] = useState<string>("");
   const [showNet, setShowNet] = useState(false);
@@ -204,6 +207,15 @@ export default function PlanningPage() {
   async function refreshNames() {
     const list = await api.listProfiles();
     setProfileNames(list.names);
+    const subs: Record<string, string> = {};
+    for (const rec of list.profiles) {
+      const sub =
+        rec.profile.subnet ||
+        rec.pl_result?.ip_plan?.subnet ||
+        rec.pl_result?.profile?.subnet;
+      if (sub) subs[rec.profile.name] = sub;
+    }
+    setProfileSubnets(subs);
     return list;
   }
 
@@ -301,15 +313,35 @@ export default function PlanningPage() {
   }
 
   function applyRecord(rec: ProfileRecord) {
+    // Profile identity: prefer saved row, then last PL result / IP plan.
+    const plProf = rec.pl_result?.ok ? rec.pl_result.profile : null;
+    const subnet =
+      rec.profile.subnet ||
+      rec.pl_result?.ip_plan?.subnet ||
+      plProf?.subnet ||
+      DEFAULT_PROFILE.subnet;
+    const maxSlices =
+      rec.profile.max_slices ?? plProf?.max_slices ?? DEFAULT_PROFILE.max_slices;
+    const dnnPrefix =
+      rec.profile.dnn_prefix ||
+      plProf?.dnn_prefix ||
+      DEFAULT_PROFILE.dnn_prefix;
+    const ranNode =
+      rec.profile.du_node ||
+      rec.profile.ue_node ||
+      plProf?.du_node ||
+      plProf?.ue_node ||
+      "usrp";
     setProfile({
       ...DEFAULT_PROFILE,
       ...rec.profile,
-      du_node: rec.profile.du_node || rec.profile.ue_node || "usrp",
+      name: rec.profile.name,
+      subnet,
+      max_slices: maxSlices,
+      dnn_prefix: dnnPrefix,
       // DU + UE always co-located on the same edge worker for rfsim.
-      ue_node:
-        rec.profile.du_node ||
-        rec.profile.ue_node ||
-        "usrp",
+      du_node: ranNode,
+      ue_node: ranNode,
     });
     setSlices(rec.slices);
     const net =
@@ -318,6 +350,9 @@ export default function PlanningPage() {
         : DEFAULT_NETWORK;
     setNetworkIn(net);
     setSelectedName(rec.profile.name);
+    setProfileSubnets((prev) =>
+      subnet ? { ...prev, [rec.profile.name]: subnet } : prev,
+    );
     setSavedAt(rec.updated_at);
     setDeployed(Boolean(rec.deployed));
     setDeployedAt(rec.deployed_at || "");
@@ -343,8 +378,7 @@ export default function PlanningPage() {
   useEffect(() => {
     (async () => {
       try {
-        const list = await api.listProfiles();
-        setProfileNames(list.names);
+        const list = await refreshNames();
         const first = list.profiles[0];
         if (first) {
           applyRecord(first);
@@ -368,6 +402,47 @@ export default function PlanningPage() {
   const profileOk = NS_RE.test(profile.name);
   const isExisting = selectedName !== "" && profileNames.includes(selectedName);
   const dirtyName = selectedName !== "" && profile.name !== selectedName;
+
+  /** Multus /24 collisions across saved profiles (live edit of current counted). */
+  const subnetConflicts = useMemo(() => {
+    const norm = (s: string) => s.trim().toLowerCase();
+    const map: Record<string, string> = { ...profileSubnets };
+    const liveKey = dirtyName ? profile.name : selectedName || profile.name;
+    if (liveKey && profile.subnet?.trim()) {
+      map[liveKey] = profile.subnet.trim();
+    }
+    if (dirtyName && selectedName) {
+      // Name rename in progress — current Multus applies to the new name only.
+      delete map[selectedName];
+    }
+    const bySub: Record<string, string[]> = {};
+    for (const [name, sub] of Object.entries(map)) {
+      const key = norm(sub || "");
+      if (!key) continue;
+      (bySub[key] ||= []).push(name);
+    }
+    return Object.entries(bySub)
+      .filter(([, names]) => names.length > 1)
+      .map(([subnet, names]) => ({
+        subnet,
+        names: names.slice().sort(),
+      }))
+      .sort((a, b) => a.subnet.localeCompare(b.subnet));
+  }, [
+    profileSubnets,
+    profile.subnet,
+    profile.name,
+    selectedName,
+    dirtyName,
+  ]);
+
+  const currentSubnetConflict = useMemo(() => {
+    const mine = (profile.subnet || "").trim().toLowerCase();
+    if (!mine) return null;
+    return (
+      subnetConflicts.find((g) => g.subnet === mine) || null
+    );
+  }, [subnetConflicts, profile.subnet]);
 
   async function refreshClusterStatus() {
     if (!NS_RE.test(profile.name)) {
@@ -558,7 +633,10 @@ export default function PlanningPage() {
       applyRecord(rec);
       await refreshNames();
       clearSolve();
-      setStatus(`Created profile “${rec.profile.name}”`);
+      setStatus(
+        `Created profile “${rec.profile.name}” · Multus ${rec.profile.subnet}` +
+          ` · DNN ${rec.profile.dnn_prefix} · RAN ${rec.profile.du_node}`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -621,8 +699,23 @@ export default function PlanningPage() {
       if (!res.ok) setError(res.message || "Solve failed");
       else {
         setStatus(res.message);
-        const list = await api.listProfiles();
-        setProfileNames(list.names);
+        // Align profile fields with the solve / IP plan — do not use
+        // updateProfile() here; that clears the PL result.
+        if (res.profile) {
+          const ran =
+            res.profile.du_node || res.profile.ue_node || profile.du_node;
+          setProfile((p) => ({
+            ...p,
+            subnet: res.profile!.subnet || res.ip_plan?.subnet || p.subnet,
+            max_slices: res.profile!.max_slices ?? p.max_slices,
+            dnn_prefix: res.profile!.dnn_prefix || p.dnn_prefix,
+            du_node: ran,
+            ue_node: ran,
+          }));
+        } else if (res.ip_plan?.subnet) {
+          setProfile((p) => ({ ...p, subnet: res.ip_plan!.subnet }));
+        }
+        await refreshNames();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -649,10 +742,18 @@ export default function PlanningPage() {
     if (resProfile) {
       setDeployed(Boolean(resProfile.deployed));
       setDeployedAt(resProfile.deployed_at || "");
-      setDeployFiles(resProfile.deploy_files || writtenFallback);
+      // Use ?? so an explicit empty list after Clear is kept (not overwritten).
+      setDeployFiles(
+        resProfile.deploy_files !== undefined && resProfile.deploy_files !== null
+          ? resProfile.deploy_files
+          : writtenFallback,
+      );
       setSavedAt(resProfile.updated_at || savedAt);
     }
   }
+
+  const hasGeneratedConfig =
+    deployed || deployFiles.length > 0 || clearPendingPush;
 
   function beginRun(action: ApplyRun, step: ApplyStep | null = null) {
     setBusy(true);
@@ -825,14 +926,14 @@ export default function PlanningPage() {
 
   /** Clear generated config — local remove only (no push). */
   async function onClear() {
-    if (!deployed && deployFiles.length === 0 && !clearPendingPush) return;
+    if (!profileOk) return;
     if (
       !(await dialog.confirm({
         title: `Clear generated config for “${profile.name}”?`,
         message:
-          `Removes local namespaces/${profile.name}/ and clears the generated ` +
-          "file list. Does not push — use Push afterward to sync deletions, " +
-          "or Undeploy (= Clear + Push + cluster cleanup).",
+          `Removes local namespaces/${profile.name}/ under repos/ and clears ` +
+          "the generated file list. Does not push — use Push afterward to " +
+          "sync deletions to Gitea, or Undeploy (= Clear + Push + cluster cleanup).",
         confirmLabel: "Clear",
         danger: true,
       }))
@@ -854,18 +955,28 @@ export default function PlanningPage() {
       setConsoleMessage("[clear] " + (res.message || ""));
       setConsoleFiles(res.removed_paths || []);
       setConsoleFilesLabel("Removed paths");
+      // Always reflect cleared local state (don't trust nested profile only).
+      setDeployed(false);
+      setDeployedAt("");
+      setDeployFiles([]);
       if (res.profile) {
-        applyDeployStateFromProfile(res.profile);
-      } else if (res.ok) {
-        setDeployed(false);
-        setDeployedAt("");
-        setDeployFiles([]);
+        applyDeployStateFromProfile({
+          ...res.profile,
+          deployed: false,
+          deploy_files: [],
+        });
       }
-      if (res.ok) setClearPendingPush(true);
-      if (!res.ok) setError(res.message);
-      else {
-        setStatus(`Cleared local config for “${profile.name}” — Push to sync`);
+      if (res.ok) {
+        setClearPendingPush(true);
+        const n = (res.removed_paths || []).length;
+        setStatus(
+          n > 0
+            ? `Cleared ${n} local path(s) for “${profile.name}” — Push to sync deletions`
+            : `No local namespaces/${profile.name}/ found — already clear (Push still syncs if Gitea has leftovers)`,
+        );
         void refreshClusterStatus();
+      } else {
+        setError(res.message);
       }
     } catch (e) {
       setConsoleOk(false);
@@ -878,7 +989,7 @@ export default function PlanningPage() {
 
   /** Undeploy = Clear + Push (+ cluster cleanup). */
   async function onUndeploy() {
-    if (!deployed && deployFiles.length === 0 && !clearPendingPush) return;
+    if (!profileOk) return;
     if (
       !(await dialog.confirm({
         title: `Undeploy “${profile.name}”?`,
@@ -1102,7 +1213,7 @@ export default function PlanningPage() {
             >
               {profileNames.map((n) => (
                 <option key={n} value={n}>
-                  {n}
+                  {profileSubnets[n] ? `${n} · ${profileSubnets[n]}` : n}
                 </option>
               ))}
             </select>
@@ -1112,24 +1223,29 @@ export default function PlanningPage() {
             help="K8s namespace on central/regional/edge. Must be a DNS label (a-z0-9-)."
           >
             <input
+              key={`name-${selectedName}`}
               value={profile.name}
               onChange={(e) => updateProfile({ name: e.target.value.trim() })}
             />
           </FieldHelp>
           <FieldHelp
+            className={currentSubnetConflict ? "field-conflict" : undefined}
             label="Multus subnet"
-            help="Macvlan CIDR for this profile (default 10.1.140.0/24). IPs use host = base[role] + n."
+            help="Per-profile macvlan /24 (e.g. ina-infra → 10.1.140.0/24, next profile → 10.1.141.0/24). Add profile auto-picks a free /24. IPs use host = base[role] + n."
           >
             <input
+              key={`subnet-${selectedName}`}
               value={profile.subnet}
               onChange={(e) => updateProfile({ subnet: e.target.value.trim() })}
+              aria-invalid={Boolean(currentSubnetConflict)}
             />
           </FieldHelp>
           <FieldHelp
             label="Max slices"
-            help="Upper bound on Add slice for this profile (IP bands sized for this cap)."
+            help="Per-profile upper bound on Add slice (IP bands sized for this cap)."
           >
             <input
+              key={`max-${selectedName}`}
               type="number"
               min={1}
               max={32}
@@ -1141,9 +1257,10 @@ export default function PlanningPage() {
           </FieldHelp>
           <FieldHelp
             label="DNN prefix"
-            help="UE PDU pool prefix: {prefix}.{n}.0/24 for slice index n (avoids clash with OAI 10.1.n.0/24)."
+            help="Per-profile UE PDU pool prefix: {prefix}.{n}.0/24. Add profile auto-picks a free 10.14x when the copied prefix is taken (aligned with Multus 10.1.14x)."
           >
             <input
+              key={`dnn-${selectedName}`}
               value={profile.dnn_prefix}
               onChange={(e) => updateProfile({ dnn_prefix: e.target.value.trim() })}
             />
@@ -1151,9 +1268,10 @@ export default function PlanningPage() {
           <FieldHelp
             className="field-help-wide"
             label="RAN node (DU + UE)"
-            help="Single edge worker for both OAI DU and UEs (rfsim). Auto-detected from the edge cluster. usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
+            help="Per-profile edge worker for OAI DU + UEs (rfsim). usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
           >
             <select
+              key={`ran-${selectedName}`}
               className="ran-node-select"
               value={profile.du_node || profile.ue_node || "usrp"}
               disabled={busy}
@@ -1195,6 +1313,18 @@ export default function PlanningPage() {
           <p className="hint">
             Name differs from loaded “{selectedName}” — Save will store under the new name
             (upsert).
+          </p>
+        )}
+        {subnetConflicts.length > 0 && (
+          <p className="hint warn" role="status">
+            Warning: Multus subnet clash
+            {subnetConflicts.map((g) => (
+              <span key={g.subnet}>
+                {" — "}
+                <code>{g.subnet}</code> used by {g.names.join(", ")}
+              </span>
+            ))}
+            . Each profile needs its own /24.
           </p>
         )}
         {savedAt && (
@@ -1582,13 +1712,9 @@ export default function PlanningPage() {
                   "apply-tree-push btn-tone-ok" +
                   (pushRunning ? " is-running" : "")
                 }
-                disabled={
-                  busy ||
-                  !profileOk ||
-                  (deployFiles.length === 0 && !clearPendingPush && !deployed)
-                }
+                disabled={busy || !profileOk || !hasGeneratedConfig}
                 onClick={() => void onPush()}
-                title="Push current local GitOps trees to Gitea (no re-render)"
+                title="Push current local GitOps trees to Gitea (no re-render). After Clear, Push syncs deletions."
               >
                 <BtnProgress active={pushRunning} />
                 Push
@@ -1633,10 +1759,7 @@ export default function PlanningPage() {
                   className={
                     "btn-tone-warn" + (clearRunning ? " is-running" : "")
                   }
-                  disabled={
-                    busy ||
-                    (!deployed && deployFiles.length === 0 && !clearPendingPush)
-                  }
+                  disabled={busy || !profileOk || !hasGeneratedConfig}
                   onClick={() => void onClear()}
                   title="Remove local namespaces/<profile>/; does not push"
                 >
@@ -1653,10 +1776,7 @@ export default function PlanningPage() {
                   className={
                     "btn-tone-warn" + (undeployRunning ? " is-running" : "")
                   }
-                  disabled={
-                    busy ||
-                    (!deployed && deployFiles.length === 0 && !clearPendingPush)
-                  }
+                  disabled={busy || !profileOk || !hasGeneratedConfig}
                   onClick={() => void onUndeploy()}
                   title="Clear + Push + cluster cleanup"
                 >

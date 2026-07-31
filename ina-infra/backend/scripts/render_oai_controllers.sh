@@ -8,7 +8,8 @@
 # Utils (amd64):   ina-infra/oai-controller-utils/
 #
 # Removes leftover namespaces/oai-cn-operators/ and namespaces/ina-cn-operators/.
-# CRB subjects are pinned to <profile> only (lab operator SA subjects dropped).
+# Does NOT rewrite shared cluster/ ClusterRoleBindings (multi-profile safe).
+# Clear/Undeploy drops profile SA subjects from those CRBs via gitea_apply.
 #
 #   ./backend/scripts/render_oai_controllers.sh [profile_ns]
 #   # profile_ns defaults to ina-infra (NOT a cluster name — do not pass "central")
@@ -544,8 +545,8 @@ def copy_nf(dest_ops: pathlib.Path, nf: str, watch_ns: str, *, cluster: str) -> 
     print(f"  {nf}@{cluster}: multus parent={parent}")
 
 
-def pin_crb_subject(cluster_dir: pathlib.Path, nf: str, sa_ns: str) -> None:
-    """Keep a single SA subject: <sa_ns>/oai-<nf>-operator."""
+def ensure_crb_subject(cluster_dir: pathlib.Path, nf: str, sa_ns: str) -> None:
+    """Add <sa_ns>/oai-<nf>-operator to the shared CRB (do not replace others)."""
     path = cluster_dir / f"clusterrolebinding-oai-{nf}-operator-rolebinding-cluster.yaml"
     if not path.is_file():
         src = repos / "central-repo" / "cluster" / path.name
@@ -569,9 +570,14 @@ def pin_crb_subject(cluster_dir: pathlib.Path, nf: str, sa_ns: str) -> None:
         "name": f"oai-{nf}-operator",
         "namespace": sa_ns,
     }
-    doc["subjects"] = [want]
-    dump(doc, path)
-    print(f"  CRB subject → {sa_ns}/oai-{nf}-operator")
+    subjects = list(doc.get("subjects") or [])
+    if want not in subjects:
+        subjects.append(want)
+        doc["subjects"] = subjects
+        dump(doc, path)
+        print(f"  CRB +subject {sa_ns}/oai-{nf}-operator")
+    else:
+        print(f"  CRB subject already has {sa_ns}/oai-{nf}-operator")
 
 
 def drop_ops_dirs(repo_name: str) -> None:
@@ -589,7 +595,7 @@ clear_operator_files(dest_central)
 drop_ops_dirs("central-repo")
 for nf in ALL_NFS:
     copy_nf(dest_central, nf, profile_ns, cluster="central")
-    pin_crb_subject(repos / "central-repo" / "cluster", nf, ops_ns)
+    ensure_crb_subject(repos / "central-repo" / "cluster", nf, ops_ns)
 print(
     f"Wrote controllers → {dest_central} "
     f"(watch ns={profile_ns}, UPF nrf={nrf_sbi}, oai images={oai_image_tag}, "
@@ -612,7 +618,7 @@ for site in ("regional", "edge"):
     dest.mkdir(parents=True, exist_ok=True)
     clear_operator_files(dest)
     copy_nf(dest, "upf", profile_ns, cluster=site)
-    pin_crb_subject(repos / repo_name / "cluster", "upf", ops_ns)
+    ensure_crb_subject(repos / repo_name / "cluster", "upf", ops_ns)
     print(f"Wrote UPF controller → {dest} (watch ns={profile_ns})")
     if profile_ns != "central":
         accidental = repos / repo_name / "namespaces" / "central"

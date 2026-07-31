@@ -80,6 +80,176 @@ def _debug_sidecar() -> dict:
     }
 
 
+# Shared shell helpers for initContainers (service ready, not just Multus up).
+_WAIT_READY_FUNCS = r"""
+wait_tcp() {
+  # $1=label $2=host $3=port — process accepting TCP (e.g. DU rfsim).
+  label="$1"; host="$2"; port="$3"
+  echo "waiting for ${label} tcp://${host}:${port}"
+  until (echo >/dev/tcp/${host}/${port}) >/dev/null 2>&1 \
+     || nc -z -w2 "$host" "$port" >/dev/null 2>&1; do
+    sleep 2
+  done
+  echo "  ${label} ready"
+}
+wait_sctp() {
+  # $1=label $2=host $3=port — SCTP listener (E1 / F1-C).
+  label="$1"; host="$2"; port="$3"
+  echo "waiting for ${label} sctp://${host}:${port}"
+  until ncat --sctp -z -w2 "$host" "$port" >/dev/null 2>&1 \
+     || nmap -sY -p "$port" --host-timeout 3s "$host" 2>/dev/null | grep -q "open"; do
+    sleep 2
+  done
+  echo "  ${label} ready"
+}
+wait_ping() {
+  # $1=label $2=host — Multus / L3 up (CU-UP has no E1 listener).
+  label="$1"; host="$2"
+  echo "waiting for ${label} icmp://${host}"
+  until ping -c1 -W2 "$host" >/dev/null 2>&1; do
+    sleep 2
+  done
+  echo "  ${label} ready"
+}
+wait_nrf_upf() {
+  # $1=label $2=nrf_sbi $3=match_ip — UPF registered at NRF (HTTP/2).
+  label="$1"; nrf="$2"; match="$3"
+  url="http://${nrf}/nnrf-nfm/v1/nf-instances?nf-type=UPF"
+  echo "waiting for ${label} via NRF ${nrf} (match ${match})"
+  until curl -fsS --connect-timeout 2 --http2-prior-knowledge "$url" 2>/dev/null \
+      | grep -q "$match"; do
+    sleep 2
+  done
+  echo "  ${label} ready (NRF registered)"
+}
+"""
+
+
+def _wait_ready_init(
+    checks: Sequence[str],
+    *,
+    name: str,
+) -> dict:
+    """Init container running service-ready checks (tcp / sctp / ping / nrf)."""
+    body = "\n".join(
+        [
+            "set -eu",
+            _WAIT_READY_FUNCS.strip(),
+            f'echo "dependency wait ({name}): service ready checks"',
+            *checks,
+            'echo "all dependencies ready — starting main container"',
+        ]
+    )
+    return {
+        "name": name,
+        "image": IMAGE_DEBUG,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["bash", "-c", body],
+        "securityContext": {"capabilities": {"add": ["NET_ADMIN", "NET_RAW"]}},
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "32Mi"},
+            "limits": {"cpu": "200m", "memory": "128Mi"},
+        },
+    }
+
+
+def _cucp_bringup_inits(ip_plan: IpPlan) -> List[dict]:
+    """CU-CP sequential bringup-* init containers (see bringup_order.md).
+
+    Order: CU-UP Multus → AMF N2 → UPF@NRF.
+    CU-UP is E1 client — probe Multus ping, never SCTP listen on CU-UP.
+    """
+    shared = ip_plan.shared
+    nrf = (shared.nrf_sbi or "").strip()
+    amf_n2 = (shared.amf_n2 or "").strip()
+    inits: List[dict] = []
+
+    cuup_checks = [
+        f'wait_ping "cu-up-{sl.n}/e1" "{sl.cuup_e1}"' for sl in ip_plan.slices
+    ]
+    inits.append(_wait_ready_init(cuup_checks, name="bringup-cuup"))
+
+    if amf_n2:
+        inits.append(
+            _wait_ready_init(
+                [f'wait_sctp "amf/n2" "{amf_n2}" "38412"'],
+                name="bringup-amf",
+            )
+        )
+
+    upf_checks: List[str] = []
+    for sl in ip_plan.slices:
+        match = sl.upf_n4 or sl.upf_n3
+        if nrf and match:
+            upf_checks.append(
+                f'wait_nrf_upf "upf-slice-{sl.n}" "{nrf}" "{match}"'
+            )
+        else:
+            upf_checks.append(f'wait_ping "upf-slice-{sl.n}/n3" "{sl.upf_n3}"')
+    if upf_checks:
+        inits.append(_wait_ready_init(upf_checks, name="bringup-upf"))
+    return inits
+
+
+def _du_bringup_inits(shared) -> List[dict]:
+    """DU after CU-CP F1-C SCTP listener is up."""
+    return [
+        _wait_ready_init(
+            [f'wait_sctp "cu-cp/f1c" "{shared.cucp_f1c}" "38472"'],
+            name="bringup-cucp",
+        )
+    ]
+
+
+def _ue_bringup_inits(shared) -> List[dict]:
+    """UE after DU rfsim TCP port is accepting connections."""
+    return [
+        _wait_ready_init(
+            [f'wait_tcp "du/rfsim" "{shared.du_rf}" "4043"'],
+            name="bringup-du",
+        )
+    ]
+
+
+def _bringup_order_sidecar(role: str, steps: Sequence[str]) -> dict:
+    """Long-running sidecar that records this pod's bring-up dependency chain.
+
+    Does not gate the main NF (inits do). Useful for ``kubectl logs`` /
+    ``kubectl describe`` while debugging Init order.
+    """
+    lines = "\n".join(f"echo '  - {s}'" for s in steps)
+    body = "\n".join(
+        [
+            "set -eu",
+            f'echo "bringup-order sidecar role={role}"',
+            "echo 'depends on (see ina-infra/bringup_order.md):'",
+            lines,
+            "echo 'gated by bringup-* initContainers; sleeping'",
+            "sleep infinity",
+        ]
+    )
+    return {
+        "name": "bringup-order",
+        "image": IMAGE_DEBUG,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["bash", "-c", body],
+        "resources": {
+            "requests": {"cpu": "5m", "memory": "16Mi"},
+            "limits": {"cpu": "50m", "memory": "64Mi"},
+        },
+    }
+
+
+def _tcp_readiness(port: int, *, period: int = 5, delay: int = 10) -> dict:
+    return {
+        "tcpSocket": {"port": port},
+        "initialDelaySeconds": delay,
+        "periodSeconds": period,
+        "timeoutSeconds": 2,
+        "failureThreshold": 12,
+    }
+
+
 def _sa(name: str, namespace: str) -> dict:
     return {
         "apiVersion": "v1",
@@ -430,7 +600,17 @@ def _write_edge_gnb(
                             "terminationGracePeriodSeconds": 5,
                             "nodeSelector": dict(ARCH_AMD64),
                             "affinity": _hostname_affinity(SITE_NODES["edge"]),
+                            # Sequential bringup-* inits + order sidecar.
+                            "initContainers": _cucp_bringup_inits(ip_plan),
                             "containers": [
+                                _bringup_order_sidecar(
+                                    "cu-cp",
+                                    [
+                                        "CU-UP Multus E1 (ping) — all slices",
+                                        "AMF N2 SCTP :38412",
+                                        "UPF registered at NRF — all slices",
+                                    ],
+                                ),
                                 {
                                     "name": "cucp",
                                     "image": IMAGE_CUCP,
@@ -449,6 +629,20 @@ def _write_edge_gnb(
                                         {"name": "e1", "containerPort": 38462, "protocol": "SCTP"},
                                         {"name": "f1c", "containerPort": 38472, "protocol": "UDP"},
                                     ],
+                                    # Process up (SCTP not supported by kube tcpSocket probes).
+                                    "readinessProbe": {
+                                        "exec": {
+                                            "command": [
+                                                "bash",
+                                                "-c",
+                                                "pgrep -f softmodem >/dev/null",
+                                            ]
+                                        },
+                                        "initialDelaySeconds": 15,
+                                        "periodSeconds": 5,
+                                        "timeoutSeconds": 2,
+                                        "failureThreshold": 24,
+                                    },
                                     "volumeMounts": [
                                         {
                                             "name": "configuration",
@@ -536,7 +730,12 @@ def _write_edge_gnb(
                                 **ARCH_AMD64,
                                 "kubernetes.io/hostname": du_node,
                             },
+                            "initContainers": _du_bringup_inits(shared),
                             "containers": [
+                                _bringup_order_sidecar(
+                                    "du",
+                                    ["CU-CP F1-C SCTP :38472"],
+                                ),
                                 {
                                     "name": "du",
                                     "image": IMAGE_DU,
@@ -554,6 +753,8 @@ def _write_edge_gnb(
                                         {"name": "rfsim", "containerPort": 4043, "protocol": "TCP"},
                                         {"name": "tmgr", "containerPort": 7374, "protocol": "TCP"},
                                     ],
+                                    # rfsim TCP accepts only after DU stack is up.
+                                    "readinessProbe": _tcp_readiness(4043, delay=20),
                                     "volumeMounts": [
                                         {
                                             "name": "configuration",
@@ -745,7 +946,12 @@ def _write_edge_gnb(
                                     **ARCH_AMD64,
                                     "kubernetes.io/hostname": ue_node,
                                 },
+                                "initContainers": _ue_bringup_inits(shared),
                                 "containers": [
+                                    _bringup_order_sidecar(
+                                        f"ue-{n}",
+                                        ["DU rfsim TCP :4043"],
+                                    ),
                                     {
                                         "name": "ue",
                                         "image": IMAGE_UE,
@@ -1036,7 +1242,15 @@ def _write_cuup(
                             "terminationGracePeriodSeconds": 5,
                             "nodeSelector": dict(ARCH_AMD64),
                             "affinity": _hostname_affinity(nodes),
+                            # No bringup-* init: CU-UP starts before CU-CP (E1 client).
                             "containers": [
+                                _bringup_order_sidecar(
+                                    f"cu-up-{n}",
+                                    [
+                                        "none (starts before CU-CP)",
+                                        "E1: dials CU-CP :38462 after CU-CP is up",
+                                    ],
+                                ),
                                 {
                                     "name": "cuup",
                                     "image": IMAGE_CUUP,
@@ -1054,6 +1268,19 @@ def _write_cuup(
                                         {"name": "n3", "containerPort": 2152, "protocol": "UDP"},
                                         {"name": "e1", "containerPort": 38462, "protocol": "SCTP"},
                                     ],
+                                    "readinessProbe": {
+                                        "exec": {
+                                            "command": [
+                                                "bash",
+                                                "-c",
+                                                "pgrep -f softmodem >/dev/null",
+                                            ]
+                                        },
+                                        "initialDelaySeconds": 15,
+                                        "periodSeconds": 5,
+                                        "timeoutSeconds": 2,
+                                        "failureThreshold": 24,
+                                    },
                                     "volumeMounts": [
                                         {
                                             "name": "configuration",

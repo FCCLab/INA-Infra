@@ -49,6 +49,57 @@ def default_profile() -> Profile:
     return Profile()
 
 
+# Lab Multus macvlan pool: one /24 per profile (parallel to OAI .139).
+_MULTUS_THIRD_OCTET_START = 140
+_MULTUS_THIRD_OCTET_END = 159  # inclusive
+
+
+def normalize_multus_subnet(subnet: str) -> str:
+    """Canonical IPv4 /24 string (e.g. ``10.1.140.0/24``)."""
+    net = ipaddress.ip_network(subnet, strict=False)
+    if net.version != 4 or net.prefixlen != 24:
+        raise ValueError(f"profile subnet must be IPv4 /24, got {subnet!r}")
+    return f"{net.network_address}/{net.prefixlen}"
+
+
+def next_multus_subnet(used: Optional[Sequence[str]] = None) -> str:
+    """Return the next free Multus /24 in ``10.1.140.0/24`` … ``10.1.159.0/24``."""
+    taken: set[str] = set()
+    for raw in used or ():
+        try:
+            taken.add(normalize_multus_subnet(str(raw)))
+        except ValueError:
+            continue
+    for third in range(_MULTUS_THIRD_OCTET_START, _MULTUS_THIRD_OCTET_END + 1):
+        cand = f"10.1.{third}.0/24"
+        if cand not in taken:
+            return cand
+    raise ValueError(
+        f"no free Multus /24 in 10.1.{_MULTUS_THIRD_OCTET_START}-"
+        f"{_MULTUS_THIRD_OCTET_END}"
+    )
+
+
+def dnn_prefix_from_multus(subnet: str) -> str:
+    """Map Multus ``10.1.N.0/24`` → DNN prefix ``10.N`` (UE PDU pools)."""
+    net = ipaddress.ip_network(normalize_multus_subnet(subnet), strict=False)
+    third = int(str(net.network_address).split(".")[2])
+    return f"10.{third}"
+
+
+def next_dnn_prefix(used: Optional[Sequence[str]] = None) -> str:
+    """Return the next free DNN prefix ``10.140`` … ``10.159``."""
+    taken = {str(x).strip() for x in (used or ()) if str(x).strip()}
+    for third in range(_MULTUS_THIRD_OCTET_START, _MULTUS_THIRD_OCTET_END + 1):
+        cand = f"10.{third}"
+        if cand not in taken:
+            return cand
+    raise ValueError(
+        f"no free DNN prefix in 10.{_MULTUS_THIRD_OCTET_START}-"
+        f"{_MULTUS_THIRD_OCTET_END}"
+    )
+
+
 def _prefix_and_len(subnet: str) -> tuple[str, int]:
     net = ipaddress.ip_network(subnet, strict=False)
     if net.version != 4 or net.prefixlen != 24:

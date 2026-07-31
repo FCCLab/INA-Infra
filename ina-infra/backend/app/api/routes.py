@@ -153,7 +153,10 @@ def get_profile_defaults():
     ),
 )
 def list_profiles():
-    records = profile_store.list_profiles()
+    records = [
+        gitea_apply.attach_local_deploy_files(r)
+        for r in profile_store.list_profiles()
+    ]
     return ProfileListOut(
         profiles=records,
         names=[r.profile.name for r in records],
@@ -168,7 +171,10 @@ def list_profiles():
     summary="Create profile",
     description=(
         "Create a new profile (K8s namespace name). Optionally `copy_from` "
-        "another profile for slices/network. If slices/network omitted, "
+        "another profile for slices/network. Per-profile identity "
+        "(Multus `subnet`, `dnn_prefix`, max slices, RAN nodes) is kept: "
+        "if Multus / DNN collide with an existing profile, the next free "
+        "`10.1.14x.0/24` / `10.14x` is assigned. If slices/network omitted, "
         "builtins are used. Returns **409** if the name already exists."
     ),
 )
@@ -190,9 +196,11 @@ def create_profile(body: ProfileCreateRequest):
         slices = pl_solver.default_slices()
     if network is None:
         network = pl_solver.default_network_in()
+    # Multus / DNN are per-profile (copy_from usually clones the same values).
+    profile = profile_store.allocate_profile_identity_for_create(body.profile)
     try:
         return profile_store.create_profile(
-            ProfileRecord(profile=body.profile, slices=slices, network=network)
+            ProfileRecord(profile=profile, slices=slices, network=network)
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -213,7 +221,7 @@ def get_profile(name: str):
     rec = profile_store.get_profile(name)
     if rec is None:
         raise HTTPException(status_code=404, detail=f"profile not found: {name}")
-    return rec
+    return gitea_apply.attach_local_deploy_files(rec)
 
 
 @router.put(
