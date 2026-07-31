@@ -201,10 +201,13 @@ def patch_smf_nf_conf(doc: dict) -> None:
     tpl = quote_snssai_sd(tpl)
     # Static upfs (oai-slice): NRF discovery cannot see off-central UPFs.
     tpl = tpl.replace("discover_upf: yes", "discover_upf: no")
-    # N3 from IP plan (same /24 as N4). N6 is DHCP on site 10.1.137 — omit from
-    # SMF static UPF info (UPF discovers n6 via ioctl after dhclient).
+    # N3 from IP plan (same /24 as N4). Real UPF N6 is DHCP (Glass 10.1.137);
+    # still declare a logical N6 in interfaceUpfInfoList so OAI SMF UPF-graph
+    # selection can complete (access N3 + DN N6). Placeholder .6N is not the
+    # live lease — SMF does not send N6 traffic to that address.
     new = """  upfs:
-    {# N4 host from IP plan; N3 shares that /24 (N4 .4N ↔ N3 .2N). N6 = DHCP. #}
+    {# N4 host from IP plan; N3 shares that /24 (N4 .4N ↔ N3 .2N).
+       Logical N6 (.6N / core.oai.org) for SMF graph selection; real N6 = DHCP. #}
     {%- for i in conf['upfs']|sort %}
     {%- set parts = i.split('.') %}
     {%- set octet = parts[3]|int %}
@@ -221,6 +224,10 @@ def patch_smf_nf_conf(doc: dict) -> None:
             ipv4EndpointAddresses:
               - {{ pfx }}.{{ 20 + slice_n }}
             networkInstance: "access.oai.org"
+          - interfaceType: "N6"
+            ipv4EndpointAddresses:
+              - {{ pfx }}.{{ 60 + slice_n }}
+            networkInstance: "core.oai.org"
         sNssaiUpfInfoList:
           - sNssai:
               sst: 1

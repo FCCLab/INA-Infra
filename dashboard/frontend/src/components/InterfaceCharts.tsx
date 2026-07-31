@@ -31,7 +31,6 @@ const PHYS_COLORS = (accent: string, accent2: string) => [
 
 export default function InterfaceCharts({ cluster, node, refreshToken }: Props) {
   const [error, setError] = useState<string | null>(null);
-  const [source, setSource] = useState("prometheus");
   const [ifaces, setIfaces] = useState<NodeInterface[]>([]);
   const [labels, setLabels] = useState<string[]>([]);
   const [series, setSeries] = useState<
@@ -45,7 +44,6 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
         const res = await api.nodeInterfaces(cluster, node);
         if (cancelled) return;
         setError(res.error || null);
-        setSource(res.source || "prometheus");
         const physical = (res.interfaces || []).filter((i) => i.kind === "physical");
         setIfaces(physical);
         const hist = res.history;
@@ -140,10 +138,7 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
       {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="chart-card">
-        <h3>
-          Physical interfaces (up) — {node}
-          <span className="gauge-kicker">{source}</span>
-        </h3>
+        <h3>Physical interfaces (up) — {node}</h3>
         <div className="iface-legend">
           <span className="tag tag-phys">physical · up</span>
           {ifaces.length === 0 ? (
