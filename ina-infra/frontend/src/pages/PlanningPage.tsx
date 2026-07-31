@@ -17,6 +17,9 @@ import Topology from "../components/Topology";
 import NetworkSettingsForm from "../components/NetworkSettingsForm";
 import FieldHelp from "../components/FieldHelp";
 import StatusRail from "../components/StatusRail";
+import Card from "../components/ui/Card";
+import SectionLabel from "../components/ui/SectionLabel";
+import KpiStrip from "../components/ui/KpiStrip";
 import type { ProfileClusterStatusOut } from "../api/client";
 
 const emptySlice = (id: number): SliceIn => ({
@@ -149,16 +152,24 @@ export default function PlanningPage() {
     return m;
   }, [edgeNodes]);
 
-  function edgeOptionLabel(name: string): string {
+  function edgeOptionDetail(name: string): string {
     const n = edgeNodeByName.get(name);
     if (!n) return name;
-    const bits = [
+    return [
       name,
       n.ready ? "Ready" : "NotReady",
       n.multus_master || null,
       n.internal_ip || null,
-    ].filter(Boolean);
-    return bits.join(" · ");
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  /** Compact label for the closed <select> (full detail in title / hint). */
+  function edgeOptionLabel(name: string): string {
+    const n = edgeNodeByName.get(name);
+    if (!n) return name;
+    return `${name}${n.ready ? "" : " · NotReady"}`;
   }
 
   async function refreshNames() {
@@ -716,12 +727,65 @@ export default function PlanningPage() {
 
   const ipPlan: IpPlan | null | undefined = result?.ok ? result.ip_plan : null;
 
+  const kpis = [
+    {
+      label: "Profile",
+      kicker: "namespace",
+      value: profile.name || "—",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        </svg>
+      ),
+      bad: !profileOk,
+    },
+    {
+      label: "Slices",
+      kicker: `max ${profile.max_slices}`,
+      value: String(slices.length),
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M4 20v-4M10 20v-9M16 20v-14M22 20V9" />
+        </svg>
+      ),
+    },
+    {
+      label: "PL solve",
+      kicker: "placement",
+      value: result?.ok ? "Solved" : "Pending",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+      ),
+      bad: Boolean(result && !result.ok),
+    },
+    {
+      label: "Deploy",
+      kicker: "GitOps",
+      value: deployed ? "Live" : "Idle",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M13 2 4 14h6l-1 8 9-12h-6z" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+  ];
+
   return (
     <div className="page-layout">
       <div className="page">
-      <section className="panel">
+      <KpiStrip items={kpis} />
+
+      <Card className="tier">
         <div className="panel-head">
-          <h2>Profile</h2>
+          <SectionLabel kicker={savedAt ? savedAt.slice(0, 19) : undefined}>
+            Profile
+          </SectionLabel>
           <div className="actions">
             <button type="button" disabled={busy} onClick={onSave}>
               {isExisting && !dirtyName ? "Update" : "Save"}
@@ -823,7 +887,7 @@ export default function PlanningPage() {
               }}
             >
               {edgeRfOptions.map((n) => (
-                <option key={n} value={n} title={edgeOptionLabel(n)}>
+                <option key={n} value={n} title={edgeOptionDetail(n)}>
                   {edgeOptionLabel(n)}
                 </option>
               ))}
@@ -836,14 +900,7 @@ export default function PlanningPage() {
         {!edgeNodesError && edgeNodes.length > 0 && (
           <p className="hint">
             Edge nodes ({edgeNodes.length}):{" "}
-            {edgeNodes
-              .map(
-                (n) =>
-                  `${n.name}${n.ready ? "" : " (NotReady)"}${
-                    n.multus_master ? `/${n.multus_master}` : ""
-                  }`,
-              )
-              .join(", ")}
+            {edgeNodes.map((n) => edgeOptionDetail(n.name)).join(", ")}
           </p>
         )}
         {profile.du_node &&
@@ -867,11 +924,13 @@ export default function PlanningPage() {
           </p>
         )}
         {status && <p className="hint ok-inline">{status}</p>}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card className="tier">
         <div className="panel-head">
-          <h2>Network settings</h2>
+          <SectionLabel kicker={showNet ? "editing" : "collapsed"}>
+            Network settings
+          </SectionLabel>
           <button type="button" onClick={() => setShowNet((v) => !v)}>
             {showNet ? "Hide" : "Show"}
           </button>
@@ -884,16 +943,13 @@ export default function PlanningPage() {
         ) : (
           <p className="hint">Collapsed — Show to edit substrate variables for this profile.</p>
         )}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card className="tier">
         <div className="panel-head">
-          <h2>
-            Slice SLAs{" "}
-            <span className="muted">
-              (N={slices.length}/{profile.max_slices})
-            </span>
-          </h2>
+          <SectionLabel kicker={`N=${slices.length}/${profile.max_slices}`}>
+            Slice SLAs
+          </SectionLabel>
           <div className="actions">
             <button
               type="button"
@@ -921,7 +977,7 @@ export default function PlanningPage() {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="dtable">
             <thead>
               <tr>
                 <th>
@@ -1010,57 +1066,74 @@ export default function PlanningPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
 
       {error && <div className="banner error">{error}</div>}
 
       {result?.ok && (
-        <section className="panel">
-          <div className="panel-head">
-            <h2>PL result</h2>
-            <span className="muted">{result.message}</span>
-          </div>
-          <Topology slices={result.slices} />
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Slice</th>
-                  <th>CU</th>
-                  <th>UPF</th>
-                  <th>APP</th>
-                  <th>b_min</th>
-                  <th>CU CPU</th>
-                  <th>UPF CPU</th>
-                  <th>APP CPU</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...result.slices]
-                  .sort((a, b) => a.id - b.id)
-                  .map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      S{s.id} {s.slice_type && <span className="muted">({s.slice_type})</span>}
-                    </td>
-                    <td>{s.placement.cu}</td>
-                    <td>{s.placement.upf}</td>
-                    <td>{s.placement.app}</td>
-                    <td>{s.resources.b_min ?? "—"}</td>
-                    <td>{s.resources.a_c_cu.toFixed(2)}</td>
-                    <td>{s.resources.a_c_upf.toFixed(2)}</td>
-                    <td>{s.resources.a_c_app.toFixed(2)}</td>
+        <Card className="tier" glow>
+          <header className="result-title-block">
+            <div className="result-eyebrow">
+              <span className="status-dot dot-ok" />
+              <span className="result-eyebrow-text">PL result</span>
+              <span className="site-badge">{result.slices.length} slice(s)</span>
+            </div>
+            <h2 className="result-title">Optimal placement and IP plan</h2>
+          </header>
+
+          <section className="result-section">
+            <div className="result-section-head">
+              <SectionLabel kicker="Edge · Regional · Central">
+                Placement
+              </SectionLabel>
+            </div>
+            <Topology slices={result.slices} />
+          </section>
+
+          <section className="result-section">
+            <div className="result-section-head">
+              <SectionLabel>Resources</SectionLabel>
+            </div>
+            <div className="table-wrap">
+              <table className="dtable">
+                <thead>
+                  <tr>
+                    <th>Slice</th>
+                    <th>b_min</th>
+                    <th>CU CPU</th>
+                    <th>UPF CPU</th>
+                    <th>APP CPU</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {[...result.slices]
+                    .sort((a, b) => a.id - b.id)
+                    .map((s) => (
+                      <tr key={s.id}>
+                        <td>
+                          S{s.id}{" "}
+                          {s.slice_type && (
+                            <span className="muted">({s.slice_type})</span>
+                          )}
+                        </td>
+                        <td className="mono">{s.resources.b_min ?? "—"}</td>
+                        <td className="mono">{s.resources.a_c_cu.toFixed(2)}</td>
+                        <td className="mono">{s.resources.a_c_upf.toFixed(2)}</td>
+                        <td className="mono">{s.resources.a_c_app.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           {ipPlan && (
-            <>
-              <h3 className="subhead">IP plan ({ipPlan.subnet})</h3>
+            <section className="result-section">
+              <div className="result-section-head">
+                <SectionLabel kicker={ipPlan.subnet}>IP plan</SectionLabel>
+              </div>
               <div className="table-wrap">
-                <table>
+                <table className="dtable">
                   <thead>
                     <tr>
                       <th>Role</th>
@@ -1120,12 +1193,16 @@ export default function PlanningPage() {
                 </table>
               </div>
               <div className="table-wrap">
-                <table>
+                <table className="dtable">
                   <thead>
                     <tr>
                       <th>n</th>
-                      <th>UPF N3/N4/N6</th>
-                      <th>CU-UP E1/F1U/N3</th>
+                      <th>UPF N3</th>
+                      <th>CU-UP N3</th>
+                      <th>UPF N4</th>
+                      <th>UPF N6</th>
+                      <th>CU-UP E1</th>
+                      <th>CU-UP F1-U</th>
                       <th>UE RF</th>
                       <th>DNN</th>
                       <th>Sites</th>
@@ -1134,16 +1211,24 @@ export default function PlanningPage() {
                   <tbody>
                     {ipPlan.slices.map((s) => (
                       <tr key={s.n}>
-                        <td>{s.n}</td>
+                        <td className="mono">{s.n}</td>
                         <td>
-                          <code>
-                            {s.upf_n3} / {s.upf_n4} / {s.upf_n6}
-                          </code>
+                          <code>{s.upf_n3}</code>
                         </td>
                         <td>
-                          <code>
-                            {s.cuup_e1} / {s.cuup_f1u} / {s.cuup_n3}
-                          </code>
+                          <code>{s.cuup_n3}</code>
+                        </td>
+                        <td>
+                          <code>{s.upf_n4}</code>
+                        </td>
+                        <td>
+                          <code>{s.upf_n6}</code>
+                        </td>
+                        <td>
+                          <code>{s.cuup_e1}</code>
+                        </td>
+                        <td>
+                          <code>{s.cuup_f1u}</code>
                         </td>
                         <td>
                           <code>{s.ue_rf}</code>
@@ -1159,7 +1244,7 @@ export default function PlanningPage() {
                   </tbody>
                 </table>
               </div>
-            </>
+            </section>
           )}
 
           <div className="apply-box">
@@ -1235,13 +1320,15 @@ export default function PlanningPage() {
               Live command output streams into the Console below.
             </p>
           </div>
-        </section>
+        </Card>
       )}
 
       {(consoleOpen || deployFiles.length > 0) && (
-        <section className="panel console-panel">
+        <Card className="tier console-panel">
           <div className="panel-head">
-            <h2>{consoleOpen ? consoleTitle : "Console"}</h2>
+            <SectionLabel kicker="stream">
+              {consoleOpen ? consoleTitle : "Console"}
+            </SectionLabel>
             {rolloutBusy ? (
               <button
                 type="button"
@@ -1312,7 +1399,7 @@ export default function PlanningPage() {
               </ul>
             </details>
           )}
-        </section>
+        </Card>
       )}
       </div>
 

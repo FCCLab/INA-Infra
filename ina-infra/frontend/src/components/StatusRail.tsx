@@ -3,6 +3,8 @@ import {
   ConfigSyncStatus,
   ProfileClusterStatusOut,
 } from "../api/client";
+import Card from "./ui/Card";
+import SectionLabel from "./ui/SectionLabel";
 
 type Row = {
   label: string;
@@ -297,9 +299,9 @@ export default function StatusRail({
     : [];
 
   return (
-    <aside className="status-rail panel">
+    <Card className="status-rail">
       <div className="panel-head">
-        <h2>Status</h2>
+        <SectionLabel kicker="live">Status</SectionLabel>
         <div className="actions">
           {onRollout && (
             <button
@@ -314,6 +316,7 @@ export default function StatusRail({
           {rolloutBusy && onStopRollout && (
             <button
               type="button"
+              className="danger"
               onClick={onStopRollout}
               title="Stop the staged rollout script"
             >
@@ -416,6 +419,6 @@ export default function StatusRail({
           </p>
         )}
       </div>
-    </aside>
+    </Card>
   );
 }
