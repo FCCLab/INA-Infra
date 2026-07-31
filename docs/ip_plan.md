@@ -15,7 +15,7 @@ Two planes split **operator/mgmt** from **cluster/data** traffic.
 | `10.1.140.0/24` | macvlan | INA-Infra profile Multus (`ina-infra`; host = `base[role]+n`) |
 | `10.1.101.0/24` | WAN / external | Bootstrap SSH for bare-metal workers |
 
-DHCP leases on mgmt start at `.100` ([services/.env](../services/.env)). Pi-hole static DNS: [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf).
+Pi-hole on `mgmt-0` is **DNS-only** (`10.1.132.200`); static records: [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf). Site DHCP is **Glass / ISC** on **central** Kubernetes (`hostNetwork` on `central-0` `enp7s0`), pool `10.1.137.160–199` — build/push: [services/glass-dhcp/build_push.sh](../services/glass-dhcp/build_push.sh), render: [scripts/render_glass_dhcp_gitops.sh](../scripts/render_glass_dhcp_gitops.sh), UI `http://10.1.132.210:3000`.
 
 ## VLAN uplinks (`eno1` trunk)
 
@@ -35,6 +35,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 
 | Range / address | Owner | Notes |
 |-----------------|-------|-------|
+| `.1` | Site internet gateway | Upstream L3 on `10.1.137.0/24` (outside lab IP plan hosts) |
 | `.10` | `br-int-central` | Hypervisor bridge (`BR_INT_CENTRAL_IP`) |
 | `.11` | `br-int-regional` | Hypervisor bridge |
 | `.12` | `br-int-edge` | Hypervisor bridge |
@@ -52,6 +53,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.151` | `gh81` | edge cluster, GH200 arm64 |
 | `.152` | `gh82` | central cluster, GH200 arm64 |
 | `.153`–`.159` | — | Spare |
+| **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC Deployment on `central-0` |
 
 ## `10.1.132.0/24` allocation (mgmt)
 
@@ -60,7 +62,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.1` | Gateway | Default route for VMs |
 | `.10` | `br-mgmt` | Hypervisor bridge |
 | `.10`–`.99` | MetalLB `mgmt-pool` | Registry, OpenSpeedTest, etc. |
-| `.100`+ | DHCP | Pi-hole leases |
+| `.100`–`.199` | *(formerly Pi-hole DHCP)* | unused — DHCP moved to site `.137` |
 | `.200` | `mgmt-0` | Gitea, Pi-hole DNS |
 | `.201` | `mgmt-1` | mgmt worker |
 | `.210`–`.211` | `central-0`, `central-1` | |

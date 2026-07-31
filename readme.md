@@ -1,4 +1,4 @@
-# Bring up Nephio
+# Bring up INA-Infra
 
 ## Clone
 

@@ -12,12 +12,8 @@ services:
       FTLCONF_dns_domain_name: ${DOMAIN}
       FTLCONF_dns_upstreams: ${PIHOLE_UPSTREAM_DNS}
       FTLCONF_misc_etc_dnsmasq_d: "true"
-      FTLCONF_dhcp_active: "true"
-      FTLCONF_dhcp_start: ${DHCP_RANGE_START}
-      FTLCONF_dhcp_end: ${DHCP_RANGE_END}
-      FTLCONF_dhcp_router: ${GATEWAY}
-      FTLCONF_dhcp_leaseTime: ${DHCP_LEASE_TIME}
-      FTLCONF_dhcp_logging: "true"
+      # Site DHCP is Glass/ISC on central K8s (10.1.137). Pi-hole is DNS-only.
+      FTLCONF_dhcp_active: "false"
     volumes:
       - ./etc-pihole:/etc/pihole
       - ./etc-dnsmasq.d:/etc/dnsmasq.d

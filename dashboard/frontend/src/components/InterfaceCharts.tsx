@@ -63,7 +63,11 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
   }, [cluster, node, refreshToken]);
 
   const colors = readThemeColors();
-  const physNames = useMemo(() => Object.keys(series).sort(), [series]);
+  const physNames = useMemo(() => {
+    const fromIfaces = ifaces.map((i) => i.name);
+    if (fromIfaces.length) return [...fromIfaces].sort();
+    return Object.keys(series).sort();
+  }, [ifaces, series]);
   const axis = {
     ticks: { color: colors.textDim, maxTicksLimit: 6 },
     grid: { color: colors.grid },
@@ -137,13 +141,13 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
 
       <div className="chart-card">
         <h3>
-          Physical interfaces — {node}
+          Physical interfaces (up) — {node}
           <span className="gauge-kicker">{source}</span>
         </h3>
         <div className="iface-legend">
-          <span className="tag tag-phys">physical</span>
+          <span className="tag tag-phys">physical · up</span>
           {ifaces.length === 0 ? (
-            <span className="muted">No physical NIC series yet</span>
+            <span className="muted">No up physical NIC series yet</span>
           ) : (
             ifaces.map((i) => {
               const rxOk = isFiniteNumber(i.rx_mbps);

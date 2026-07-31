@@ -67,19 +67,24 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
     node_esc = _esc(node)
     # Bytes/s * 8 / 1e6 => Mbps. Prefer series labeled with kubernetes node name.
     # Prefer kubernetes-pods scrape job; fall back without job filter if empty.
+    # Restrict to physically up NICs via node_network_up == 1 (operstate).
+    sel = f'node="{node_esc}",job="kubernetes-pods"'
+    up_q = f'max by (device) (node_network_up{{{sel}}} == 1)'
     rx_q = (
-        f'avg by (device) (rate(node_network_receive_bytes_total{{node="{node_esc}",job="kubernetes-pods"}}[5m]))'
-        f" * 8 / 1e6"
+        f'(avg by (device) (rate(node_network_receive_bytes_total{{{sel}}}[5m]))'
+        f" and on(device) ({up_q})) * 8 / 1e6"
     )
     tx_q = (
-        f'avg by (device) (rate(node_network_transmit_bytes_total{{node="{node_esc}",job="kubernetes-pods"}}[5m]))'
-        f" * 8 / 1e6"
+        f'(avg by (device) (rate(node_network_transmit_bytes_total{{{sel}}}[5m]))'
+        f" and on(device) ({up_q})) * 8 / 1e6"
     )
     rx_bytes_q = (
-        f'max by (device) (node_network_receive_bytes_total{{node="{node_esc}",job="kubernetes-pods"}})'
+        f'(max by (device) (node_network_receive_bytes_total{{{sel}}})'
+        f" and on(device) ({up_q}))"
     )
     tx_bytes_q = (
-        f'max by (device) (node_network_transmit_bytes_total{{node="{node_esc}",job="kubernetes-pods"}})'
+        f'(max by (device) (node_network_transmit_bytes_total{{{sel}}})'
+        f" and on(device) ({up_q}))"
     )
 
     rx_res, rx_err = prom.query(cluster, rx_q)
@@ -95,6 +100,13 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
     tx_res, tx_err = prom.query(cluster, tx_q)
     rx_b_res, _ = prom.query(cluster, rx_bytes_q)
     tx_b_res, _ = prom.query(cluster, tx_bytes_q)
+    up_res, _ = prom.query(cluster, up_q)
+
+    up_devs = {
+        (sample.get("metric") or {}).get("device")
+        for sample in up_res
+        if (sample.get("metric") or {}).get("device")
+    }
 
     rx_by: Dict[str, float] = {}
     tx_by: Dict[str, float] = {}
@@ -136,6 +148,8 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
         kind = classify_iface(name)
         if kind != "physical":
             continue
+        if up_devs and name not in up_devs:
+            continue
         rx_mbps = _mbps(rx_by.get(name))
         tx_mbps = _mbps(tx_by.get(name))
         interfaces.append(
@@ -151,7 +165,9 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
             }
         )
 
-    # Range history for charts (physical only).
+    up_physical = {i["name"] for i in interfaces}
+
+    # Range history for charts (physically up NICs only).
     end = time.time()
     start = end - _HISTORY_SECONDS
     rx_hist, hist_err = prom.query_range(cluster, rx_q, start, end, step=_HISTORY_STEP)
@@ -177,6 +193,8 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
         dev = metric.get("device")
         if not dev or classify_iface(dev) != "physical":
             continue
+        if up_physical and dev not in up_physical:
+            continue
         bucket = series.setdefault(
             dev, {"rx_mbps": [None] * n, "tx_mbps": [None] * n}
         )
@@ -191,6 +209,8 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
         metric = sample.get("metric") or {}
         dev = metric.get("device")
         if not dev or classify_iface(dev) != "physical":
+            continue
+        if up_physical and dev not in up_physical:
             continue
         bucket = series.setdefault(
             dev, {"rx_mbps": [None] * n, "tx_mbps": [None] * n}
@@ -209,7 +229,7 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
     if hist_err:
         err_parts.append(hist_err)
     if not interfaces and not err_parts:
-        err_parts.append("no physical NIC series (is node_exporter scraped?)")
+        err_parts.append("no up physical NIC series (is node_exporter scraped?)")
 
     return {
         "cluster": cluster,
