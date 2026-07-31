@@ -67,7 +67,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$TMUX_MODE" == "1" ]]; then
-  args=(--tmux --ue-ns "$SLICE_NS" --dnn-prefix "$DNN_PREFIX")
+  # One tmux session per namespace/profile — do not kill other profiles' panes.
+  safe_ns="$(printf '%s' "$SLICE_NS" | tr -c 'A-Za-z0-9_-' '-' | sed 's/^-//;s/-$//')"
+  [[ -n "$safe_ns" ]] || safe_ns="ue"
+  args=(
+    --tmux
+    --ue-ns "$SLICE_NS"
+    --session "oai_ping_${safe_ns}"
+    --dnn-prefix "$DNN_PREFIX"
+  )
   [[ "$USE_DNN" == "1" ]] && args+=(--dnn)
   if [[ "$USE_N6" == "1" ]]; then
     args+=(--n6)
@@ -78,6 +86,7 @@ if [[ "$TMUX_MODE" == "1" ]]; then
   for n in "${SELECTED[@]+"${SELECTED[@]}"}"; do
     args+=(--ue"$n")
   done
+  echo "tmux session: oai_ping_${safe_ns} (ns=${SLICE_NS})"
   exec "$SCRIPT_DIR/test_ping.py" "${args[@]}"
 fi
 

@@ -339,7 +339,7 @@ step_ues() {
     exit 1
   fi
   echo "Done. All ${SLICE_COUNT} UEs have ${OAITUN_IFACE} in ns=${PROFILE_NS}."
-  echo "Next: ./scripts/ina-infra-ping-test.sh --dnn"
+  echo "Next: ./scripts/profile/profile_ping_test.sh ${PROFILE_NS} --dnn"
 }
 
 echo "==> INA profile namespace rollout (ns=${PROFILE_NS})"

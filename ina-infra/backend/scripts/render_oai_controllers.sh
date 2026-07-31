@@ -200,25 +200,29 @@ def patch_smf_nf_conf(doc: dict) -> None:
     tpl = quote_snssai_sd(tpl)
     # Static upfs (oai-slice): NRF discovery cannot see off-central UPFs.
     tpl = tpl.replace("discover_upf: yes", "discover_upf: no")
+    # N3/N6 from IP plan: same /24 as N4 host (profile Multus subnet), octets
+    # N4=.40+n → N3=.20+n → N6=.60+n. Never hardcode 10.1.140 (breaks .141+ profiles).
     new = """  upfs:
-    {# N4 .4N ↔ N3 .2N ↔ N6 .6N; interfaceUpfInfoList required for SMF UPF graph N3 #}
+    {# N4 host from IP plan; N3/N6 share that /24 (N4 .4N ↔ N3 .2N ↔ N6 .6N) #}
     {%- for i in conf['upfs']|sort %}
-    {%- set octet = i.split('.')[3]|int %}
+    {%- set parts = i.split('.') %}
+    {%- set octet = parts[3]|int %}
     {%- set slice_n = octet - 40 %}
+    {%- set pfx = parts[0] ~ '.' ~ parts[1] ~ '.' ~ parts[2] %}
     - host: {{ i }}
       config:
         enable_usage_reporting: no
         enable_upf_wo_nf_discovery: yes
-        n3_local_ipv4: 10.1.140.{{ 20 + slice_n }}
+        n3_local_ipv4: {{ pfx }}.{{ 20 + slice_n }}
       upf_info:
         interfaceUpfInfoList:
           - interfaceType: "N3"
             ipv4EndpointAddresses:
-              - 10.1.140.{{ 20 + slice_n }}
+              - {{ pfx }}.{{ 20 + slice_n }}
             networkInstance: "access.oai.org"
           - interfaceType: "N6"
             ipv4EndpointAddresses:
-              - 10.1.140.{{ 60 + slice_n }}
+              - {{ pfx }}.{{ 60 + slice_n }}
             networkInstance: "core.oai.org"
         sNssaiUpfInfoList:
           - sNssai:

@@ -15,7 +15,8 @@ Examples:
   ./scripts/test_ping.py --ue-ns ina-infra --dnn --dnn-prefix 10.140
   ./scripts/test_ping.py --ue-ns ina-infra --n6 --n6-prefix 10.1.140 --n6-base 60
   ./scripts/test_ping.py --tmux
-  ./scripts/test_ping.py --tmux --ue1 --ue2 --session oai_ping
+  ./scripts/test_ping.py --tmux --ue-ns ina-infra   # session oai_ping_ina-infra
+  ./scripts/test_ping.py --tmux --ue1 --ue2 --session oai_ping_custom
   ./scripts/test_ping.py --list-only
 """
 
@@ -407,7 +408,11 @@ def main() -> int:
         action="store_true",
         help="One tmux pane per UE; ping forever (auto-retry)",
     )
-    ap.add_argument("--session", default="oai_ping", help="tmux session name")
+    ap.add_argument(
+        "--session",
+        default=None,
+        help="tmux session name (default: oai_ping_<ue-ns>, so profiles do not clobber each other)",
+    )
     ap.add_argument(
         "--retry-delay",
         type=float,
@@ -440,6 +445,11 @@ def main() -> int:
         help="Include UE N (repeatable)",
     )
     args = ap.parse_args()
+
+    if not args.session:
+        # Per-namespace session so ina-infra / test / oai-slice-deployment can run in parallel.
+        safe_ns = re.sub(r"[^A-Za-z0-9_-]+", "-", args.ue_ns).strip("-") or "ue"
+        args.session = f"oai_ping_{safe_ns}"
 
     ssh_config = Path(args.ssh_config)
     if not ssh_config.is_file():
