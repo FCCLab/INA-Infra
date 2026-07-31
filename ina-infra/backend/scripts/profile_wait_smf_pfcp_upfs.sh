@@ -205,10 +205,20 @@ smf_pfcp_ok_for_n4() {
   echo "$logs" | grep -qiE "$SMF_PFCP_RE"
 }
 
+# Resolve and cache UPF site in the current shell (not via $(...), which
+# would discard declare -A writes under set -u).
+resolve_upf_context() {
+  local n="$1"
+  if [[ -n "${UPF_CTX[$n]:-}" ]]; then
+    return 0
+  fi
+  find_upf_context "$n" >/dev/null
+}
+
 slice_pfcp_ok() {
   local n="$1" ctx n4
-  ctx="$(find_upf_context "$n" || true)"
-  [[ -n "$ctx" ]] || return 1
+  resolve_upf_context "$n" || return 1
+  ctx="${UPF_CTX[$n]}"
   n4="$(n4_for_slice "$n")"
   if upf_pfcp_ok "$n" "$ctx"; then
     return 0
@@ -230,12 +240,11 @@ fi
 
 echo "Waiting up to ${TIMEOUT_SEC}s for SMF↔UPF PFCP (ns=$NS slices=${SLICES[*]} since=$SINCE)"
 for n in "${SLICES[@]}"; do
-  ctx="$(find_upf_context "$n" || true)"
-  if [[ -z "$ctx" ]]; then
+  if ! resolve_upf_context "$n"; then
     echo "error: upf-slice-${n} not found on central/regional/edge" >&2
     exit 1
   fi
-  echo "  UPF${n}  N4=$(n4_for_slice "$n")  site=$ctx"
+  echo "  UPF${n}  N4=$(n4_for_slice "$n")  site=${UPF_CTX[$n]}"
 done
 echo
 
@@ -250,7 +259,7 @@ while (( SECONDS < deadline )); do
   done
   if [[ ${#missing[@]} -eq 0 ]]; then
     for n in "${SLICES[@]}"; do
-      echo "OK  UPF${n}  N4=$(n4_for_slice "$n")  ${UPF_CTX[$n]}  PFCP associated/heartbeat"
+      echo "OK  UPF${n}  N4=$(n4_for_slice "$n")  ${UPF_CTX[$n]:-?}  PFCP associated/heartbeat"
     done
     echo "RESULT: all PFCP associations ready"
     exit 0
@@ -263,6 +272,11 @@ echo "RESULT: FAIL — PFCP not ready for UPF ${missing[*]} within ${TIMEOUT_SEC
 echo "Hints:" >&2
 echo "  kubectl --context $SMF_CTX -n $NS logs deploy/${SMF_DEPLOY} -c smf-core | grep -iE 'PFCP|Associat|Failed'" >&2
 for n in "${missing[@]}"; do
-  echo "  kubectl --context ${UPF_CTX[$n]} -n $NS logs \$(kubectl --context ${UPF_CTX[$n]} -n $NS get pods -o name | grep upf-slice-${n}- | head -1) -c upf-slice-${n} | grep -iE 'PFCP|Associat|heartbeat'" >&2
+  ctx="${UPF_CTX[$n]:-}"
+  if [[ -z "$ctx" ]]; then
+    resolve_upf_context "$n" || true
+    ctx="${UPF_CTX[$n]:-unknown}"
+  fi
+  echo "  kubectl --context ${ctx} -n $NS logs \$(kubectl --context ${ctx} -n $NS get pods -o name | grep upf-slice-${n}- | head -1) -c upf-slice-${n} | grep -iE 'PFCP|Associat|heartbeat'" >&2
 done
 exit 1

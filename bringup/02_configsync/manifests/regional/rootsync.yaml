@@ -12,3 +12,7 @@ spec:
     secretRef:
       name: regional-repo-access-token-configsync
     period: 15s
+  override:
+    statusMode: disabled
+    # Don't block sync for long on NFDeployments / DaemonSets that stay non-Ready.
+    reconcileTimeout: 30s

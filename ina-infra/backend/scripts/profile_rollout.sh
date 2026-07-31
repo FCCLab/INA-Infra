@@ -1,30 +1,32 @@
 #!/usr/bin/env bash
 # Staged rollout for an INA-Infra profile namespace (default: ina-infra).
 #
-# Same bring-up order as oai_slice_deployment_namespace_rollout.sh, but all
-# Deployments live in PROFILE_NS and UPF sites come from PL placement CM.
+# Deployments live in PROFILE_NS; UPF/CU sites come from PL placement CM.
 #
 # Order:
-#   [1] NRF (central) → wait NRF HTTP
-#   [2] UPF-slice-1..N (PL upf_id site) → wait UPF→NRF registration
-#   [3] SMF (central) → wait SMF→NRF registration
-#   [4] Wait SMF↔UPF PFCP
-#   [5] CU-CP (edge)
-#   [6] CU-UP 1..N (PL cu_id site — may differ from UPF)
-#   [7] FlexRIC + DU (edge) + settle for F1
-#   [8] UEs 1..N one-by-one (pod delete + wait oaitun)
+#   NRF → UPF → SMF → CU-CP → All UEs
+#
+#   [1] NRF (central)
+#   [2] UPF-slice-1..N → check UPF→NRF
+#   [3] SMF (central) → check SMF→NRF → check SMF↔UPF PFCP
+#   [4] CU-CP (edge)
+#   [5] UEs 1..N one-by-one (pod delete + wait oaitun)
+#
+# CU-UP and DU are not restarted (left as-is).
 #
 # Usage:
 #   ./backend/scripts/profile_rollout.sh
 #   ./backend/scripts/profile_rollout.sh --step 2          # UPF only
 #   ./backend/scripts/profile_rollout.sh --step upf
 #   ./backend/scripts/profile_rollout.sh --from-step 3       # SMF → end
-#   ./backend/scripts/profile_rollout.sh --nrf-http-wait   # also probe SBI HTTP (slow/unreliable)
+#   ./backend/scripts/profile_rollout.sh --nrf-http-wait
+#   IGNORE_PFCP=1 ./backend/scripts/profile_rollout.sh
 #   SKIP_UES=1 ./backend/scripts/profile_rollout.sh
 #   SKIP_RAN=1 ./backend/scripts/profile_rollout.sh
 #   ONLY_UES=1 ./backend/scripts/profile_rollout.sh
 #
-# Steps: 1=nrf  2=upf  3=smf  4=pfcp  5=cu-cp  6=cu-up  7=du  8=ue
+# Steps: 1=nrf  2=upf  3=smf  4=cu-cp  5=ue
+# Legacy: pfcp → smf
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,16 +41,16 @@ EDGE_HOST="${EDGE_HOST:-edge-0}"
 TIMEOUT="${TIMEOUT:-180}"
 UE_GAP_SEC="${UE_GAP_SEC:-0}"
 PDU_WAIT_SEC="${PDU_WAIT_SEC:-90}"
-DU_SETTLE_SEC="${DU_SETTLE_SEC:-20}"
 PFCP_WAIT_SEC="${PFCP_WAIT_SEC:-120}"
 NRF_WAIT_SEC="${NRF_WAIT_SEC:-120}"
 NRF_LOG_SINCE="${NRF_LOG_SINCE:-5m}"
 SKIP_UES="${SKIP_UES:-0}"
 SKIP_RAN="${SKIP_RAN:-0}"
 ONLY_UES="${ONLY_UES:-0}"
+IGNORE_PFCP="${IGNORE_PFCP:-0}"
 OAITUN_IFACE="${OAITUN_IFACE:-oaitun_ue1}"
 STEP_FROM=1
-STEP_TO=8
+STEP_TO=5
 SKIP_NRF_WAIT="${SKIP_NRF_WAIT:-0}"
 NRF_HTTP_WAIT="${NRF_HTTP_WAIT:-0}"
 
@@ -61,14 +63,11 @@ step_to_num() {
   case "$1" in
     1|nrf) printf '1' ;;
     2|upf) printf '2' ;;
-    3|smf) printf '3' ;;
-    4|pfcp) printf '4' ;;
-    5|cu-cp|cucp) printf '5' ;;
-    6|cu-up|cuup) printf '6' ;;
-    7|du|ran-du) printf '7' ;;
-    8|ue|ues) printf '8' ;;
+    3|smf|pfcp) printf '3' ;;
+    4|cu-cp|cucp) printf '4' ;;
+    5|ue|ues|6|7|8) printf '5' ;;
     *)
-      echo "Unknown step: $1 (use 1-8 or nrf|upf|smf|pfcp|cu-cp|cu-up|du|ue)" >&2
+      echo "Unknown step: $1 (use 1-5 or nrf|upf|smf|cu-cp|ue)" >&2
       return 1
       ;;
   esac
@@ -95,10 +94,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-nrf-wait) SKIP_NRF_WAIT=1; shift ;;
     --nrf-http-wait) NRF_HTTP_WAIT=1; shift ;;
-    --nrf-ready-only) SKIP_NRF_WAIT=1; shift ;;  # deprecated alias
+    --nrf-ready-only) SKIP_NRF_WAIT=1; shift ;;
     --skip-ues) SKIP_UES=1; shift ;;
     --skip-ran) SKIP_RAN=1; shift ;;
     --only-ues) ONLY_UES=1; shift ;;
+    --ignore-pfcp) IGNORE_PFCP=1; shift ;;
     *)
       echo "Unknown arg: $1" >&2
       usage 1
@@ -107,8 +107,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$ONLY_UES" == "1" ]]; then
-  STEP_FROM=8
-  STEP_TO=8
+  STEP_FROM=5
+  STEP_TO=5
 fi
 
 should_run_step() {
@@ -146,15 +146,6 @@ wait_rollout() {
   local host="$1" ns="$2" deploy="$3"
   echo "  wait   ${host}: ${ns}/deployment/${deploy} (timeout=${TIMEOUT}s)"
   ssh_host "$host" kubectl -n "$ns" rollout status "deployment/${deploy}" --timeout="${TIMEOUT}s"
-}
-
-site_from_upf_id() {
-  case "$1" in
-    0) printf 'edge' ;;
-    1) printf 'regional' ;;
-    2) printf 'central' ;;
-    *) printf 'central' ;;
-  esac
 }
 
 load_placement() {
@@ -227,8 +218,42 @@ wait_ue_pdu() {
   return 1
 }
 
+check_smf_pfcp() {
+  # Returns 0 if all UPF PFCP associations are ready (or IGNORE_PFCP=1).
+  echo "  check  SMF↔UPF PFCP (slices 1..${SLICE_COUNT})"
+  if PFCP_WAIT_SEC="$PFCP_WAIT_SEC" \
+    "$SCRIPT_DIR/profile_wait_smf_pfcp_upfs.sh" "$PROFILE_NS" \
+    --timeout "$PFCP_WAIT_SEC" --since "$NRF_LOG_SINCE" "${wait_args[@]}"; then
+    echo "  OK     SMF↔UPF PFCP — all ${SLICE_COUNT} UPFs associated"
+    return 0
+  fi
+  echo "  PFCP incomplete — restart SMF again (UPFs already up)"
+  restart_deploy "$CENTRAL_HOST" "$PROFILE_NS" smf-core
+  wait_rollout "$CENTRAL_HOST" "$PROFILE_NS" smf-core
+  sleep 8
+  echo "  check  SMF→NRF (after SMF re-restart)"
+  NRF_WAIT_SEC="$NRF_WAIT_SEC" NRF_LOG_SINCE="$NRF_LOG_SINCE" \
+    "$SCRIPT_DIR/profile_wait_smf_nrf.sh" "$PROFILE_NS" \
+    --timeout "$NRF_WAIT_SEC" --since "$NRF_LOG_SINCE" || true
+  echo "  check  SMF↔UPF PFCP (retry)"
+  if PFCP_WAIT_SEC="$PFCP_WAIT_SEC" \
+    "$SCRIPT_DIR/profile_wait_smf_pfcp_upfs.sh" "$PROFILE_NS" \
+    --timeout "$PFCP_WAIT_SEC" --since "$NRF_LOG_SINCE" "${wait_args[@]}"; then
+    echo "  OK     SMF↔UPF PFCP — all ${SLICE_COUNT} UPFs associated"
+    return 0
+  fi
+  if [[ "$IGNORE_PFCP" == "1" ]]; then
+    echo "  WARN   SMF↔UPF PFCP not confirmed — continuing (IGNORE_PFCP=1)" >&2
+    return 0
+  fi
+  echo "ERROR: SMF did not associate all UPF-slice-1..${SLICE_COUNT}." >&2
+  echo "Check: ssh ${CENTRAL_HOST} kubectl -n ${PROFILE_NS} logs deploy/smf-core --since=5m | grep ASSOCIATION" >&2
+  echo "Or re-run with IGNORE_PFCP=1 / --ignore-pfcp to continue." >&2
+  return 1
+}
+
 step_nrf() {
-  echo "==> [1/8] NRF (central) → wait deployment Ready"
+  echo "==> [1/5] NRF (central)"
   restart_deploy "$CENTRAL_HOST" "$PROFILE_NS" nrf-core
   wait_rollout "$CENTRAL_HOST" "$PROFILE_NS" nrf-core
   echo "  OK     NRF deployment Ready"
@@ -243,10 +268,10 @@ step_nrf() {
 }
 
 step_upf() {
-  echo "==> [2/8] UPF-slice-1..${SLICE_COUNT} → wait UPF→NRF"
+  echo "==> [2/5] UPF-slice-1..${SLICE_COUNT} → check UPF→NRF"
   local n site host
   # Controller bakes NRF into Deployment init only at create; re-sync after subnet change.
-  "$SCRIPT_DIR/profile_sync_upf_nrf_wait.sh" "$PROFILE_NS"
+  "$SCRIPT_DIR/profile_wait_upf_nrf.sh" "$PROFILE_NS" --sync-only
   for n in $(seq 1 "$SLICE_COUNT"); do
     site="${UPF_SITE[$((n - 1))]}"
     host="$(host_for_site "$site")"
@@ -259,76 +284,34 @@ step_upf() {
   done
   echo "  settle 5s for UPF N4 sockets..."
   sleep 5
+  echo "  check  UPF→NRF registration"
   NRF_WAIT_SEC="$NRF_WAIT_SEC" NRF_LOG_SINCE="$NRF_LOG_SINCE" \
-    "$SCRIPT_DIR/wait_upf_nrf.sh" --ns "$PROFILE_NS" \
+    "$SCRIPT_DIR/profile_wait_upf_nrf.sh" "$PROFILE_NS" --wait-only \
     --timeout "$NRF_WAIT_SEC" --since "$NRF_LOG_SINCE" "${wait_args[@]}"
+  echo "  OK     UPF→NRF — all ${SLICE_COUNT} UPFs registered"
 }
 
 step_smf() {
-  echo "==> [3/8] SMF (central) → wait SMF→NRF"
+  echo "==> [3/5] SMF (central) → check SMF→NRF → check SMF↔UPF"
   restart_deploy "$CENTRAL_HOST" "$PROFILE_NS" smf-core
   wait_rollout "$CENTRAL_HOST" "$PROFILE_NS" smf-core
   sleep 5
+  echo "  check  SMF→NRF registration"
   NRF_WAIT_SEC="$NRF_WAIT_SEC" NRF_LOG_SINCE="$NRF_LOG_SINCE" \
     "$SCRIPT_DIR/profile_wait_smf_nrf.sh" "$PROFILE_NS" \
     --timeout "$NRF_WAIT_SEC" --since "$NRF_LOG_SINCE"
-}
-
-step_pfcp() {
-  echo "==> [4/8] Wait SMF↔UPF PFCP association"
-  if ! PFCP_WAIT_SEC="$PFCP_WAIT_SEC" \
-    "$SCRIPT_DIR/profile_wait_smf_pfcp_upfs.sh" "$PROFILE_NS" \
-    --timeout "$PFCP_WAIT_SEC" --since "$NRF_LOG_SINCE" "${wait_args[@]}"; then
-    echo "  PFCP incomplete — restart SMF again (UPFs already up)"
-    restart_deploy "$CENTRAL_HOST" "$PROFILE_NS" smf-core
-    wait_rollout "$CENTRAL_HOST" "$PROFILE_NS" smf-core
-    sleep 8
-    if ! PFCP_WAIT_SEC="$PFCP_WAIT_SEC" \
-      "$SCRIPT_DIR/profile_wait_smf_pfcp_upfs.sh" "$PROFILE_NS" \
-      --timeout "$PFCP_WAIT_SEC" --since "$NRF_LOG_SINCE" "${wait_args[@]}"; then
-      echo "ERROR: SMF did not associate all UPF-slice-1..${SLICE_COUNT}." >&2
-      echo "Check: ssh ${CENTRAL_HOST} kubectl -n ${PROFILE_NS} logs deploy/smf-core --since=5m | grep ASSOCIATION" >&2
-      exit 1
-    fi
-  fi
-  echo "  OK     all ${SLICE_COUNT} UPFs connected to SMF"
+  echo "  OK     SMF→NRF registered"
+  check_smf_pfcp
 }
 
 step_cu_cp() {
-  echo "==> [5/8] CU-CP (edge)"
+  echo "==> [4/5] CU-CP (edge)"
   restart_deploy "$EDGE_HOST" "$PROFILE_NS" oai-cu-cp
   wait_rollout "$EDGE_HOST" "$PROFILE_NS" oai-cu-cp
 }
 
-step_cu_up() {
-  echo "==> [6/8] CU-UP 1..${SLICE_COUNT}"
-  local n site host
-  for n in $(seq 1 "$SLICE_COUNT"); do
-    site="${CU_SITE[$((n - 1))]}"
-    host="$(host_for_site "$site")"
-    restart_deploy "$host" "$PROFILE_NS" "oai-cu-up-${n}"
-  done
-  for n in $(seq 1 "$SLICE_COUNT"); do
-    site="${CU_SITE[$((n - 1))]}"
-    host="$(host_for_site "$site")"
-    wait_rollout "$host" "$PROFILE_NS" "oai-cu-up-${n}"
-  done
-}
-
-step_du() {
-  echo "==> [7/8] FlexRIC + DU (edge)"
-  if ssh_host "$EDGE_HOST" kubectl -n "$PROFILE_NS" get deploy oai-flexric >/dev/null 2>&1; then
-    restart_deploy "$EDGE_HOST" "$PROFILE_NS" oai-flexric
-    wait_rollout "$EDGE_HOST" "$PROFILE_NS" oai-flexric
-  fi
-  restart_deploy "$EDGE_HOST" "$PROFILE_NS" oai-du
-  wait_rollout "$EDGE_HOST" "$PROFILE_NS" oai-du
-  echo "  settle ${DU_SETTLE_SEC}s for F1 / cell..."
-  sleep "$DU_SETTLE_SEC"
-}
-
 step_ues() {
-  echo "==> [8/8] UEs 1..${SLICE_COUNT} (pod delete${UE_GAP_SEC:+, ${UE_GAP_SEC}s gap})"
+  echo "==> [5/5] UEs 1..${SLICE_COUNT} (pod delete${UE_GAP_SEC:+, ${UE_GAP_SEC}s gap})"
   local n failed=0 ip
   for n in $(seq 1 "$SLICE_COUNT"); do
     echo "--- UE${n} ---"
@@ -360,9 +343,11 @@ step_ues() {
 }
 
 echo "==> INA profile namespace rollout (ns=${PROFILE_NS})"
+echo "    order: NRF → UPF → SMF → CU-CP → UEs  (CU-UP/DU not restarted)"
+echo "    checks: UPF→NRF · SMF→NRF · SMF↔UPF PFCP"
 echo "    central=${CENTRAL_HOST} regional=${REGIONAL_HOST} edge=${EDGE_HOST}"
-echo "    UE_GAP_SEC=${UE_GAP_SEC} PDU_WAIT_SEC=${PDU_WAIT_SEC} DU_SETTLE_SEC=${DU_SETTLE_SEC}"
-echo "    NRF_WAIT_SEC=${NRF_WAIT_SEC} PFCP_WAIT_SEC=${PFCP_WAIT_SEC}"
+echo "    UE_GAP_SEC=${UE_GAP_SEC} PDU_WAIT_SEC=${PDU_WAIT_SEC}"
+echo "    NRF_WAIT_SEC=${NRF_WAIT_SEC} PFCP_WAIT_SEC=${PFCP_WAIT_SEC} IGNORE_PFCP=${IGNORE_PFCP}"
 echo "    steps=${STEP_FROM}..${STEP_TO}  nrf_http_wait=${NRF_HTTP_WAIT}"
 
 if [[ -z "${KUBECONFIG:-}" ]]; then
@@ -390,18 +375,15 @@ done
 if should_run_step 1; then step_nrf; fi
 if should_run_step 2; then step_upf; fi
 if should_run_step 3; then step_smf; fi
-if should_run_step 4; then step_pfcp; fi
 
 if [[ "$SKIP_RAN" == "1" ]]; then
-  echo "==> SKIP_RAN=1 — done (NRF+UPF+SMF+PFCP only)"
+  echo "==> SKIP_RAN=1 — done (NRF + UPF→NRF + SMF→NRF + SMF↔UPF only)"
   exit 0
 fi
 
-if should_run_step 5; then step_cu_cp; fi
-if should_run_step 6; then step_cu_up; fi
-if should_run_step 7; then step_du; fi
+if should_run_step 4; then step_cu_cp; fi
 
-if [[ "$SKIP_UES" == "1" ]] || ! should_run_step 8; then
+if [[ "$SKIP_UES" == "1" ]] || ! should_run_step 5; then
   if [[ "$SKIP_UES" == "1" ]]; then
     echo "==> SKIP_UES=1 — done (no UE restart)"
   fi

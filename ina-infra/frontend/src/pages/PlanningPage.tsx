@@ -126,7 +126,10 @@ export default function PlanningPage() {
   const [consoleOk, setConsoleOk] = useState<boolean | null>(null);
   const [consoleFiles, setConsoleFiles] = useState<string[]>([]);
   const [consoleFilesLabel, setConsoleFilesLabel] = useState("Files");
+  /** Follow new stream lines; pauses if the operator scrolls up. */
+  const [consoleAutoScroll, setConsoleAutoScroll] = useState(true);
   const consoleRef = useRef<HTMLPreElement>(null);
+  const consolePanelRef = useRef<HTMLDivElement | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const [rolloutBusy, setRolloutBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -208,6 +211,18 @@ export default function PlanningPage() {
     setResult(null);
   }
 
+  function scrollConsoleToBottom() {
+    const el = consoleRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function enableConsoleAutoScroll() {
+    setConsoleAutoScroll(true);
+    // Scroll after paint so new text is included.
+    requestAnimationFrame(() => scrollConsoleToBottom());
+  }
+
   function resetConsole(title: string) {
     setConsoleOpen(true);
     setConsoleTitle(title);
@@ -216,10 +231,27 @@ export default function PlanningPage() {
     setConsoleOk(null);
     setConsoleFiles([]);
     setConsoleFilesLabel("Files");
+    setConsoleAutoScroll(true);
+    // Bring stream into view when an action starts.
+    requestAnimationFrame(() => {
+      consolePanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+      scrollConsoleToBottom();
+    });
   }
 
   function appendConsole(line: string) {
     setConsoleText((prev) => (prev ? `${prev}\n${line}` : line));
+  }
+
+  function onConsoleScroll() {
+    const el = consoleRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Near bottom → keep following; scrolled up → pause.
+    setConsoleAutoScroll(distance < 40);
   }
 
   function streamHandlers(opts?: {
@@ -601,10 +633,9 @@ export default function PlanningPage() {
   }
 
   useEffect(() => {
-    if (consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-    }
-  }, [consoleText]);
+    if (!consoleAutoScroll) return;
+    scrollConsoleToBottom();
+  }, [consoleText, consoleAutoScroll, consoleMessage]);
 
   function applyDeployStateFromProfile(
     resProfile: {
@@ -1676,83 +1707,102 @@ export default function PlanningPage() {
       )}
 
       {(consoleOpen || deployFiles.length > 0) && (
-        <Card className="tier console-panel">
-          <div className="panel-head">
-            <SectionLabel kicker="stream">
-              {consoleOpen ? consoleTitle : "Console"}
-            </SectionLabel>
-            {rolloutBusy ? (
-              <button
-                type="button"
-                className="danger"
-                onClick={() => void onStopRollout()}
-                title="Stop the staged rollout script"
+        <div ref={consolePanelRef}>
+          <Card className="tier console-panel">
+            <div className="panel-head">
+              <SectionLabel kicker="stream">
+                {consoleOpen ? consoleTitle : "Console"}
+              </SectionLabel>
+              <div className="actions">
+                {!consoleAutoScroll && consoleText.length > 0 && (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => enableConsoleAutoScroll()}
+                    title="Jump to latest output and resume auto-scroll"
+                  >
+                    To bottom
+                  </button>
+                )}
+                {rolloutBusy ? (
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => void onStopRollout()}
+                    title="Stop the staged rollout script"
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setConsoleText("");
+                      setConsoleMessage("");
+                      setConsoleOk(null);
+                      setConsoleFiles([]);
+                      setConsoleAutoScroll(true);
+                      if (!deployFiles.length) setConsoleOpen(false);
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            {consoleMessage && (
+              <pre
+                className={
+                  "console-summary" +
+                  (consoleOk == null ? "" : consoleOk ? " ok" : " error")
+                }
               >
-                Stop
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setConsoleText("");
-                  setConsoleMessage("");
-                  setConsoleOk(null);
-                  setConsoleFiles([]);
-                  if (!deployFiles.length) setConsoleOpen(false);
-                }}
-              >
-                Clear
-              </button>
+                {consoleMessage}
+              </pre>
             )}
-          </div>
-          {consoleMessage && (
             <pre
-              className={
-                "console-summary" +
-                (consoleOk == null ? "" : consoleOk ? " ok" : " error")
-              }
+              className="net-pre console-pre"
+              ref={consoleRef}
+              onScroll={onConsoleScroll}
             >
-              {consoleMessage}
+              {consoleText ||
+                (busy
+                  ? "Waiting for output…"
+                  : consoleOpen
+                    ? "(empty)"
+                    : "Run Generate config, Deploy, or Rollout to stream output here.")}
             </pre>
-          )}
-          <pre className="net-pre console-pre" ref={consoleRef}>
-            {consoleText ||
-              (busy
-                ? "Waiting for output…"
-                : consoleOpen
-                  ? "(empty)"
-                  : "Run Generate config, Deploy, or Rollout to stream output here.")}
-          </pre>
-          {consoleFiles.length > 0 && (
-            <details style={{ marginTop: 8 }} open>
-              <summary className="hint">
-                {consoleFilesLabel} ({consoleFiles.length})
-              </summary>
-              <ul className="file-list">
-                {consoleFiles.map((f) => (
-                  <li key={f}>
-                    <code>{f}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {!consoleFiles.length && deployFiles.length > 0 && (
-            <details style={{ marginTop: 8 }}>
-              <summary className="hint">
-                Saved file list ({deployFiles.length})
-              </summary>
-              <ul className="file-list">
-                {deployFiles.map((f) => (
-                  <li key={f}>
-                    <code>{f}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </Card>
+            {consoleFiles.length > 0 && (
+              <details style={{ marginTop: 8 }} open>
+                <summary className="hint">
+                  {consoleFilesLabel} ({consoleFiles.length})
+                </summary>
+                <ul className="file-list">
+                  {consoleFiles.map((f) => (
+                    <li key={f}>
+                      <code>{f}</code>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {!consoleFiles.length && deployFiles.length > 0 && (
+              <details style={{ marginTop: 8 }}>
+                <summary className="hint">
+                  Saved file list ({deployFiles.length})
+                </summary>
+                <ul className="file-list">
+                  {deployFiles.map((f) => (
+                    <li key={f}>
+                      <code>{f}</code>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </Card>
+        </div>
       )}
       </div>
 
