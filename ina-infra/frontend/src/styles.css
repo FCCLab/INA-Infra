@@ -384,6 +384,7 @@ body { font-size: 1rem; }
 .app .status-rows li { font-size: 13.5px; }
 .app .status-pill { font-size: 13px; }
 .app .actions button,
+.app .apply-tree button,
 .app .panel-head button,
 .app table button,
 .app .btn { font-size: 13.5px; }
@@ -538,6 +539,7 @@ body { font-size: 1rem; }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .actions button,
+.apply-tree button,
 .panel-head button,
 table button,
 .btn {
@@ -553,6 +555,7 @@ table button,
   transition: .15s;
 }
 .actions button:hover:not(:disabled),
+.apply-tree button:hover:not(:disabled),
 .panel-head button:hover:not(:disabled),
 table button:hover:not(:disabled),
 .btn:hover:not(:disabled) {
@@ -560,6 +563,7 @@ table button:hover:not(:disabled),
   border-color: var(--border-2);
 }
 .actions button.primary,
+.apply-tree button.primary,
 button.primary,
 .btn-primary {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
@@ -567,6 +571,7 @@ button.primary,
   color: var(--accent);
 }
 .actions button.primary:hover:not(:disabled),
+.apply-tree button.primary:hover:not(:disabled),
 button.primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 26%, var(--surface-2));
   border-color: var(--accent);
@@ -737,6 +742,20 @@ input:disabled, select:disabled, textarea:disabled {
   border-color: color-mix(in srgb, var(--bad) 35%, var(--border));
 }
 p.ok { color: var(--accent); }
+.console-summary {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.console-summary.ok { color: var(--accent); }
+.console-summary.error { color: var(--bad); }
 
 .net-pre {
   margin: 0;
@@ -758,6 +777,191 @@ p.ok { color: var(--accent); }
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+/* Generate ──┐              ┌── Deploy
+              ├── Push ──────┤
+   Clear ─────┘              └── Undeploy */
+.apply-tree {
+  --apply-side: 12.5rem;
+  display: grid;
+  grid-template-columns:
+    var(--apply-side)
+    40px
+    auto
+    40px
+    var(--apply-side);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "gen fork push split dep"
+    "clr fork push split und";
+  column-gap: 0;
+  /* Keep 0 so fork/split SVG 25/50/75% hits row midlines exactly */
+  row-gap: 0;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+.apply-tree-gen { grid-area: gen; }
+.apply-tree-clr { grid-area: clr; }
+.apply-tree-fork,
+.apply-tree-split {
+  width: 40px;
+  height: 100%;
+  min-height: 100%;
+  align-self: stretch;
+  color: color-mix(in srgb, var(--border-2) 70%, var(--text-dim));
+  overflow: visible;
+  padding: 0;
+}
+.apply-tree-fork { grid-area: fork; }
+.apply-tree-split { grid-area: split; }
+.apply-tree-push {
+  grid-area: push;
+  align-self: center;
+  justify-self: center;
+  margin: 0 2px;
+}
+.apply-tree-deploy { grid-area: dep; }
+.apply-tree-undeploy { grid-area: und; }
+.apply-tree-combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  /* Reserve caption space so the button midline stays at row center (fork SVG) */
+  padding: 8px 0 18px;
+}
+.apply-tree-caption {
+  position: absolute;
+  left: 2px;
+  right: 0;
+  bottom: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--text-faint, var(--text-dim));
+  opacity: 0.85;
+  user-select: none;
+}
+.apply-tree button {
+  width: 100%;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  position: relative;
+  overflow: hidden;
+}
+.apply-tree button.apply-tree-push {
+  width: auto;
+  min-width: 4.25rem;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+/* Colored when clickable; muted when disabled */
+.apply-tree button:disabled:not(.is-running) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+}
+.apply-tree button.is-running,
+.actions button.is-running {
+  opacity: 1;
+  filter: none;
+  cursor: progress;
+}
+.btn-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.btn-progress-spin {
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+.apply-tree button.is-running::after,
+.actions button.is-running::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    currentColor,
+    transparent
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: btn-bar 1.1s ease-in-out infinite;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes btn-bar {
+  0% { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
+}
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  position: relative;
+  overflow: hidden;
+}
+.apply-tree button.btn-tone-ok:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.apply-tree button.btn-tone-ok:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface-2));
+  border-color: var(--accent);
+}
+.apply-tree button.btn-tone-warn:not(:disabled) {
+  color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 14%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent-orange) 42%, var(--border));
+}
+.apply-tree button.btn-tone-warn:hover:not(:disabled) {
+  color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 24%, var(--surface-2));
+  border-color: var(--accent-orange);
+}
+.apply-tree button.primary:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.apply-tree button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 32%, var(--surface-2));
+  border-color: var(--accent);
+}
+@media (max-width: 720px) {
+  .apply-tree {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .apply-tree-fork,
+  .apply-tree-split { display: none; }
+  .apply-tree-combo { padding: 0; }
+  .apply-tree-caption { position: static; }
+  .apply-tree button { width: auto; }
 }
 .file-list {
   margin: 8px 0;
@@ -1001,4 +1205,158 @@ code {
 /* Keep title + kicker grouped left; don't push kicker into the action buttons */
 .panel-head > .section-label .section-kicker {
   margin-left: 0;
+}
+
+/* Themed confirm / prompt — solid message box, no backdrop blur */
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--bg0) 55%, transparent);
+}
+.dlg-panel {
+  width: min(100%, 28rem);
+  padding: 0;
+  overflow: hidden;
+  color: var(--text, #eef2f9);
+  /* Solid opaque fill — never rely on translucent --surface */
+  background: #0b1120;
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.13));
+  border-radius: 14px;
+  box-shadow: var(--shadow, 0 18px 50px -22px rgba(0, 0, 0, 0.7));
+}
+.theme-dark .dlg-panel { background: #0b1120; }
+.theme-light .dlg-panel {
+  background: #ffffff;
+  color: #1a2e1a;
+}
+.dlg-panel-ok {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.dlg-panel-warn {
+  border-color: color-mix(in srgb, var(--accent-orange) 45%, var(--border));
+}
+.dlg-lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.dlg-panel-warn .dlg-lead {
+  background: color-mix(in srgb, var(--accent-orange) 10%, transparent);
+}
+.dlg-panel-ok .dlg-lead {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.dlg-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.dlg-icon-ok {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.dlg-icon-warn {
+  color: var(--accent-orange);
+  background: var(--accent-orange-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-orange) 40%, var(--border));
+}
+.dlg-copy { min-width: 0; flex: 1; }
+.dlg-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.dlg-eyebrow-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.dlg-panel-warn .dlg-eyebrow-text { color: var(--accent-orange); }
+.dlg-title {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.3;
+}
+.dlg-body {
+  margin: 0;
+  padding: 14px 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-dim, #93a0b8);
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: #111827;
+}
+.theme-light .dlg-body { background: #f4faf6; }
+.dlg-panel-warn .dlg-body {
+  background: #1a1510;
+}
+.theme-light .dlg-panel-warn .dlg-body {
+  background: #fff4e5;
+}
+.dlg-input {
+  width: calc(100% - 36px);
+  margin: 14px 18px 0;
+}
+.dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px 14px;
+}
+.dlg-actions button {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: .15s;
+}
+.dlg-actions button:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+.dlg-actions button.primary {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+}
+.dlg-actions button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface-2));
+  border-color: var(--accent);
+}
+.dlg-actions button.danger {
+  border-color: color-mix(in srgb, var(--accent-orange) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-orange) 14%, var(--surface));
+  color: var(--accent-orange);
+}
+.dlg-actions button.danger:hover {
+  border-color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 22%, var(--surface));
 }

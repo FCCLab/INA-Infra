@@ -11,7 +11,17 @@ from typing import Dict, Iterator, List, Tuple
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from app.schemas import IpPlan, PlApplyRequest, PlApplyResponse, PlSolveResponse, Profile, PlUndeployRequest, PlUndeployResponse
+from app.schemas import (
+    IpPlan,
+    PlApplyRequest,
+    PlApplyResponse,
+    PlPushRequest,
+    PlPushResponse,
+    PlSolveResponse,
+    Profile,
+    PlUndeployRequest,
+    PlUndeployResponse,
+)
 from app.services import ip_allocator
 from app.services import multus_iface
 from app.services import paths as ina_paths
@@ -842,6 +852,51 @@ def _patch_profile_mysql_live(namespace: str, n_slices: int) -> str:
     return f"mysql patch warn: {tail}"
 
 
+def _format_cluster_cleanup(notes: List[str]) -> str:
+    """Align cluster cleanup notes for console display."""
+    if not notes:
+        return ""
+    rows: List[Tuple[str, str]] = []
+    for note in notes:
+        text = (note or "").strip()
+        if not text:
+            continue
+        if ": " in text:
+            cluster, status = text.split(": ", 1)
+        elif ":" in text:
+            cluster, status = text.split(":", 1)
+            status = status.lstrip()
+        else:
+            cluster, status = text, ""
+        rows.append((cluster.strip(), status.strip()))
+    if not rows:
+        return ""
+    width = max(len(c) for c, _ in rows)
+    lines = ["Cluster cleanup"]
+    for cluster, status in rows:
+        lines.append(f"  {cluster:<{width}}  {status}")
+    return "\n".join(lines)
+
+
+def _format_undeploy_message(
+    ns: str,
+    *,
+    ok: bool,
+    n_paths: int,
+    notes: List[str],
+    empty_git: bool = False,
+    exit_code: int | None = None,
+) -> str:
+    if not ok:
+        return f"Undeploy push failed (exit {exit_code})"
+    if empty_git:
+        head = f"Undeployed  ns={ns}\nPaths       none (git already clean)"
+    else:
+        head = f"Undeployed  ns={ns}\nPaths       {n_paths} removed"
+    cleanup = _format_cluster_cleanup(notes)
+    return f"{head}\n{cleanup}" if cleanup else head
+
+
 def _force_delete_profile_ns(cluster: str, ns: str) -> str:
     """Best-effort cluster cleanup when Config Sync prune stalls on finalizers.
 
@@ -969,8 +1024,49 @@ def _force_delete_profile_ns(cluster: str, ns: str) -> str:
     return f"{cluster}: {(phase2.stdout or 'unknown').strip()}"
 
 
+def _profile_ns_clusters(ns: str, clusters: List[str]) -> List[str]:
+    """Normalize cluster list for profile namespace ops."""
+    out = [
+        c
+        for c in (clusters or ["central", "regional", "edge"])
+        if c in CLUSTER_TO_REPO and c != "mgmt"
+    ]
+    for c in ("central", "regional", "edge"):
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def _remove_profile_ns_dirs(ns: str, clusters: List[str]) -> List[str]:
+    repos = _repos_dir()
+    removed: List[str] = []
+    for cluster in clusters:
+        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
+        if ns_dir.exists():
+            shutil.rmtree(ns_dir)
+            removed.append(_rel(ns_dir))
+    return removed
+
+
+def _list_profile_ns_files(ns: str, clusters: List[str]) -> List[str]:
+    repos = _repos_dir()
+    files: List[str] = []
+    for cluster in clusters:
+        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
+        if not ns_dir.is_dir():
+            continue
+        for path in sorted(ns_dir.rglob("*")):
+            if path.is_file():
+                files.append(_rel(path))
+    return files
+
+
 def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
-    """Remove namespaces/<profile>/ from GitOps repos and push (Config Sync prunes)."""
+    """Clear local namespaces/<profile>/; optionally push + cluster cleanup.
+
+    dry_run=True  → Clear (local remove + clear deploy state; no push)
+    dry_run=False → Undeploy (clear + push + force cluster cleanup)
+    """
     from app.services import profile_store
 
     profile = req.profile
@@ -979,41 +1075,28 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
             ok=False, message="profile required", dry_run=req.dry_run
         )
     ns = profile.name
-    clusters = [
-        c
-        for c in (req.clusters or ["central", "regional", "edge"])
-        if c in CLUSTER_TO_REPO and c != "mgmt"
-    ]
-    for c in ("central", "regional", "edge"):
-        if c not in clusters:
-            clusters.append(c)
+    clusters = _profile_ns_clusters(ns, req.clusters)
 
-    repos = _repos_dir()
-    would_remove: List[str] = []
-    for cluster in clusters:
-        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
-        if ns_dir.exists():
-            would_remove.append(_rel(ns_dir))
+    removed = _remove_profile_ns_dirs(ns, clusters)
 
     if req.dry_run:
+        saved = profile_store.save_deploy_state(
+            ns,
+            deployed=False,
+            deploy_files=[],
+            deploy_clusters=[],
+        )
         return PlUndeployResponse(
             ok=True,
             dry_run=True,
             message=(
-                f"Dry undeploy: would remove {len(would_remove)} path(s) "
-                f"for ns={ns}; push skipped"
+                f"Cleared local config for ns={ns} "
+                f"({len(removed)} path(s)); push skipped"
             ),
-            removed_paths=would_remove,
-            deployed=True,
-            profile=profile_store.get_profile(ns),
+            removed_paths=removed,
+            deployed=False,
+            profile=saved,
         )
-
-    removed: List[str] = []
-    for cluster in clusters:
-        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
-        if ns_dir.exists():
-            shutil.rmtree(ns_dir)
-            removed.append(_rel(ns_dir))
 
     cluster_notes: List[str] = []
     if not removed:
@@ -1029,13 +1112,11 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
             deploy_files=[],
             deploy_clusters=[],
         )
-        note = "; ".join(cluster_notes) if cluster_notes else "no cluster cleanup"
         return PlUndeployResponse(
             ok=True,
             dry_run=False,
-            message=(
-                f"Nothing to remove in git for ns={ns}; "
-                f"forced cluster cleanup: {note}"
+            message=_format_undeploy_message(
+                ns, ok=True, n_paths=0, notes=cluster_notes, empty_git=True
             ),
             removed_paths=[],
             deployed=False,
@@ -1077,14 +1158,15 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
             deploy_files=[],
             deploy_clusters=[],
         )
-    note = f"; cluster cleanup: {'; '.join(cluster_notes)}" if cluster_notes else ""
     return PlUndeployResponse(
         ok=ok,
         dry_run=False,
-        message=(
-            f"Undeployed ns={ns} ({len(removed)} path(s)){note}"
-            if ok
-            else f"Undeploy push failed (exit {proc.returncode})"
+        message=_format_undeploy_message(
+            ns,
+            ok=ok,
+            n_paths=len(removed),
+            notes=cluster_notes,
+            exit_code=proc.returncode,
         ),
         removed_paths=removed,
         push_stdout=proc.stdout,
@@ -1231,8 +1313,133 @@ def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
     )
 
 
+def push_to_gitea(req: PlPushRequest) -> PlPushResponse:
+    """Push already-rendered repos to Gitea (no re-render)."""
+    from app.services import profile_store
+
+    profile = req.profile
+    if profile is None:
+        return PlPushResponse(ok=False, message="profile required")
+    ns = profile.name
+    clusters = _profile_ns_clusters(ns, req.clusters)
+    files = _list_profile_ns_files(ns, clusters)
+
+    script = _push_script()
+    if not script.is_file():
+        return PlPushResponse(
+            ok=False,
+            message=f"Push script not found: {script}",
+            written_files=files,
+        )
+
+    env = _gitea_push_env()
+    proc = subprocess.run(
+        ["bash", str(script), "-m", req.commit_message, *clusters],
+        cwd=str(ina_paths.ina_infra_root()),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    ok = proc.returncode == 0
+    saved = None
+    if ok:
+        # Push of remaining files → deployed; push after Clear (empty) → not deployed
+        saved = profile_store.save_deploy_state(
+            ns,
+            deployed=bool(files),
+            deploy_files=files,
+            deploy_clusters=clusters if files else [],
+        )
+    else:
+        prior = profile_store.get_profile(ns)
+        saved = prior
+    return PlPushResponse(
+        ok=ok,
+        message=(
+            f"Pushed ns={ns} ({len(files)} file(s)) to Gitea"
+            if ok
+            else f"Push failed (exit {proc.returncode})"
+        ),
+        written_files=files,
+        push_stdout=proc.stdout,
+        push_stderr=proc.stderr,
+        exit_code=proc.returncode,
+        deployed=bool(saved.deployed) if saved else False,
+        profile=saved,
+    )
+
+
+def iter_push_sse(req: PlPushRequest) -> Iterator[str]:
+    """SSE stream for push-only (no re-render)."""
+    from app.services import profile_store
+
+    profile = req.profile
+    if profile is None:
+        yield result_event(PlPushResponse(ok=False, message="profile required"))
+        return
+
+    ns = profile.name
+    clusters = _profile_ns_clusters(ns, req.clusters)
+    files = _list_profile_ns_files(ns, clusters)
+    yield status_event(
+        f"Pushing ns={ns} ({len(files)} local file(s)) for "
+        f"{', '.join(clusters)}…"
+    )
+
+    script = _push_script()
+    if not script.is_file():
+        yield result_event(
+            PlPushResponse(
+                ok=False,
+                message=f"Push script not found: {script}",
+                written_files=files,
+            )
+        )
+        return
+
+    cmd = ["bash", str(script), "-m", req.commit_message, *clusters]
+    yield status_event(f"$ {' '.join(cmd)}")
+    cmd_result: CmdResult | None = None
+    for item in stream_cmd(
+        cmd, cwd=str(ina_paths.ina_infra_root()), env=_gitea_push_env()
+    ):
+        if isinstance(item, CmdResult):
+            cmd_result = item
+        else:
+            stream, line = item
+            yield log_event(stream, line)
+
+    assert cmd_result is not None
+    ok = cmd_result.returncode == 0
+    saved = None
+    if ok:
+        saved = profile_store.save_deploy_state(
+            ns,
+            deployed=bool(files),
+            deploy_files=files,
+            deploy_clusters=clusters if files else [],
+        )
+    yield result_event(
+        PlPushResponse(
+            ok=ok,
+            message=(
+                f"Pushed ns={ns} ({len(files)} file(s)) to Gitea"
+                if ok
+                else f"Push failed (exit {cmd_result.returncode})"
+            ),
+            written_files=files,
+            push_stdout=cmd_result.stdout,
+            push_stderr=cmd_result.stderr,
+            exit_code=cmd_result.returncode,
+            deployed=bool(saved.deployed) if saved else False,
+            profile=saved or profile_store.get_profile(ns),
+        )
+    )
+
+
 def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
-    """SSE stream for undeploy (git prune + push + cluster cleanup)."""
+    """SSE: Clear (dry_run) or Undeploy (clear + push + cluster cleanup)."""
     from app.services import profile_store
 
     profile = req.profile
@@ -1243,47 +1450,38 @@ def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
         return
 
     ns = profile.name
-    clusters = [
-        c
-        for c in (req.clusters or ["central", "regional", "edge"])
-        if c in CLUSTER_TO_REPO and c != "mgmt"
-    ]
-    for c in ("central", "regional", "edge"):
-        if c not in clusters:
-            clusters.append(c)
+    clusters = _profile_ns_clusters(ns, req.clusters)
 
-    yield status_event(f"Undeploying namespace {ns} from {', '.join(clusters)}…")
+    yield status_event(
+        f"{'Clearing' if req.dry_run else 'Undeploying'} namespace {ns} "
+        f"from {', '.join(clusters)}…"
+    )
 
-    repos = _repos_dir()
-    would_remove: List[str] = []
-    for cluster in clusters:
-        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
-        if ns_dir.exists():
-            would_remove.append(_rel(ns_dir))
+    removed = _remove_profile_ns_dirs(ns, clusters)
+    for path in removed:
+        yield status_event(f"Removed {path}")
 
     if req.dry_run:
+        saved = profile_store.save_deploy_state(
+            ns,
+            deployed=False,
+            deploy_files=[],
+            deploy_clusters=[],
+        )
         yield result_event(
             PlUndeployResponse(
                 ok=True,
                 dry_run=True,
                 message=(
-                    f"Dry undeploy: would remove {len(would_remove)} path(s) "
-                    f"for ns={ns}; push skipped"
+                    f"Cleared local config for ns={ns} "
+                    f"({len(removed)} path(s)); push skipped"
                 ),
-                removed_paths=would_remove,
-                deployed=True,
-                profile=profile_store.get_profile(ns),
+                removed_paths=removed,
+                deployed=False,
+                profile=saved,
             )
         )
         return
-
-    removed: List[str] = []
-    for cluster in clusters:
-        ns_dir = repos / CLUSTER_TO_REPO[cluster] / "namespaces" / ns
-        if ns_dir.exists():
-            shutil.rmtree(ns_dir)
-            removed.append(_rel(ns_dir))
-            yield status_event(f"Removed {removed[-1]}")
 
     cluster_notes: List[str] = []
     if not removed:
@@ -1303,14 +1501,12 @@ def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
             deploy_files=[],
             deploy_clusters=[],
         )
-        note = "; ".join(cluster_notes) if cluster_notes else "no cluster cleanup"
         yield result_event(
             PlUndeployResponse(
                 ok=True,
                 dry_run=False,
-                message=(
-                    f"Nothing to remove in git for ns={ns}; "
-                    f"forced cluster cleanup: {note}"
+                message=_format_undeploy_message(
+                    ns, ok=True, n_paths=0, notes=cluster_notes, empty_git=True
                 ),
                 removed_paths=[],
                 deployed=False,
@@ -1362,15 +1558,16 @@ def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
             deploy_files=[],
             deploy_clusters=[],
         )
-    note = f"; cluster cleanup: {'; '.join(cluster_notes)}" if cluster_notes else ""
     yield result_event(
         PlUndeployResponse(
             ok=ok,
             dry_run=False,
-            message=(
-                f"Undeployed ns={ns} ({len(removed)} path(s)){note}"
-                if ok
-                else f"Undeploy push failed (exit {cmd_result.returncode})"
+            message=_format_undeploy_message(
+                ns,
+                ok=ok,
+                n_paths=len(removed),
+                notes=cluster_notes,
+                exit_code=cmd_result.returncode,
             ),
             removed_paths=removed,
             push_stdout=cmd_result.stdout,

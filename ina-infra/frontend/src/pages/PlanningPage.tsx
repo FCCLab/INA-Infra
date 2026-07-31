@@ -20,7 +20,28 @@ import StatusRail from "../components/StatusRail";
 import Card from "../components/ui/Card";
 import SectionLabel from "../components/ui/SectionLabel";
 import KpiStrip from "../components/ui/KpiStrip";
+import { useDialog } from "../components/ui/Dialog";
 import type { ProfileClusterStatusOut } from "../api/client";
+
+type ApplyRun =
+  | "generate"
+  | "push"
+  | "deploy"
+  | "clear"
+  | "undeploy"
+  | "rollout";
+
+/** Sub-step while Deploy (gen→push) or Undeploy (clear→push→cleanup) runs. */
+type ApplyStep = "generate" | "push" | "clear" | "cleanup";
+
+function BtnProgress({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <span className="btn-progress" aria-hidden>
+      <span className="btn-progress-spin" />
+    </span>
+  );
+}
 
 const emptySlice = (id: number): SliceIn => ({
   id,
@@ -89,6 +110,7 @@ function normalizeNetwork(raw: NetworkIn | null | undefined): NetworkIn {
 }
 
 export default function PlanningPage() {
+  const dialog = useDialog();
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [slices, setSlices] = useState<SliceIn[]>(DEFAULT_SLICES);
   const [networkIn, setNetworkIn] = useState<NetworkIn>(DEFAULT_NETWORK);
@@ -108,12 +130,16 @@ export default function PlanningPage() {
   const streamAbortRef = useRef<AbortController | null>(null);
   const [rolloutBusy, setRolloutBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [runningAction, setRunningAction] = useState<ApplyRun | null>(null);
+  const [runningStep, setRunningStep] = useState<ApplyStep | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [commitMsg, setCommitMsg] = useState("ina-pl: deploy profile manifests");
   const [deployed, setDeployed] = useState(false);
   const [deployedAt, setDeployedAt] = useState<string>("");
   const [deployFiles, setDeployFiles] = useState<string[]>([]);
+  /** After Clear, Push stays enabled so Clear -- Push can sync deletions. */
+  const [clearPendingPush, setClearPendingPush] = useState(false);
   const [clusterStatus, setClusterStatus] = useState<ProfileClusterStatusOut | null>(
     null,
   );
@@ -196,13 +222,45 @@ export default function PlanningPage() {
     setConsoleText((prev) => (prev ? `${prev}\n${line}` : line));
   }
 
-  function streamHandlers(): StreamHandlers {
+  function streamHandlers(opts?: {
+    trackDeploySteps?: boolean;
+    trackUndeploySteps?: boolean;
+  }): StreamHandlers {
     return {
       onLog: (stream, line) => {
         appendConsole(stream === "stderr" ? `[err] ${line}` : line);
       },
       onStatus: (message) => {
         if (message) appendConsole(`# ${message}`);
+        if (!message) return;
+        const m = message.toLowerCase();
+        if (opts?.trackDeploySteps) {
+          if (
+            m.includes("rendering") ||
+            m.includes("wrote ") ||
+            m.includes("multus")
+          ) {
+            setRunningStep("generate");
+          }
+          if (m.startsWith("$ ") || m.includes("syncing mysql")) {
+            setRunningStep("push");
+          }
+        }
+        if (opts?.trackUndeploySteps) {
+          if (
+            m.includes("clearing") ||
+            m.includes("undeploying") ||
+            m.startsWith("removed ")
+          ) {
+            setRunningStep("clear");
+          }
+          if (m.startsWith("$ ")) {
+            setRunningStep("push");
+          }
+          if (m.includes("cleanup") || m.includes("forcing")) {
+            setRunningStep("cleanup");
+          }
+        }
       },
       onError: (message) => {
         if (message) appendConsole(`! ${message}`);
@@ -232,6 +290,7 @@ export default function PlanningPage() {
     setDeployed(Boolean(rec.deployed));
     setDeployedAt(rec.deployed_at || "");
     setDeployFiles(rec.deploy_files || []);
+    setClearPendingPush(false);
     if (rec.pl_result?.ok) {
       setResult(rec.pl_result);
     } else {
@@ -350,11 +409,14 @@ export default function PlanningPage() {
       return;
     }
     if (
-      !window.confirm(
-        `Restore builtin defaults for profile "${profile.name}"?\n\n` +
+      !(await dialog.confirm({
+        title: `Restore defaults for “${profile.name}”?`,
+        message:
           "Resets subnet, max slices, DNN prefix, RAN node, network settings, " +
           "and 4-slice SLAs. Deploy status is kept. Clears the PL result.",
-      )
+        confirmLabel: "Restore",
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -374,10 +436,13 @@ export default function PlanningPage() {
 
   async function onRestoreDefaultSlices() {
     if (
-      !window.confirm(
-        "Restore the default 4-slice SLAs (CCTV / Physical AI / OTT / IoT)?\n\n" +
-          "Clears the current PL result.",
-      )
+      !(await dialog.confirm({
+        title: "Restore default slice SLAs?",
+        message:
+          "Resets to CCTV / Physical AI / OTT / IoT and clears the current PL result.",
+        confirmLabel: "Restore",
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -437,10 +502,12 @@ export default function PlanningPage() {
   }
 
   async function onAddProfile() {
-    const name = window.prompt(
-      "New profile name (K8s namespace):",
-      `${profile.name}-2`,
-    );
+    const name = await dialog.prompt({
+      title: "Add profile",
+      message: "New profile name (K8s namespace):",
+      defaultValue: `${profile.name}-2`,
+      confirmLabel: "Create",
+    });
     if (!name) return;
     const trimmed = name.trim();
     if (!NS_RE.test(trimmed)) {
@@ -471,10 +538,12 @@ export default function PlanningPage() {
     const name = selectedName || profile.name;
     if (!name) return;
     if (
-      !window.confirm(
-        `Delete profile “${name}” from the database?\n\n` +
-          `This does not remove GitOps manifests under namespaces/${name}/.`,
-      )
+      !(await dialog.confirm({
+        title: `Delete profile “${name}”?`,
+        message: `Removes it from the database. GitOps manifests under namespaces/${name}/ are not deleted.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -537,58 +606,75 @@ export default function PlanningPage() {
     }
   }, [consoleText]);
 
-  async function onApply(dryRun: boolean) {
-    if (!result?.ok) return;
-    if (
-      !dryRun &&
-      !window.confirm(
-        `Deploy profile "${profile.name}" to the clusters?\n\n` +
-          `Writes namespaces/${profile.name}/ then pushes to Gitea ` +
-          `(Config Sync) for N=${slices.length} slice(s) on ${profile.subnet}.`,
-      )
-    ) {
-      return;
+  function applyDeployStateFromProfile(
+    resProfile: {
+      deployed?: boolean;
+      deployed_at?: string | null;
+      deploy_files?: string[];
+      updated_at?: string;
+    } | null | undefined,
+    writtenFallback: string[] = [],
+  ) {
+    if (resProfile) {
+      setDeployed(Boolean(resProfile.deployed));
+      setDeployedAt(resProfile.deployed_at || "");
+      setDeployFiles(resProfile.deploy_files || writtenFallback);
+      setSavedAt(resProfile.updated_at || savedAt);
     }
+  }
+
+  function beginRun(action: ApplyRun, step: ApplyStep | null = null) {
     setBusy(true);
+    setRunningAction(action);
+    setRunningStep(step);
     setError(null);
-    resetConsole(dryRun ? "Dry deploy" : "Deploy");
+  }
+
+  function endRun() {
+    setBusy(false);
+    setRunningAction(null);
+    setRunningStep(null);
+  }
+
+  const genRunning =
+    runningAction === "generate" || runningStep === "generate";
+  const pushRunning = runningAction === "push" || runningStep === "push";
+  const clearRunning = runningAction === "clear" || runningStep === "clear";
+  const deployRunning = runningAction === "deploy";
+  const undeployRunning =
+    runningAction === "undeploy" || runningStep === "cleanup";
+  const rolloutRunning = runningAction === "rollout";
+
+  /** Generate config — write locally, no push. */
+  async function onGenerate() {
+    if (!result?.ok) return;
+    beginRun("generate");
+    resetConsole("Generate config");
     try {
       const res = await api.applyStream(
         {
           result,
           slices,
           profile,
-          commit_message: dryRun
-            ? commitMsg.replace("deploy", "dry-deploy")
-            : commitMsg,
-          dry_run: dryRun,
+          commit_message: commitMsg.replace("deploy", "generate-config"),
+          dry_run: true,
         },
         streamHandlers(),
       );
       setConsoleOk(res.ok);
-      setConsoleMessage(
-        (res.dry_run ? "[dry deploy] " : "") + (res.message || ""),
-      );
+      setConsoleMessage("[generate] " + (res.message || ""));
       setConsoleFiles(res.written_files || []);
       setConsoleFilesLabel("Written files");
       if (res.profile) {
-        setDeployed(Boolean(res.profile.deployed));
-        setDeployedAt(res.profile.deployed_at || "");
-        setDeployFiles(res.profile.deploy_files || res.written_files || []);
-        setSavedAt(res.profile.updated_at || savedAt);
+        applyDeployStateFromProfile(res.profile, res.written_files || []);
       } else {
         setDeployFiles(res.written_files || []);
-        if (!dryRun && res.ok) {
-          setDeployed(true);
-          setDeployedAt(new Date().toISOString());
-        }
       }
+      if (res.ok) setClearPendingPush(false);
       if (!res.ok) setError(res.message);
       else {
         setStatus(
-          dryRun
-            ? `Dry deploy: ${res.written_files.length} file(s) saved on profile`
-            : `Deployed: ${res.written_files.length} file(s)`,
+          `Generated config: ${res.written_files.length} file(s) — Push to sync`,
         );
         void refreshClusterStatus();
       }
@@ -597,23 +683,184 @@ export default function PlanningPage() {
       setConsoleMessage(e instanceof Error ? e.message : String(e));
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      endRun();
     }
   }
 
-  async function onUndeploy() {
-    if (!deployed) return;
+  /** Deploy = Generate + Push. */
+  async function onDeploy() {
+    if (!result?.ok) return;
     if (
-      !window.confirm(
-        `Undeploy profile "${profile.name}"?\n\n` +
-          `Deletes namespaces/${profile.name}/ from GitOps repos and pushes to Gitea ` +
-          `(Config Sync will prune the workloads).`,
-      )
+      !(await dialog.confirm({
+        title: `Deploy “${profile.name}”?`,
+        message:
+          `Generate config + Push: writes namespaces/${profile.name}/ then ` +
+          `pushes to Gitea (Config Sync) for N=${slices.length} slice(s) on ${profile.subnet}.`,
+        confirmLabel: "Deploy",
+      }))
     ) {
       return;
     }
-    setBusy(true);
-    setError(null);
+    beginRun("deploy", "generate");
+    resetConsole("Deploy");
+    try {
+      const res = await api.applyStream(
+        {
+          result,
+          slices,
+          profile,
+          commit_message: commitMsg,
+          dry_run: false,
+        },
+        streamHandlers({ trackDeploySteps: true }),
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage("[deploy] " + (res.message || ""));
+      setConsoleFiles(res.written_files || []);
+      setConsoleFilesLabel("Written files");
+      if (res.profile) {
+        applyDeployStateFromProfile(res.profile, res.written_files || []);
+      } else {
+        setDeployFiles(res.written_files || []);
+        if (res.ok) {
+          setDeployed(true);
+          setDeployedAt(new Date().toISOString());
+        }
+      }
+      if (res.ok) setClearPendingPush(false);
+      if (!res.ok) setError(res.message);
+      else {
+        setStatus(`Deployed: ${res.written_files.length} file(s)`);
+        void refreshClusterStatus();
+      }
+    } catch (e) {
+      setConsoleOk(false);
+      setConsoleMessage(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      endRun();
+    }
+  }
+
+  /** Push — sync current local GitOps trees to Gitea (no re-render). */
+  async function onPush() {
+    if (!profileOk) return;
+    if (
+      !(await dialog.confirm({
+        title: `Push “${profile.name}”?`,
+        message:
+          "Pushes the current local GitOps trees to Gitea (no re-render). " +
+          "Use after Generate config, or after Clear to sync deletions.",
+        confirmLabel: "Push",
+      }))
+    ) {
+      return;
+    }
+    beginRun("push");
+    resetConsole("Push");
+    try {
+      const res = await api.pushStream(
+        {
+          profile,
+          commit_message: commitMsg.replace("deploy", "push"),
+        },
+        streamHandlers(),
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage("[push] " + (res.message || ""));
+      setConsoleFiles(res.written_files || []);
+      setConsoleFilesLabel("Files on disk");
+      if (res.profile) {
+        applyDeployStateFromProfile(res.profile, res.written_files || []);
+      } else if (res.ok) {
+        setDeployed(Boolean(res.deployed));
+        setDeployFiles(res.written_files || []);
+        if (!res.deployed) setDeployedAt("");
+      }
+      if (res.ok) setClearPendingPush(false);
+      if (!res.ok) setError(res.message);
+      else {
+        setStatus(res.message || "Push complete");
+        void refreshClusterStatus();
+      }
+    } catch (e) {
+      setConsoleOk(false);
+      setConsoleMessage(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      endRun();
+    }
+  }
+
+  /** Clear generated config — local remove only (no push). */
+  async function onClear() {
+    if (!deployed && deployFiles.length === 0 && !clearPendingPush) return;
+    if (
+      !(await dialog.confirm({
+        title: `Clear generated config for “${profile.name}”?`,
+        message:
+          `Removes local namespaces/${profile.name}/ and clears the generated ` +
+          "file list. Does not push — use Push afterward to sync deletions, " +
+          "or Undeploy (= Clear + Push + cluster cleanup).",
+        confirmLabel: "Clear",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    beginRun("clear");
+    resetConsole("Clear generated config");
+    try {
+      const res = await api.undeployStream(
+        {
+          profile,
+          commit_message: "ina-pl: clear profile manifests",
+          dry_run: true,
+        },
+        streamHandlers(),
+      );
+      setConsoleOk(res.ok);
+      setConsoleMessage("[clear] " + (res.message || ""));
+      setConsoleFiles(res.removed_paths || []);
+      setConsoleFilesLabel("Removed paths");
+      if (res.profile) {
+        applyDeployStateFromProfile(res.profile);
+      } else if (res.ok) {
+        setDeployed(false);
+        setDeployedAt("");
+        setDeployFiles([]);
+      }
+      if (res.ok) setClearPendingPush(true);
+      if (!res.ok) setError(res.message);
+      else {
+        setStatus(`Cleared local config for “${profile.name}” — Push to sync`);
+        void refreshClusterStatus();
+      }
+    } catch (e) {
+      setConsoleOk(false);
+      setConsoleMessage(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      endRun();
+    }
+  }
+
+  /** Undeploy = Clear + Push (+ cluster cleanup). */
+  async function onUndeploy() {
+    if (!deployed && deployFiles.length === 0 && !clearPendingPush) return;
+    if (
+      !(await dialog.confirm({
+        title: `Undeploy “${profile.name}”?`,
+        message:
+          `Clear + Push: deletes namespaces/${profile.name}/ from GitOps repos, ` +
+          "pushes to Gitea, and force-cleans cluster namespaces.",
+        confirmLabel: "Undeploy",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    beginRun("undeploy", "clear");
     resetConsole("Undeploy");
     try {
       const res = await api.undeployStream(
@@ -622,22 +869,22 @@ export default function PlanningPage() {
           commit_message: "ina-pl: undeploy profile manifests",
           dry_run: false,
         },
-        streamHandlers(),
+        streamHandlers({ trackUndeploySteps: true }),
       );
       setConsoleOk(res.ok);
-      setConsoleMessage(res.message || "");
+      setConsoleMessage(
+        res.message ? `[undeploy]\n${res.message}` : "[undeploy]",
+      );
       setConsoleFiles(res.removed_paths || []);
       setConsoleFilesLabel("Removed paths");
       if (res.profile) {
-        setDeployed(Boolean(res.profile.deployed));
-        setDeployedAt(res.profile.deployed_at || "");
-        setDeployFiles(res.profile.deploy_files || []);
-        setSavedAt(res.profile.updated_at || savedAt);
+        applyDeployStateFromProfile(res.profile);
       } else if (res.ok) {
         setDeployed(false);
         setDeployedAt("");
         setDeployFiles([]);
       }
+      if (res.ok) setClearPendingPush(false);
       if (!res.ok) setError(res.message);
       else {
         setStatus(`Undeployed “${profile.name}”`);
@@ -648,7 +895,7 @@ export default function PlanningPage() {
       setConsoleMessage(e instanceof Error ? e.message : String(e));
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      endRun();
     }
   }
 
@@ -659,20 +906,21 @@ export default function PlanningPage() {
   }) {
     if (!profileOk) return;
     if (
-      !window.confirm(
-        `Staged rollout for profile "${profile.name}"?\n\n` +
-          `Order: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs\n` +
-          `(same bring-up order as oai-slice-deployment; may take several minutes)`,
-      )
+      !(await dialog.confirm({
+        title: `Start rollout for “${profile.name}”?`,
+        message:
+          "Order: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs. " +
+          "Same bring-up order as oai-slice-deployment; may take several minutes.",
+        confirmLabel: "Rollout",
+      }))
     ) {
       return;
     }
     const ctrl = new AbortController();
     streamAbortRef.current = ctrl;
     setRolloutBusy(true);
-    setBusy(true);
-    setError(null);
-    resetConsole("Profile rollout");
+    beginRun("rollout");
+    resetConsole("Rollout");
     try {
       const res = await api.profileRolloutStream(
         profile.name,
@@ -708,7 +956,7 @@ export default function PlanningPage() {
     } finally {
       if (streamAbortRef.current === ctrl) streamAbortRef.current = null;
       setRolloutBusy(false);
-      setBusy(false);
+      endRun();
     }
   }
 
@@ -1267,35 +1515,144 @@ export default function PlanningPage() {
                 style={{ width: "100%", marginTop: 4 }}
               />
             </label>
-            <div className="actions" style={{ marginTop: 12 }}>
-              <button type="button" disabled={busy} onClick={() => onApply(true)}>
-                Dry deploy
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => onApply(false)}
-              >
-                Deploy
-              </button>
-              {deployed && (
+            <div className="apply-tree" style={{ marginTop: 12 }}>
+              <div className="apply-tree-combo apply-tree-gen">
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={() => void onUndeploy()}
-                  title="Remove profile namespace from GitOps and push"
+                  className={"btn-tone-ok" + (genRunning ? " is-running" : "")}
+                  disabled={busy || !result?.ok}
+                  onClick={() => void onGenerate()}
+                  title="Write manifests locally without pushing to Gitea"
                 >
-                  Undeploy
+                  <BtnProgress active={genRunning} />
+                  Generate config
                 </button>
-              )}
+                <span className="apply-tree-caption" aria-hidden>
+                  &nbsp;
+                </span>
+              </div>
+              <svg
+                className="apply-tree-fork"
+                viewBox="0 0 40 100"
+                preserveAspectRatio="none"
+                aria-hidden
+              >
+                <path
+                  d="M0 25 H20 V50 H40 M0 75 H20 V50"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
               <button
                 type="button"
+                className={
+                  "apply-tree-push btn-tone-ok" +
+                  (pushRunning ? " is-running" : "")
+                }
+                disabled={
+                  busy ||
+                  !profileOk ||
+                  (deployFiles.length === 0 && !clearPendingPush && !deployed)
+                }
+                onClick={() => void onPush()}
+                title="Push current local GitOps trees to Gitea (no re-render)"
+              >
+                <BtnProgress active={pushRunning} />
+                Push
+              </button>
+              <svg
+                className="apply-tree-split"
+                viewBox="0 0 40 100"
+                preserveAspectRatio="none"
+                aria-hidden
+              >
+                <path
+                  d="M0 50 H20 V25 H40 M20 50 V75 H40"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <div className="apply-tree-combo apply-tree-deploy">
+                <button
+                  type="button"
+                  className={"primary" + (deployRunning ? " is-running" : "")}
+                  disabled={busy || !result?.ok}
+                  onClick={() => void onDeploy()}
+                  title="Generate config + Push"
+                >
+                  <BtnProgress active={deployRunning} />
+                  Deploy
+                </button>
+                <span className="apply-tree-caption">
+                  {deployRunning
+                    ? runningStep === "push"
+                      ? "pushing…"
+                      : "generating…"
+                    : "gen + push"}
+                </span>
+              </div>
+
+              <div className="apply-tree-combo apply-tree-clr">
+                <button
+                  type="button"
+                  className={
+                    "btn-tone-warn" + (clearRunning ? " is-running" : "")
+                  }
+                  disabled={
+                    busy ||
+                    (!deployed && deployFiles.length === 0 && !clearPendingPush)
+                  }
+                  onClick={() => void onClear()}
+                  title="Remove local namespaces/<profile>/; does not push"
+                >
+                  <BtnProgress active={clearRunning} />
+                  Clear generated config
+                </button>
+                <span className="apply-tree-caption" aria-hidden>
+                  &nbsp;
+                </span>
+              </div>
+              <div className="apply-tree-combo apply-tree-undeploy">
+                <button
+                  type="button"
+                  className={
+                    "btn-tone-warn" + (undeployRunning ? " is-running" : "")
+                  }
+                  disabled={
+                    busy ||
+                    (!deployed && deployFiles.length === 0 && !clearPendingPush)
+                  }
+                  onClick={() => void onUndeploy()}
+                  title="Clear + Push + cluster cleanup"
+                >
+                  <BtnProgress active={undeployRunning} />
+                  Undeploy
+                </button>
+                <span className="apply-tree-caption">
+                  {runningAction === "undeploy"
+                    ? runningStep === "push"
+                      ? "pushing…"
+                      : runningStep === "cleanup"
+                        ? "cleanup…"
+                        : "clearing…"
+                    : "clear + push"}
+                </span>
+              </div>
+            </div>
+            <div className="actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className={rolloutRunning ? "is-running" : undefined}
                 disabled={busy || !profileOk || rolloutBusy}
                 onClick={() => void onProfileRollout()}
-                title="Staged restart: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs"
+                title="Staged restart only: UPF → SMF → PFCP → CU-CP → CU-UP → DU → UEs"
               >
-                {rolloutBusy ? "Rolling out…" : "Profile rollout"}
+                <BtnProgress active={rolloutRunning} />
+                {rolloutBusy ? "Rolling out…" : "Rollout"}
               </button>
               {rolloutBusy && (
                 <button
@@ -1309,15 +1666,10 @@ export default function PlanningPage() {
               )}
             </div>
             <p className="hint">
-              <strong>Deploy</strong> writes <code>namespaces/{profile.name}/</code> and
-              pushes to Gitea. <strong>Dry deploy</strong> writes locally and saves the
-              file list on the profile without pushing.{" "}
-              {deployed && (
-                <>
-                  <strong>Undeploy</strong> removes the namespace from GitOps.
-                </>
-              )}{" "}
-              Live command output streams into the Console below.
+              Left steps feed into shared <strong>Push</strong>.{" "}
+              <strong>Deploy</strong> / <strong>Undeploy</strong> are the
+              shortcuts. Undeploy also force-cleans cluster namespaces.{" "}
+              <strong>Rollout</strong> is separate — staged NF restart only.
             </p>
           </div>
         </Card>
@@ -1355,13 +1707,14 @@ export default function PlanningPage() {
             )}
           </div>
           {consoleMessage && (
-            <p
+            <pre
               className={
-                consoleOk == null ? "hint" : consoleOk ? "ok" : "error"
+                "console-summary" +
+                (consoleOk == null ? "" : consoleOk ? " ok" : " error")
               }
             >
               {consoleMessage}
-            </p>
+            </pre>
           )}
           <pre className="net-pre console-pre" ref={consoleRef}>
             {consoleText ||
@@ -1369,7 +1722,7 @@ export default function PlanningPage() {
                 ? "Waiting for output…"
                 : consoleOpen
                   ? "(empty)"
-                  : "Run Deploy, Undeploy, or Profile rollout to stream command output here.")}
+                  : "Run Generate config, Deploy, or Rollout to stream output here.")}
           </pre>
           {consoleFiles.length > 0 && (
             <details style={{ marginTop: 8 }} open>

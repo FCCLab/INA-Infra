@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import PlanningPage from "./pages/PlanningPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import AppShell, { type NavTab } from "./components/ui/AppShell";
+import { DialogProvider } from "./components/ui/Dialog";
 
 type Tab = "planning" | "medium" | "short";
 
@@ -87,7 +88,8 @@ export default function App() {
         </a>
       }
     >
-      {body}
+      {/* Inside .app so dialogs inherit theme tokens (opaque --bg1, etc.) */}
+      <DialogProvider>{body}</DialogProvider>
     </AppShell>
   );
 }

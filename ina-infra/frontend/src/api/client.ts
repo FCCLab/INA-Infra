@@ -179,6 +179,17 @@ export type PlUndeployResponse = {
   profile?: ProfileRecord | null;
 };
 
+export type PlPushResponse = {
+  ok: boolean;
+  message: string;
+  written_files: string[];
+  push_stdout: string;
+  push_stderr: string;
+  exit_code: number | null;
+  deployed?: boolean;
+  profile?: ProfileRecord | null;
+};
+
 export type ProfileRolloutRequest = {
   skip_ues?: boolean;
   skip_ran?: boolean;
@@ -534,6 +545,20 @@ export const api = {
   ) =>
     streamRequest<PlApplyResponse>(
       "/api/v1/pl/apply/stream",
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
+    ),
+  pushStream: (
+    body: {
+      profile: Profile;
+      commit_message?: string;
+    },
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<PlPushResponse>(
+      "/api/v1/pl/push/stream",
       body,
       handlers,
       { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },

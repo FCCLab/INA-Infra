@@ -425,7 +425,14 @@ class PlApplyResponse(BaseModel):
 class PlUndeployRequest(BaseModel):
     profile: Optional[Profile] = None
     commit_message: str = "ina-pl: undeploy profile manifests"
-    dry_run: bool = False
+    dry_run: bool = Field(
+        False,
+        description=(
+            "True = Clear (remove local namespaces/<profile>/ + clear deploy "
+            "state; skip Gitea push). False = Undeploy (clear + push + "
+            "cluster cleanup)."
+        ),
+    )
     clusters: List[str] = Field(
         default_factory=lambda: ["central", "regional", "edge"],
     )
@@ -436,6 +443,30 @@ class PlUndeployResponse(BaseModel):
     dry_run: bool = False
     message: str = ""
     removed_paths: List[str] = Field(default_factory=list)
+    push_stdout: str = ""
+    push_stderr: str = ""
+    exit_code: Optional[int] = None
+    deployed: bool = False
+    profile: Optional[ProfileRecord] = None
+
+
+class PlPushRequest(BaseModel):
+    """Push already-rendered GitOps repos to Gitea (no re-render)."""
+
+    profile: Optional[Profile] = None
+    commit_message: str = "ina-pl: push profile manifests"
+    clusters: List[str] = Field(
+        default_factory=lambda: ["central", "regional", "edge"],
+    )
+
+
+class PlPushResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    written_files: List[str] = Field(
+        default_factory=list,
+        description="Files currently under namespaces/<profile>/ after push",
+    )
     push_stdout: str = ""
     push_stderr: str = ""
     exit_code: Optional[int] = None

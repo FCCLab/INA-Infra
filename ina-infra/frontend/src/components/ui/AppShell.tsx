@@ -1,6 +1,27 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { AccentKey, buildColors, fmtSiteNow } from "../../lib/theme";
 
+const THEME_DARK_KEY = "ina-infra.theme.dark";
+
+function readStoredDark(fallback = true): boolean {
+  try {
+    const raw = localStorage.getItem(THEME_DARK_KEY);
+    if (raw === "1" || raw === "true") return true;
+    if (raw === "0" || raw === "false") return false;
+  } catch {
+    /* private mode / blocked storage */
+  }
+  return fallback;
+}
+
+function writeStoredDark(dark: boolean) {
+  try {
+    localStorage.setItem(THEME_DARK_KEY, dark ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 export type NavTab = {
   id: string;
   label: string;
@@ -127,9 +148,13 @@ export default function AppShell({
   children: ReactNode;
   topbarExtra?: ReactNode;
 }) {
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(() => readStoredDark(true));
   const [accent] = useState<AccentKey>("Energy green");
   const colors = buildColors(dark, accent);
+
+  useEffect(() => {
+    writeStoredDark(dark);
+  }, [dark]);
 
   const appClass = `app ${dark ? "theme-dark" : "theme-light"} density-comfy`;
   const appVars = {
@@ -150,7 +175,10 @@ export default function AppShell({
             <div className="topbar-right">
               {topbarExtra}
               <SiteClock tz={clockTz} />
-              <DarkToggle dark={dark} onToggle={() => setDark((d) => !d)} />
+              <DarkToggle
+                dark={dark}
+                onToggle={() => setDark((d) => !d)}
+              />
             </div>
           </header>
           <main className="dash">{children}</main>

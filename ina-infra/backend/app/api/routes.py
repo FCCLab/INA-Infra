@@ -11,6 +11,8 @@ from app.schemas import (
     NetworkOut,
     PlApplyRequest,
     PlApplyResponse,
+    PlPushRequest,
+    PlPushResponse,
     PlSolveRequest,
     PlSolveResponse,
     PlUndeployRequest,
@@ -442,14 +444,48 @@ def pl_apply_stream(body: PlApplyRequest):
 
 
 @router.post(
+    "/pl/push",
+    response_model=PlPushResponse,
+    tags=["Planning (PL)"],
+    summary="Push rendered GitOps to Gitea (blocking)",
+    description=(
+        "Push already-rendered `namespaces/<profile>/` trees to Gitea without "
+        "re-rendering. Pair with Generate config (= Deploy) or Clear "
+        "(= Undeploy git sync)."
+    ),
+)
+def pl_push(body: PlPushRequest):
+    try:
+        return gitea_apply.push_to_gitea(body)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/pl/push/stream",
+    tags=["Planning (PL)"],
+    summary="Push rendered GitOps to Gitea (SSE)",
+    description="Same as `/pl/push` with live **SSE** logs.",
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from git push",
+        }
+    },
+)
+def pl_push_stream(body: PlPushRequest):
+    return _sse_response(gitea_apply.iter_push_sse(body))
+
+
+@router.post(
     "/pl/undeploy",
     response_model=PlUndeployResponse,
     tags=["Planning (PL)"],
-    summary="Undeploy profile from GitOps (blocking)",
+    summary="Clear or Undeploy profile GitOps (blocking)",
     description=(
-        "Remove `namespaces/<profile>/` from cluster GitOps repos, push to "
-        "Gitea (Config Sync prune), and best-effort force-delete stuck "
-        "namespaces / OAI finalizers on the clusters."
+        "`dry_run=true` (Clear): remove local `namespaces/<profile>/` and "
+        "clear deploy state; skip push. `dry_run=false` (Undeploy): clear + "
+        "push to Gitea + best-effort cluster namespace cleanup."
     ),
 )
 def pl_undeploy(body: PlUndeployRequest):
@@ -462,7 +498,7 @@ def pl_undeploy(body: PlUndeployRequest):
 @router.post(
     "/pl/undeploy/stream",
     tags=["Planning (PL)"],
-    summary="Undeploy profile from GitOps (SSE)",
+    summary="Clear or Undeploy profile GitOps (SSE)",
     description=(
         "Same as `/pl/undeploy` with live **SSE** logs for push and cluster "
         "cleanup."
