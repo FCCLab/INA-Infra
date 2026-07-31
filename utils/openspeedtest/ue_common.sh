@@ -5,7 +5,8 @@
 : "${SCRIPT_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
-UE_HOST="${UE_HOST:-usrp}"
+# UEs schedule on usrp, but kubectl needs the edge control-plane admin.conf.
+UE_HOST="${UE_HOST:-edge-0}"
 OST_SERVER="${OST_SERVER:-http://10.1.132.11/}"
 OST_HOST="${OST_HOST:-${OST_SERVER#http://}}"
 OST_HOST="${OST_HOST#https://}"
@@ -24,40 +25,45 @@ kubectl_ue() {
 # Print lines: id|namespace|pod|container|tun|ue_ip
 # id is 1-based in discovery order.
 discover_ues() {
-  ssh_ue "sudo bash -s" <<'REMOTE'
+  ssh_ue "sudo bash -s" <<REMOTE
 set -euo pipefail
-KCFG=/etc/kubernetes/admin.conf
+KCFG=${KUBECONFIG_REMOTE}
 id=0
-# Prefer oai-* namespaces; fall back to all if none.
-mapfile -t nss < <(kubectl --kubeconfig="$KCFG" get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-  | grep -E '^oai-' || true)
-if [[ ${#nss[@]} -eq 0 ]]; then
-  mapfile -t nss < <(kubectl --kubeconfig="$KCFG" get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+# oai-* and ina-* profile namespaces (ina-infra); else all non-system.
+mapfile -t nss < <(kubectl --kubeconfig="\$KCFG" get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+  | grep -E '^(oai-|ina-)' || true)
+if [[ \${#nss[@]} -eq 0 ]]; then
+  mapfile -t nss < <(kubectl --kubeconfig="\$KCFG" get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 fi
-for ns in "${nss[@]}"; do
-  [[ "$ns" == kube-* || "$ns" == default || "$ns" == local-path-* || "$ns" == metallb-* ]] && continue
+for ns in "\${nss[@]}"; do
+  [[ "\$ns" == kube-* || "\$ns" == default || "\$ns" == local-path-* || "\$ns" == metallb-* ]] && continue
   while IFS= read -r pod; do
-    [[ -z "$pod" ]] && continue
-    # Skip non-Running
-    phase="$(kubectl --kubeconfig="$KCFG" -n "$ns" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-    [[ "$phase" == "Running" ]] || continue
-    ctr="$(kubectl --kubeconfig="$KCFG" -n "$ns" get pod "$pod" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || true)"
-    [[ -z "$ctr" ]] && continue
-    info="$(kubectl --kubeconfig="$KCFG" -n "$ns" exec "$pod" -c "$ctr" -- sh -c '
+    [[ -z "\$pod" ]] && continue
+    # Prefer ue container name when present (bringup-order/ue/debug).
+    phase="\$(kubectl --kubeconfig="\$KCFG" -n "\$ns" get pod "\$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    [[ "\$phase" == "Running" ]] || continue
+    ctr="\$(kubectl --kubeconfig="\$KCFG" -n "\$ns" get pod "\$pod" -o jsonpath='{range .spec.containers[*]}{.name}{"\\n"}{end}' 2>/dev/null | grep -E '^ue\$' || true)"
+    if [[ -z "\$ctr" ]]; then
+      ctr="\$(kubectl --kubeconfig="\$KCFG" -n "\$ns" get pod "\$pod" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || true)"
+    fi
+    [[ -z "\$ctr" ]] && continue
+    # Only nrUE pods (name or container).
+    echo "\$pod" | grep -Eq 'ue|nrue' || [[ "\$ctr" == "ue" ]] || continue
+    info="\$(kubectl --kubeconfig="\$KCFG" -n "\$ns" exec "\$pod" -c "\$ctr" -- sh -c '
       for t in /sys/class/net/oaitun_*; do
-        [ -e "$t" ] || continue
-        name=$(basename "$t")
-        ip=$(ip -4 -o addr show dev "$name" 2>/dev/null | awk "{print \$4}" | cut -d/ -f1)
-        [ -n "$ip" ] && echo "$name $ip" && exit 0
+        [ -e "\$t" ] || continue
+        name=\$(basename "\$t")
+        ip=\$(ip -4 -o addr show dev "\$name" 2>/dev/null | awk "{print \$4}" | cut -d/ -f1)
+        [ -n "\$ip" ] && echo "\$name \$ip" && exit 0
       done
       exit 1
     ' 2>/dev/null || true)"
-    [[ -z "$info" ]] && continue
-    tun="${info%% *}"
-    ue_ip="${info##* }"
-    id=$((id + 1))
-    printf '%s|%s|%s|%s|%s|%s\n' "$id" "$ns" "$pod" "$ctr" "$tun" "$ue_ip"
-  done < <(kubectl --kubeconfig="$KCFG" -n "$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    [[ -z "\$info" ]] && continue
+    tun="\${info%% *}"
+    ue_ip="\${info##* }"
+    id=\$((id + 1))
+    printf '%s|%s|%s|%s|%s|%s\\n' "\$id" "\$ns" "\$pod" "\$ctr" "\$tun" "\$ue_ip"
+  done < <(kubectl --kubeconfig="\$KCFG" -n "\$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}' 2>/dev/null || true)
 done
 REMOTE
 }

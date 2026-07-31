@@ -20,15 +20,20 @@ List UEs first:
 Examples:
   $(basename "$0") 1
   $(basename "$0") oai-nws-1ue
-  $(basename "$0") 1 --server http://10.1.132.11/ --duration 10 --threads 1
-  $(basename "$0") 2 --direction download
+  $(basename "$0") 1 --server http://10.1.132.11/ -d 10 --threads 1
+  $(basename "$0") 2 --dir download
+  $(basename "$0") 2 --dir upload -d 0
 
 Options:
-  --server URL       OpenSpeedTest server (default: ${OST_SERVER})
-  --duration SEC     Seconds per direction (default: ${DURATION})
-  --threads N        Parallel connections (default: ${THREADS}; use 1 on RFsim)
-  --direction DIR    download|upload|both (default: ${DIRECTION})
-  -h, --help         Show help
+  --server URL              OpenSpeedTest server (default: ${OST_SERVER})
+  -d|--duration SEC         Seconds (default: ${DURATION}; 0|forever = until Ctrl+C)
+  --threads|-t N            Parallel connections (default: ${THREADS}; use 1 on RFsim)
+  --dir|--direction DIR     download|upload|both (default: ${DIRECTION})
+  -h, --help                Show help
+
+Forever (Ctrl+C to stop):
+  $(basename "$0") 1 --dir download -d 0 --threads 1
+  $(basename "$0") 1 --dir upload -d 0 --threads 1
 
 Environment:
   UE_HOST OST_SERVER TUN_MTU SSH_CONFIG DURATION THREADS DIRECTION
@@ -43,9 +48,9 @@ main() {
     case "$1" in
       -h|--help) usage; exit 0 ;;
       --server) server="$2"; shift 2 ;;
-      --duration|-d) duration="$2"; shift 2 ;;
+      -d|--duration) duration="$2"; shift 2 ;;
       --threads|-t) threads="$2"; shift 2 ;;
-      --direction|--dir) direction="$2"; shift 2 ;;
+      --dir|--direction) direction="$2"; shift 2 ;;
       -*)
         echo "error: unknown option $1" >&2
         usage >&2
