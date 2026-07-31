@@ -28,7 +28,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options] [cluster ...]
 
-Restore Flannel CNI after host reboot (default: mgmt, central, regional, edge, ue).
+Restore Flannel CNI after host reboot (default: mgmt, central, regional, edge).
 
 Per cluster (via SSH to control plane):
   1. Ensure br_netfilter on control-plane and worker nodes

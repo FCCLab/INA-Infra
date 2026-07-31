@@ -32,7 +32,6 @@ With no arguments, forwards all clusters in the background (default: all).
   central   https://${CLUSTER_MGMT_IP[central]}:${LOCAL_PORT}
   regional  https://${CLUSTER_MGMT_IP[regional]}:${LOCAL_PORT}
   edge      https://${CLUSTER_MGMT_IP[edge]}:${LOCAL_PORT}
-  ue        https://${CLUSTER_MGMT_IP[ue]}:${LOCAL_PORT}
 
 Options:
   -d, --detach        Start all forwards and exit (default for multiple clusters)
@@ -98,7 +97,7 @@ validate_cluster() {
       fi
       ;;
   esac
-  echo "error: unknown cluster '${cluster}' (expected all, mgmt, central, regional, edge, or ue)" >&2
+  echo "error: unknown cluster '${cluster}' (expected all, mgmt, central, regional, edge)" >&2
   return 1
 }
 

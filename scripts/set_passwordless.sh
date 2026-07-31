@@ -16,7 +16,7 @@ ALL_HOSTS=(
   central-0 central-1
   regional-0 regional-1
   edge-0 edge-1
-  ue-0 ue-1
+
 )
 
 cleanup() {
@@ -37,7 +37,7 @@ Examples:
   $(basename "$0") central-0 regional-0
   SUDO_PASSWORD=secret $(basename "$0") -y mgmt-0
 
-Clusters: mgmt, central, regional, edge, ue
+Clusters: mgmt, central, regional, edge
 
 Environment:
   SSH_CONFIG      SSH config (default: utils/ssh_config/config)
@@ -65,7 +65,7 @@ resolve_hosts() {
   local arg hosts=() host
   for arg in "$@"; do
     case "$arg" in
-      mgmt|central|regional|edge|ue)
+      mgmt|central|regional|edge)
         while IFS= read -r host; do
           hosts+=("$host")
         done < <(hosts_for_cluster "$arg")

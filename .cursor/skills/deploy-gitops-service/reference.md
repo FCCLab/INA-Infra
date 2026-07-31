@@ -13,9 +13,11 @@ From `docs/config_sync.md` (trim to what you need):
 ./scripts/render_oai_operators_gitops.sh central
 ./scripts/render_oai_core_gitops.sh central
 ./scripts/render_oai_slice_deployment_gitops.sh      # multi-slice UPF/CU-UP/CU-CP/DU/UE
-./scripts/render_metallb_gitops.sh mgmt central regional edge ue
-./scripts/render_dashboard_gitops.sh mgmt central regional edge ue
-./scripts/render_prometheus_gitops.sh central        # optional
+./scripts/render_metallb_gitops.sh mgmt central regional edge
+./scripts/render_dashboard_gitops.sh mgmt central regional edge
+./scripts/render_prometheus_gitops.sh mgmt central regional edge
+./scripts/render_node_exporter_gitops.sh mgmt central regional edge
+./scripts/render_dcgm_scrape_gitops.sh central edge  # GPU Prom scrape
 ./scripts/render_gpu_operator_gitops.sh              # where needed
 ./bringup/03_push_to_git_repos/push_git_repos.sh
 ./scripts/check-configsync.sh
@@ -35,7 +37,9 @@ Legacy / alternate OAI renders (prefer `render_oai_slice_deployment_gitops.sh` f
 | `render_multus_gitops.sh` | workload | Required before OAI NADs |
 | `render_metallb_gitops.sh` | all | Site VIP pools in `cluster_lib.sh` |
 | `render_dashboard_gitops.sh` | all | NodePort 30443 |
-| `render_prometheus_gitops.sh` | default central | Annotation-based scrape |
+| `render_prometheus_gitops.sh` | mgmt/central/regional/edge | Annotation-based scrape; NodePort 30909 |
+| `render_node_exporter_gitops.sh` | mgmt/central/regional/edge | Host CPU/mem/NIC for Prom |
+| `render_dcgm_scrape_gitops.sh` | central/edge | Annotated Service for DCGM |
 | `render_gpu_operator_gitops.sh` | central/edge as used | NVIDIA |
 | `render_oai_operators_gitops.sh` | **central** | CN/RAN operators |
 | `render_oai_core_gitops.sh` | **central** | `oai-cn` NFDeployments |

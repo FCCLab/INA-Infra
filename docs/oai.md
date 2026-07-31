@@ -15,7 +15,6 @@ Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). Node i
 | central | `.10` | `.10`–`.59` | AMF/SMF `.10`–`.19`; **UPF IP pool `.20`–`.39`** (slice1 pods here) |
 | regional | `.60` | `.60`–`.109` | **CU-UP IP pool `.70`–`.89`** (slice2 pods here) |
 | edge | `.110` | `.110`–`.159` | CU-CP/DU/UE/RIC `.110`–`.121`; slices 3–5 UPF+CU-UP pods |
-| ue | `.160` | `.160`–`.209` | (unused by oai-slice-deployment) |
 
 ### Reserved pools (5 slices — old IPs, co-located pods)
 
@@ -97,15 +96,6 @@ Offsets `+1`, `+3`, `+4` are on the same **`upf-core`** pod (N3 / N4 / N6). SMF 
 | `+2` | CU-UP | N3 | `10.1.139.112` |
 | `+3` | DU | F1 | `10.1.139.113` |
 | `+4` – `+49` | — | reserved | |
-
-**ue** (base `10.1.139.160`) — 1× nrUE
-
-| Offset | NF | Interface | IP |
-|--------|-----|-----------|-----|
-| `+0` | nrUE | RF (macvlan `rf`) | `10.1.139.160` |
-| `+1` – `+49` | — | reserved | |
-
-RFsim is **not** SCTP/GTP — the nrUE pod connects to the edge DU rfsim server over site L2 (`10.1.139.113:4043`). No additional macvlan offsets are used on ue today.
 
 When a cluster later runs a full RAN trio (1 CU-CP + 1 CU-UP + 1 DU), continue assigning from `+0` in interface order: CU-CP N2/F1-C/E1 (`+0`–`+2`), CU-UP E1/F1-U/N3 (`+3`–`+5`), DU F1 (`+6`).
 
@@ -301,39 +291,12 @@ PLMN: **MCC 001 / MNC 01**, SST **1**, SD **ffffff**, DNN **internet**.
 | CU-CP (regional) | [scripts/render_oai_ran_gitops.sh](../scripts/render_oai_ran_gitops.sh) |
 | DU + rfsim (edge) | [scripts/render_oai_ran_du_gitops.sh](../scripts/render_oai_ran_du_gitops.sh) |
 | CU-UP (edge) | [scripts/render_oai_ran_cuup_gitops.sh](../scripts/render_oai_ran_cuup_gitops.sh) |
-| UE sim (ue) | [scripts/render_oai_ue_gitops.sh](../scripts/render_oai_ue_gitops.sh) |
+| nrUE (edge `usrp`) | ina-infra profiles / [scripts/render_oai_slice_deployment_gitops.sh](../scripts/render_oai_slice_deployment_gitops.sh) |
 | Multus CNI | [scripts/render_multus_gitops.sh](../scripts/render_multus_gitops.sh) |
 | PFCP reconcile (central) | [scripts/reconcile_oai_pfcp.sh](../scripts/reconcile_oai_pfcp.sh) |
 | Push to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](../bringup/03_push_to_git_repos/push_git_repos.sh) |
 
-**Executor pattern:** RAN workloads (CU-CP, DU, CU-UP) use static executor manifests in git (Deployment, ConfigMap, NADs) because Config Sync prunes operator-created pods. Core NFs on central are reconciled by OAI CN operators from `NFDeployment` CRs. The **nrUE** on ue is a static Deployment (no operator).
-
-## UE sim (ue cluster)
-
-OAI **nrUE** in namespace **`oai-ue`** on the **ue** cluster. One macvlan NAD (`ue-sim-rf`, interface `rf`) at **`10.1.139.160`**. RFsim client targets edge DU at **`10.1.139.113:4043`** (same host as DU F1, rfsim server port).
-
-| Item | Value |
-|------|-------|
-| Namespace | `oai-ue` |
-| Deployment | `oai-ue` |
-| Macvlan IP | `10.1.139.160` (base `+0`) |
-| RFsim target | `10.1.139.113:4043` (edge DU) |
-| IMSI | `001010000000100` |
-| DNN / slice | `internet` · SST `1` · SD `ffffff` |
-| RF params | `-C 3609120000 -r 51 --numerology 1 --ssb 234 --band 78` |
-| PDU IPv4 pool | `10.1.0.0/24` (assigned by SMF/UPF, e.g. `10.1.0.2`) |
-
-**Prerequisites:** Multus on ue; edge DU running with rfsim; central 5GC + PFCP association; subscriber `001010000000100` in central MySQL.
-
-```bash
-./scripts/render_multus_gitops.sh ue
-./scripts/render_oai_ue_gitops.sh ue
-./bringup/03_push_to_git_repos/push_git_repos.sh ue
-
-# After central core + edge RAN are up:
-./scripts/reconcile_oai_pfcp.sh central-0
-ssh ue-0 kubectl rollout restart deployment/oai-ue -n oai-ue
-```
+**Executor pattern:** RAN workloads (CU-CP, DU, CU-UP, nrUE) use static executor manifests in git (Deployment, ConfigMap, NADs) because Config Sync prunes operator-created pods. Core NFs on central are reconciled by OAI CN operators from `NFDeployment` CRs. The dedicated **ue** Kubernetes cluster is removed; nrUEs run on **edge `usrp`**.
 
 ## PFCP (SMF ↔ UPF)
 

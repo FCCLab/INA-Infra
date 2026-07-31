@@ -21,7 +21,7 @@ NEPHIO_CRD_MANIFESTS=(
   workload.nephio.org_nfdeployments.yaml
   workload.nephio.org_nfconfigs.yaml
 )
-# DU + simulated RU (rfsim) at edge; extend to ue when needed.
+# DU + simulated RU (rfsim) at edge.
 DU_CLUSTERS=(edge)
 # Regional CU-CP F1-C on shared vpc-cudu-f1 L2.
 CUCP_CLUSTER="${CUCP_CLUSTER:-regional}"
@@ -29,7 +29,6 @@ CUCP_F1C_IP="${CUCP_F1C_IP:-$(oai_macvlan_ip regional 1)}"
 CUCP_F1C_GW="${CUCP_F1C_GW:-$OAI_MACVLAN_GW}"
 declare -A DU_F1_IP=(
   [edge]="$(oai_macvlan_ip edge 3)"
-  [ue]="$(oai_macvlan_ip ue 6)"
 )
 
 fetch_operator_manifests() {

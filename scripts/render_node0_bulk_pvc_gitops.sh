@@ -21,7 +21,7 @@ BULK_IMAGE="${BULK_IMAGE:-registry.k8s.io/pause:3.9}"
 if [[ $# -gt 0 ]]; then
   CLUSTERS=("$@")
 else
-  CLUSTERS=(central regional edge ue)
+  CLUSTERS=(central regional edge)
 fi
 
 usage() {
@@ -30,14 +30,14 @@ Usage: $0 [cluster ...]
 
 Write PVC + binder Deployment for node-0 bulk storage (2T local-path disk).
 
-Defaults: clusters = central regional edge ue
+Defaults: clusters = central regional edge
   BULK_NS            namespace (default: local-bulk)
   BULK_PVC_NAME      PVC name (default: node0-bulk)
   BULK_SIZE          request size (default: 1800Gi)
   BULK_STORAGE_CLASS StorageClass (default: local-path)
 
 Push with:
-  ./bringup/03_push_to_git_repos/push_git_repos.sh -m 'node0 bulk PVC' central regional edge ue
+  ./bringup/03_push_to_git_repos/push_git_repos.sh -m 'node0 bulk PVC' central regional edge
 EOF
   exit "${1:-0}"
 }

@@ -34,7 +34,7 @@ usage() {
 Usage: $(basename "$0") [options] [cluster ...]
 
 For each repos/<cluster-repo>/ submodule: pull from Gitea, push Gitea, mirror GitHub.
-Default (no args): mgmt, central, regional, edge, ue.
+Default (no args): mgmt, central, regional, edge.
 
 Clone parent from GitHub, then on the testbed run:
   ./scripts/setup_lab_git_remotes.sh
@@ -63,8 +63,8 @@ EOF
 validate_cluster() {
   local cluster="$1"
   case "$cluster" in
-    mgmt|central|regional|edge|ue) return 0 ;;
-    *) die "unknown cluster '${cluster}' (expected mgmt, central, regional, edge, or ue)" ;;
+    mgmt|central|regional|edge) return 0 ;;
+    *) die "unknown cluster '${cluster}' (expected mgmt, central, regional, edge)" ;;
   esac
 }
 

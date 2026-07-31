@@ -17,14 +17,14 @@ After cloning FCCLab/INA-Infra from GitHub, run on the testbed to add Gitea remo
   origin → GitHub (FCCLab/INA-Infra-*)
   gitea  → lab Gitea (nephio/*, Config Sync source)
 
-Default (no args): mgmt central regional edge ue
+Default (no args): mgmt central regional edge
 EOF
 }
 
 validate_cluster() {
   local cluster="$1"
   case "$cluster" in
-    mgmt|central|regional|edge|ue) return 0 ;;
+    mgmt|central|regional|edge) return 0 ;;
     *) echo "error: unknown cluster '${cluster}'" >&2; exit 1 ;;
   esac
 }
@@ -69,7 +69,7 @@ setup_cluster_repo() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    mgmt|central|regional|edge|ue) break ;;
+    mgmt|central|regional|edge) break ;;
     *) echo "error: unknown arg: $1" >&2; usage >&2; exit 1 ;;
   esac
 done

@@ -1,20 +1,18 @@
 # Minimal helpers for ina-infra backend scripts (no monorepo cluster_lib).
 # Sourced by scripts in this directory. Do not source from outside ina-infra.
 
-ALL_CLUSTERS=(central regional edge ue)
+ALL_CLUSTERS=(central regional edge)
 
 MGMT_API_IP="${MGMT_API_IP:-10.1.132.200}"
 declare -A CLUSTER_MGMT_IP=(
   [central]=10.1.132.210
   [regional]=10.1.132.220
   [edge]=10.1.132.230
-  [ue]=10.1.132.240
 )
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [central]=10.1.138.101
   [regional]=10.1.138.126
   [edge]=10.1.138.151
-  [ue]=10.1.138.176
 )
 MGMT_OPENSPEEDTEST_VIP="${MGMT_OPENSPEEDTEST_VIP:-10.1.132.11}"
 

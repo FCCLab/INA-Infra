@@ -23,7 +23,7 @@ Remove <node> from <cluster>:
 
 <node> must be reachable via SSH (utils/ssh_config/config).
 
-Clusters: central, regional, edge, ue
+Clusters: central, regional, edge
 
 Examples:
   $(basename "$0") edge gh81

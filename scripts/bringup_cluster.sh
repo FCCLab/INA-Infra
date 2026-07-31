@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap kubeadm clusters on central, regional, edge, and ue (control plane + worker each).
+# Bootstrap kubeadm clusters on central, regional, and edge (control plane + worker each).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,12 +35,12 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--join] [cluster ...]
 
-Bring up Kubernetes on mgmt and/or workload clusters (central, regional, edge, ue).
+Bring up Kubernetes on mgmt and/or workload clusters (central, regional, edge).
 Mgmt uses 10.1.132/24 only (${MGMT_CP_HOST} ${MGMT_API_IP}). Workload sites use site
 netplan (10.1.137/24), kubeadm on site IPs, Flannel on ${SITE_IFACE}. SSH on all nodes
 stays on 10.1.132/24 (enp1s0).
 
-With no arguments, brings up all four workload clusters (central, regional, edge, ue).
+With no arguments, brings up all three workload clusters (central, regional, edge).
 
 Options:
   --join    Join worker node(s) only (control plane must already be running)
@@ -58,7 +58,6 @@ Clusters (SSH / cluster API / dashboard):
   central    ${CLUSTER_CP_HOST[central]} ${CLUSTER_MGMT_IP[central]} / ${CLUSTER_API_IP[central]}  dashboard NodePort :30443
   regional   ${CLUSTER_CP_HOST[regional]} ${CLUSTER_MGMT_IP[regional]} / ${CLUSTER_API_IP[regional]}  dashboard NodePort :30443
   edge       ${CLUSTER_CP_HOST[edge]} ${CLUSTER_MGMT_IP[edge]} / ${CLUSTER_API_IP[edge]}  dashboard NodePort :30443
-  ue         ${CLUSTER_CP_HOST[ue]} ${CLUSTER_MGMT_IP[ue]} / ${CLUSTER_API_IP[ue]}  dashboard NodePort :30443
 
 Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
@@ -363,7 +362,7 @@ for file in "\$HOME/.bashrc" "\$HOME/.zshrc"; do
   if [[ -f "\$file" ]]; then
     if ! grep -q "KUBECONFIG" "\$file"; then
       echo "" >> "\$file"
-      echo 'export KUBECONFIG="\${HOME}/.kube/config:\${HOME}/.kube/config-central:\${HOME}/.kube/config-regional:\${HOME}/.kube/config-edge:\${HOME}/.kube/config-ue"' >> "\$file"
+      echo 'export KUBECONFIG="\${HOME}/.kube/config:\${HOME}/.kube/config-central:\${HOME}/.kube/config-regional:\${HOME}/.kube/config-edge"' >> "\$file"
       echo "    added KUBECONFIG to \$file"
     fi
   fi
@@ -798,7 +797,7 @@ EOF
 }
 
 ensure_kubeconfig_profile_export() {
-  local kcfg_export='export KUBECONFIG="${HOME}/.kube/config:${HOME}/.kube/config-central:${HOME}/.kube/config-regional:${HOME}/.kube/config-edge:${HOME}/.kube/config-ue"'
+  local kcfg_export='export KUBECONFIG="${HOME}/.kube/config:${HOME}/.kube/config-central:${HOME}/.kube/config-regional:${HOME}/.kube/config-edge"'
   local file
   for file in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
     if [[ -f "$file" ]]; then
@@ -1121,7 +1120,7 @@ else
       mgmt) ;;
       *)
         if [[ -z "${CLUSTER_CP_HOST[$c]:-}" ]]; then
-          echo "error: unknown cluster '${c}' (expected mgmt, central, regional, edge, or ue)" >&2
+          echo "error: unknown cluster '${c}' (expected mgmt, central, regional, edge)" >&2
           exit 1
         fi
         ;;

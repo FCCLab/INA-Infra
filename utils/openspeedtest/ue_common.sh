@@ -5,7 +5,7 @@
 : "${SCRIPT_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
-UE_HOST="${UE_HOST:-ue-0}"
+UE_HOST="${UE_HOST:-usrp}"
 OST_SERVER="${OST_SERVER:-http://10.1.132.11/}"
 OST_HOST="${OST_HOST:-${OST_SERVER#http://}}"
 OST_HOST="${OST_HOST#https://}"

@@ -37,7 +37,7 @@ Targets:
   oai-smf       ${SMF_REL}
   oai-cn5g-fed  ${FED_REL} (includes oai-smf gitlink refresh when oai-smf selected)
   oai-slice     ${SLICE_REL}
-  gitops        repos/mgmt … repos/ue-repo
+  gitops        repos/mgmt … repos/edge-repo
   parent        FCCLab/INA-Infra (submodule gitlinks + repo root)
 
 Options:

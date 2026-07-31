@@ -46,7 +46,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
 | `.130`–`.131` | `edge-0`, `edge-1` | K8s VMs |
 | `.132`–`.134` | `edge-2`, `edge-3`, `usrp` | Physical edge workers |
-| `.140`–`.141` | `ue-0`, `ue-1` | K8s VMs |
+| `.140`–`.141` | *(retired ue cluster)* | formerly `ue-0`/`ue-1` |
 | **`.150`–`.159`** | **GPU bare-metal workers** | `GPU_WORKER_IP_FIRST` … `LAST` |
 | `.150` | — | Spare |
 | `.151` | `gh81` | edge cluster, GH200 arm64 |
@@ -66,7 +66,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.210`–`.211` | `central-0`, `central-1` | |
 | `.220`–`.221` | `regional-0`, `regional-1` | |
 | `.230`–`.231` | `edge-0`, `edge-1` | |
-| `.240`–`.241` | `ue-0`, `ue-1` | |
+| `.240`–`.241` | *(retired ue cluster)* | |
 
 Bare-metal **SSH is mgmt/WAN only** (`.101.x` or off-LAN addresses below). Site `.137` is kubelet/node-ip only — do not use for SSH.
 
@@ -87,10 +87,9 @@ Deploy via `./scripts/render_metallb_gitops.sh`; remove imperative installs with
 | mgmt | `mgmt-pool` | `10.1.132.10`–`10.1.132.99` | `enp1s0` |
 | central | `site-pool` | `10.1.138.100`–`10.1.138.124` | `enp7s0` |
 | regional | `site-pool` | `10.1.138.125`–`10.1.138.149` | `enp7s0` |
-| edge | `site-pool` | `10.1.138.150`–`10.1.138.174` | `enp7s0` |
-| ue | `site-pool` | `10.1.138.175`–`10.1.138.199` | `enp7s0` |
+| edge | `site-pool` | `10.1.138.150`–`10.1.138.199` | `enp7s0` |
 
-Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per cluster). Per slice: 1st reserved, 2nd = OpenSpeedTest. VMs also hold a host `.138` address matching their `.137` node IP (e.g. `central-0` → `.138.110`).
+Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. Per slice: 1st reserved, 2nd = OpenSpeedTest. VMs also hold a host `.138` address matching their `.137` node IP (e.g. `central-0` → `.138.110`).
 
 ### Mgmt MetalLB VIPs (`10.1.132.0/24`)
 
@@ -109,7 +108,6 @@ Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`** (25 IPs per clu
 | 10.1.138.101 | central | OpenSpeedTest | 80 | [http://10.1.138.101](http://10.1.138.101) | `openspeedtest-central.nephio.lab` |
 | 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
 | 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
-| 10.1.138.176 | ue | OpenSpeedTest | 80 | [http://10.1.138.176](http://10.1.138.176) | `openspeedtest-ue.nephio.lab` |
 
 OAI 5GC CP on **central**; co-located **UPF + CU-UP** per slice (1→central, 2→regional, 3–5→edge); **CU-CP + DU + 5 nrUEs** on **edge `usrp`** — namespace `oai-slice-deployment`, macvlan **`10.1.139.0/24`** ([oai.md](oai.md)). Render: `./scripts/render_oai_slice_deployment_gitops.sh`.
 
@@ -123,7 +121,6 @@ Dashboard uses **NodePort 30443** on the control-plane **mgmt** IP (`10.1.132.x`
 | NodePort | central | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.210:30443](https://10.1.132.210:30443) | — |
 | NodePort | regional | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.220:30443](https://10.1.132.220:30443) | — |
 | NodePort | edge | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.230:30443](https://10.1.132.230:30443) | — |
-| NodePort | ue | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.240:30443](https://10.1.132.240:30443) | — |
 | ClusterIP | central | OAI NRF / UDR | 80/tcp (SBI) | `oai-nrf.oai-cn.svc` / `oai-udr.oai-cn.svc` | — |
 
 Port-forward fallback (`:8443` on mgmt IP): [scripts/kubectl_forward.sh](../scripts/kubectl_forward.sh). Login token: [scripts/get_dashboard_key.sh](../scripts/get_dashboard_key.sh). GitOps: [scripts/render_dashboard_gitops.sh](../scripts/render_dashboard_gitops.sh).
@@ -148,8 +145,6 @@ Port-forward fallback (`:8443` on mgmt IP): [scripts/kubectl_forward.sh](../scri
 | regional | `regional-1` | 10.1.132.221 | 10.1.137.121 | 10.1.138.121 | — |
 | edge | `edge-0` | 10.1.132.230 | 10.1.137.130 | 10.1.138.130 | [https://10.1.137.130:6443](https://10.1.137.130:6443) |
 | edge | `edge-1` | 10.1.132.231 | 10.1.137.131 | 10.1.138.131 | — |
-| ue | `ue-0` | 10.1.132.240 | 10.1.137.140 | 10.1.138.140 | [https://10.1.137.140:6443](https://10.1.137.140:6443) |
-| ue | `ue-1` | 10.1.132.241 | 10.1.137.141 | 10.1.138.141 | — |
 
 ### Physical / external workers
 

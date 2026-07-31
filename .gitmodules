@@ -18,10 +18,6 @@
 	path = repos/edge-repo
 	url = https://github.com/FCCLab/INA-Infra-edge-repo.git
 	branch = main
-[submodule "repos/ue-repo"]
-	path = repos/ue-repo
-	url = https://github.com/FCCLab/INA-Infra-ue-repo.git
-	branch = main
 [submodule "ina-infra/frontend/neuroran-ui-ux"]
 	path = ina-infra/frontend/neuroran-ui-ux
 	url = https://github.com/FCCLab/neuroran-ui-ux.git

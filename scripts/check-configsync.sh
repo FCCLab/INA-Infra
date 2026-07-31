@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Report Config Sync operator health and RootSync/RepoSync progress.
 #
-#   ./scripts/check-configsync.sh                    # mgmt + central, regional, edge, ue
+#   ./scripts/check-configsync.sh                    # mgmt + central, regional, edge
 #   ./scripts/check-configsync.sh central regional
 #   ./scripts/check-configsync.sh -c central@central -n central-repo
 # Workload clusters: uses SSH to control plane when local context is unavailable (132→137).
@@ -36,7 +36,7 @@ Usage: $(basename "$0") [options] [cluster ...]
 
 Show Config Sync operator status and git sync progress.
 
-Default (no args): mgmt, central, regional, edge, ue.
+Default (no args): mgmt, central, regional, edge.
 
 Options:
   -c CONTEXT     kubectl context (single-target mode; default per cluster: {name}@{name})
@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -v) VERBOSE=1; shift ;;
     -h) usage; exit 0 ;;
-    mgmt|central|regional|edge|ue)
+    mgmt|central|regional|edge)
       cluster_args+=("$1")
       shift
       ;;
@@ -108,7 +108,7 @@ resolve_ssh_cluster() {
   USE_SSH=0
   SSH_CLUSTER=""
   case "$cluster" in
-    central|regional|edge|ue)
+    central|regional|edge)
       if ! kubectl config get-contexts "$ctx" >/dev/null 2>&1 \
         || ! kubectl --context="$ctx" get ns kube-system --request-timeout=5s >/dev/null 2>&1; then
         USE_SSH=1

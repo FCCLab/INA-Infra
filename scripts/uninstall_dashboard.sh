@@ -15,7 +15,7 @@ usage() {
 Usage: $(basename "$0") [cluster ...]
 
 Uninstall Kubernetes Dashboard Helm release, LoadBalancer Service, and namespace.
-With no arguments, targets mgmt, central, regional, edge, and ue.
+With no arguments, targets mgmt, central, regional, edge.
 
 Examples:
   $(basename "$0")

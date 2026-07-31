@@ -22,7 +22,7 @@ usage() {
 Usage: $(basename "$0") [options] [cluster ...]
 
 Print bearer tokens for the Kubernetes Dashboard on each cluster.
-With no cluster arguments, prints tokens for mgmt, central, regional, edge, and ue.
+With no cluster arguments, prints tokens for mgmt, central, regional, edge.
 
 Workload clusters use SSH to the control plane (API is on 10.1.137.x, not
 reachable from the operator network on 10.1.132.x).
@@ -163,7 +163,7 @@ else
       mgmt) ;;
       *)
         if [[ -z "${CLUSTER_CP_HOST[$cluster]:-}" ]]; then
-          echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge, or ue)" >&2
+          echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge)" >&2
           exit 1
         fi
         ;;

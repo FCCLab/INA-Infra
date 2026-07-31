@@ -17,7 +17,7 @@ ALL_HOSTS=(
   central-0 central-1
   regional-0 regional-1
   edge-0 edge-1
-  ue-0 ue-1
+
 )
 
 cleanup() {
@@ -39,14 +39,14 @@ Install your SSH public key on mgmt and workload nodes for passwordless login.
   status   Test BatchMode SSH to each host
 
 With no host arguments, targets all nodes:
-  mgmt-0 mgmt-1 central-{0,1} regional-{0,1} edge-{0,1} ue-{0,1}
+  mgmt-0 mgmt-1 central-{0,1} regional-{0,1} edge-{0,1}
 
 Examples:
   $(basename "$0") -y
   $(basename "$0") copy mgmt central
   $(basename "$0") status edge-0
 
-Clusters: mgmt, central, regional, edge, ue
+Clusters: mgmt, central, regional, edge
 
 Environment:
   SSH_CONFIG     SSH config (default: utils/ssh_config/config)
@@ -77,7 +77,7 @@ resolve_hosts() {
   local arg hosts=() host
   for arg in "$@"; do
     case "$arg" in
-      mgmt|central|regional|edge|ue)
+      mgmt|central|regional|edge)
         while IFS= read -r host; do
           hosts+=("$host")
         done < <(hosts_for_cluster "$arg")

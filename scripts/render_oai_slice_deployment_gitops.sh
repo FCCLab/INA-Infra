@@ -622,9 +622,7 @@ if retire_old == "1":
     for rel in (
         "regional-repo/namespaces/oai-ran-nephio-example-split-deploy",
         "edge-repo/namespaces/oai-ran-nephio-example-split-deploy",
-        "ue-repo/namespaces/oai-ran-nephio-example-split-deploy",
         "edge-repo/namespaces/oai-nws-1ue",
-        "ue-repo/namespaces/oai-nws-1ue",
     ):
         purge_dir(repos / rel)
     # Fix regional/edge ClusterRoleBinding subject ns if present

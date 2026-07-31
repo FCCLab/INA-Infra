@@ -24,7 +24,6 @@ CLUSTER_PROBE_HOST: Dict[str, str] = {
     "central": "central-0",
     "regional": "regional-0",
     "edge": "edge-0",
-    "ue": "ue-0",
 }
 
 _lock = threading.Lock()
@@ -200,7 +199,6 @@ def label_cluster_nodes_multus_master(
         "central": ["central-0", "central-1"],
         "regional": ["regional-0", "regional-1"],
         "edge": ["edge-0", "edge-1", "edge-2", "usrp"],
-        "ue": ["ue-0", "ue-1"],
     }
     targets = nodes if nodes is not None else defaults.get(cluster, [CLUSTER_PROBE_HOST.get(cluster, cluster)])
     # Prefer kube context name like edge@edge
@@ -210,7 +208,6 @@ def label_cluster_nodes_multus_master(
             "central": "central@central",
             "regional": "regional@regional",
             "edge": "edge@edge",
-            "ue": "ue@ue",
         }.get(cluster)
 
     out: Dict[str, str] = {}

@@ -4,7 +4,7 @@ description: >-
   Deploys or updates services on the Nephio multi-cluster testbed via Config Sync
   GitOps (render → repos/ → Gitea → RootSync). Use when the user asks to deploy,
   add, update, or roll out a service, workload, app, operator, OAI NF, Prometheus,
-  MetalLB, Multus, dashboard, or any GitOps manifest to mgmt/central/regional/edge/ue.
+  MetalLB, Multus, dashboard, or any GitOps manifest to mgmt/central/regional/edge.
 ---
 
 # Deploy GitOps Service
@@ -35,7 +35,6 @@ Deploy progress:
 | central | `repos/central-repo/` | Gitea `nephio/central-repo` · GitHub `FCCLab/INA-Infra-central-repo` | `central@central` |
 | regional | `repos/regional-repo/` | Gitea `nephio/regional-repo` · GitHub `FCCLab/INA-Infra-regional-repo` | `regional@regional` |
 | edge | `repos/edge-repo/` | Gitea `nephio/edge-repo` · GitHub `FCCLab/INA-Infra-edge-repo` | `edge@edge` |
-| ue | `repos/ue-repo/` | Gitea `nephio/ue-repo` · GitHub `FCCLab/INA-Infra-ue-repo` | `ue@ue` |
 
 `repos/*` are Gitea submodules (`.gitmodules`). Init: `git submodule update --init --recursive`.
 
@@ -54,7 +53,6 @@ repos/<name>/
 - OAI core / operators: **central** only
 - Slice UPF+CU-UP: slice1→central, slice2→regional, slices 3–5→edge
 - CU-CP, DU, UEs, FlexRIC: **edge** (UEs on `usrp`)
-- Prefer `ue` cluster only when the user explicitly wants something there
 
 IPs / VIPs: `scripts/cluster_lib.sh`, `docs/ip_plan.md`, `docs/oai.md`.
 
@@ -88,14 +86,14 @@ Respect order when stacking platform + OAI (see [reference.md](reference.md)).
 # optional: -m "message" | -p pull-only | -n dry-run
 ```
 
-Pulls each Gitea submodule first, then commits and pushes (never pushes before a successful pull/merge). Default with no args: all of mgmt, central, regional, edge, ue.
+Pulls each Gitea submodule first, then commits and pushes (never pushes before a successful pull/merge). Default with no args: all of mgmt, central, regional, edge.
 
 Gitea lab: `http://10.1.132.200:3000` (`nephio` / `secret`).
 
 ## Step 5 — Verify sync
 
 ```bash
-export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge:~/.kube/config-ue
+export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge
 ./scripts/check-configsync.sh [cluster ...]
 # optional watch: ./scripts/check-configsync.sh -w 15
 ```

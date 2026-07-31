@@ -22,25 +22,29 @@ fetch_manifest() {
 
 write_cluster_flannel() {
   local cluster="$1"
-  local repo_name src iface_flag dest_cluster dest_ns
+  local repo_name src iface_flag reach_ip dest_cluster dest_ns
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   src="$2"
+  reach_ip=""
   if [[ "$cluster" == "mgmt" ]]; then
     iface_flag=""
   else
     iface_flag="$FLANNEL_IFACE_REGEX"
+    # Prefer the NIC that can reach this cluster's site-plane CP (kube InternalIP).
+    reach_ip="$(cluster_k8s_node_ip "$(cluster_cp_host "$cluster")")"
   fi
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
   dest_ns="${REPOS_DIR}/${repo_name}/namespaces/kube-flannel"
   mkdir -p "$dest_cluster" "$dest_ns"
 
-  python3 - "$src" "$dest_cluster" "$dest_ns" "$iface_flag" <<'PY'
+  python3 - "$src" "$dest_cluster" "$dest_ns" "$iface_flag" "$reach_ip" <<'PY'
+import shlex
 import sys
 from pathlib import Path
 
 import yaml
 
-src, dest_cluster, dest_ns, iface_regex = sys.argv[1:5]
+src, dest_cluster, dest_ns, iface_regex, reach_ip = sys.argv[1:6]
 docs = list(yaml.safe_load_all(Path(src).read_text()))
 cluster_docs = []
 ns_docs = []
@@ -52,11 +56,42 @@ for doc in docs:
     if kind in ("ClusterRole", "ClusterRoleBinding"):
         cluster_docs.append(doc)
         continue
-    if kind == "DaemonSet" and iface_regex:
-        args = doc["spec"]["template"]["spec"]["containers"][0].setdefault("args", [])
-        # Drop legacy single --iface=… so regex wins on mixed NIC fleets.
-        args[:] = [a for a in args if not a.startswith("--iface=") and not a.startswith("--iface-regex=")]
-        args.append(f"--iface-regex={iface_regex}")
+    if kind == "DaemonSet":
+        c0 = doc["spec"]["template"]["spec"]["containers"][0]
+        args = list(c0.get("args") or [])
+        # Drop iface / public-ip flags; we rebuild them below.
+        args = [
+            a
+            for a in args
+            if not a.startswith("--iface=")
+            and not a.startswith("--iface-regex=")
+            and not a.startswith("--iface-can-reach=")
+            and not a.startswith("--public-ip=")
+        ]
+        if iface_regex:
+            args.append(f"--iface-regex={iface_regex}")
+        if reach_ip:
+            # Prefer site-plane NIC even when default route is on mgmt/wifi.
+            args.append(f"--iface-can-reach={reach_ip}")
+        env = c0.setdefault("env", [])
+        env = [e for e in env if e.get("name") != "NODE_IP"]
+        env.append(
+            {
+                "name": "NODE_IP",
+                "valueFrom": {
+                    "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "status.hostIP",
+                    }
+                },
+            }
+        )
+        c0["env"] = env
+        # Force VXLAN public IP = kubelet InternalIP. Needed when the selected
+        # NIC has multiple addresses (edge-3: 10.5.5.1 before 10.1.137.133).
+        quoted = " ".join(shlex.quote(a) for a in (["/opt/bin/flanneld"] + args))
+        c0["command"] = ["/bin/sh", "-c"]
+        c0["args"] = [f'exec {quoted} --public-ip="${{NODE_IP}}"']
     ns_docs.append(doc)
 
 def write_docs(docs, directory, prefix):
@@ -74,6 +109,9 @@ print(f"  cluster: {len(cluster_docs)} resources")
 print(f"  namespaces/kube-flannel: {len(ns_docs)} resources")
 if iface_regex:
     print(f"  daemonset: --iface-regex={iface_regex}")
+if reach_ip:
+    print(f"  daemonset: --iface-can-reach={reach_ip}")
+print("  daemonset: --public-ip=${NODE_IP} (status.hostIP)")
 PY
 
   echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (Flannel CNI)"
@@ -110,10 +148,13 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 Usage: $(basename "$0") [cluster ...]
 
 Write Flannel manifests to repos/<gitea-repo>/ for Config Sync.
-Default: mgmt, central, regional, edge, ue.
+Default: mgmt, central, regional, edge.
 
-Workload clusters patch kube-flannel-ds with --iface-regex=${FLANNEL_IFACE_REGEX}.
-Mgmt uses upstream defaults (operator network).
+Workload clusters: --iface-regex=${FLANNEL_IFACE_REGEX}, --iface-can-reach=<site CP>,
+and --public-ip=\${NODE_IP} from status.hostIP (kube InternalIP) so multi-address
+NICs (e.g. edge-3) do not advertise the wrong VTEP IP.
+
+Mgmt: same hostIP public-ip; no site iface-regex.
 
 Source: ${FLANNEL_MANIFEST}
 EOF

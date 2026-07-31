@@ -21,7 +21,7 @@ Install kubelet/kubeadm/kubectl on <node> and join it to <cluster>'s control pla
 <node> must already be reachable via SSH (see wl_setup_ssh_mgmt_ip.sh) with netplan applied.
 After join, configures Docker + containerd to trust the lab registry (self-signed TLS).
 
-Clusters: central, regional, edge, ue
+Clusters: central, regional, edge
 
 Examples:
   $(basename "$0") edge gh81

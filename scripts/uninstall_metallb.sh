@@ -15,7 +15,7 @@ usage() {
 Usage: $(basename "$0") [cluster ...]
 
 Uninstall MetalLB Helm release, IPAddressPool, and metallb-system namespace.
-With no arguments, targets mgmt, central, regional, edge, and ue.
+With no arguments, targets mgmt, central, regional, edge.
 
 MetalLB LoadBalancer VIPs will stop working until redeployed via GitOps.
 

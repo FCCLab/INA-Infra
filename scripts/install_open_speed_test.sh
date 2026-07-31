@@ -15,14 +15,13 @@ usage() {
 Usage: $(basename "$0") [options] [cluster ...]
 
 Install or uninstall OpenSpeedTest on cluster control planes with LoadBalancer VIPs.
-With no cluster arguments, targets mgmt, central, regional, edge, and ue.
+With no cluster arguments, targets mgmt, central, regional, edge.
 
 OpenSpeedTest URLs (http):
   mgmt      $(openspeedtest_vip mgmt)
   central   $(openspeedtest_vip central)
   regional  $(openspeedtest_vip regional)
   edge      $(openspeedtest_vip edge)
-  ue        $(openspeedtest_vip ue)
 
 LoadBalancer VIPs require MetalLB (deploy via GitOps).
 
@@ -196,7 +195,7 @@ validate_cluster() {
     mgmt) return 0 ;;
     *)
       if [[ -z "${CLUSTER_CP_HOST[$cluster]:-}" ]]; then
-        echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge, or ue)" >&2
+        echo "error: unknown cluster '${cluster}' (expected mgmt, central, regional, edge)" >&2
         return 1
       fi
       ;;

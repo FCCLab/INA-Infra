@@ -14,8 +14,8 @@ SSH_USER="${SSH_USER:-fcp}"
 
 # Workers before control planes; mgmt worker before mgmt CP.
 ALL_K8S_HOSTS=(
-  central-1 regional-1 edge-1 ue-1
-  central-0 regional-0 edge-0 ue-0
+  central-1 regional-1 edge-1
+  central-0 regional-0 edge-0
   mgmt-1 mgmt-0
 )
 
@@ -34,7 +34,7 @@ Examples:
   $(basename "$0") -y central          # central-1 then central-0
   $(basename "$0") -y central-0        # single host
 
-Clusters: mgmt, central, regional, edge, ue
+Clusters: mgmt, central, regional, edge
 
 Environment:
   SSH_CONFIG              SSH config (default: utils/ssh_config/config)
@@ -95,7 +95,7 @@ resolve_hosts() {
   local arg hosts=() host
   for arg in "$@"; do
     case "$arg" in
-      mgmt|central|regional|edge|ue)
+      mgmt|central|regional|edge)
         while IFS= read -r host; do
           hosts+=("$host")
         done < <(hosts_for_cluster "$arg")

@@ -16,7 +16,7 @@ ALL_HOSTS=(
   central-0 central-1
   regional-0 regional-1
   edge-0 edge-1
-  ue-0 ue-1
+
 )
 
 MGMT_ONLY_HOSTS=(mgmt-0 mgmt-1)

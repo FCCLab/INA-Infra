@@ -43,7 +43,6 @@ CLUSTER_TO_REPO = {
     "regional": "regional-repo",
     "edge": "edge-repo",
     "mgmt": "mgmt",
-    "ue": "ue-repo",
 }
 
 def _repo_root() -> Path:

@@ -174,13 +174,12 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 Usage: $(basename "$0") [cluster ...]
 
 Write MetalLB controller + site IPAddressPool to repos/<gitea-repo>/.
-Default: mgmt, central, regional, edge, ue.
+Default: mgmt, central, regional, edge.
 
 Workload site pool: ${CLUSTER_METALLB_SITE_POOL} (enp7s0), split per cluster:
   central  ${CLUSTER_METALLB_SITE_POOL_SLICE[central]}
   regional ${CLUSTER_METALLB_SITE_POOL_SLICE[regional]}
   edge     ${CLUSTER_METALLB_SITE_POOL_SLICE[edge]}
-  ue       ${CLUSTER_METALLB_SITE_POOL_SLICE[ue]}
 
 Environment:
   METALLB_VERSION       MetalLB release tag (default: v0.14.8)

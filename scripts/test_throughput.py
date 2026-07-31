@@ -989,7 +989,7 @@ def open_tmux(
     if _tmux_session_alive(session):
         print(f"Killing existing tmux session {session}")
         subprocess.run(["tmux", "kill-session", "-t", session], check=False)
-        clear_iperf_ue(edge, ue_ns, targets, ssh_config=ssh_config, quiet=True)
+        clear_iperf_ue(edge_ns, targets, ssh_config=ssh_config, quiet=True)
         clear_iperf_servers(upf_ns, targets, ssh_config=ssh_config, quiet=True)
 
     reverse = direction == "DL"
@@ -1064,7 +1064,7 @@ def open_tmux(
         signal.signal(signal.SIGTERM, prev_term)
         if _tmux_session_alive(session):
             subprocess.run(["tmux", "kill-session", "-t", session], check=False)
-        clear_iperf_ue(edge, ue_ns, targets, ssh_config=ssh_config, quiet=False)
+        clear_iperf_ue(edge_ns, targets, ssh_config=ssh_config, quiet=False)
         clear_iperf_servers(upf_ns, targets, ssh_config=ssh_config, quiet=False)
     return rc
 

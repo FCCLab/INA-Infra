@@ -1,5 +1,5 @@
 # Shared workload-cluster definitions (sourced by bringup/install scripts).
-ALL_CLUSTERS=(central regional edge ue)
+ALL_CLUSTERS=(central regional edge)
 
 SITE_IFACE="${SITE_IFACE:-enp7s0}"
 MGMT_IFACE="${MGMT_IFACE:-enp1s0}"
@@ -10,52 +10,44 @@ declare -A CLUSTER_CP_HOST=(
   [central]=central-0
   [regional]=regional-0
   [edge]=edge-0
-  [ue]=ue-0
 )
 declare -A CLUSTER_WORKER_HOST=(
   [central]=central-1
   [regional]=regional-1
   [edge]=edge-1
-  [ue]=ue-1
 )
 # SSH / operator access (enp1s0, 10.1.132.0/24)
 declare -A CLUSTER_MGMT_IP=(
   [central]=10.1.132.210
   [regional]=10.1.132.220
   [edge]=10.1.132.230
-  [ue]=10.1.132.240
 )
 declare -A CLUSTER_MGMT_WORKER_IP=(
   [central]=10.1.132.211
   [regional]=10.1.132.221
   [edge]=10.1.132.231
-  [ue]=10.1.132.241
 )
 # Kubernetes API and node identity (enp7s0, 10.1.137.0/24)
 declare -A CLUSTER_API_IP=(
   [central]=10.1.137.110
   [regional]=10.1.137.120
   [edge]=10.1.137.130
-  [ue]=10.1.137.140
 )
 declare -A CLUSTER_WORKER_IP=(
   [central]=10.1.137.111
   [regional]=10.1.137.121
   [edge]=10.1.137.131
-  [ue]=10.1.137.141
 )
 # Legacy: first IP in each .138 slice; workload dashboard uses NodePort, not MetalLB.
 declare -A CLUSTER_DASHBOARD_VIP=(
   [central]=10.1.138.100
   [regional]=10.1.138.125
   [edge]=10.1.138.150
-  [ue]=10.1.138.175
 )
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [central]=10.1.138.101
   [regional]=10.1.138.126
   [edge]=10.1.138.151
-  [ue]=10.1.138.176
 )
 # OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
@@ -64,27 +56,23 @@ declare -A OAI_MACVLAN_BASE=(
   [central]=10
   [regional]=60
   [edge]=110
-  [ue]=160
 )
 # Legacy names: AMF N2 / CU-CP N2 / UPF N3 on macvlan .139 (not MetalLB .138).
 declare -A CLUSTER_AMF_N2_VIP=(
   [central]=10.1.139.10
   [regional]=10.1.139.60
   [edge]=10.1.139.110
-  [ue]=10.1.139.160
 )
 declare -A CLUSTER_UPF_N3_VIP=(
   [central]=10.1.139.11
   [regional]=10.1.139.61
   [edge]=10.1.139.111
-  [ue]=10.1.139.161
 )
 # Nephio PackageVariantSet / WorkloadCluster label (nephio.org/site-type)
 declare -A CLUSTER_SITE_TYPE=(
   [central]=core
   [regional]=regional
   [edge]=edge
-  [ue]=ue
 )
 
 MGMT_METALLB_POOL="${MGMT_METALLB_POOL:-10.1.132.10-10.1.132.99}"
@@ -94,8 +82,7 @@ CLUSTER_METALLB_SITE_POOL="${CLUSTER_METALLB_SITE_POOL:-10.1.138.100-10.1.138.19
 declare -A CLUSTER_METALLB_SITE_POOL_SLICE=(
   [central]=10.1.138.100-10.1.138.124
   [regional]=10.1.138.125-10.1.138.149
-  [edge]=10.1.138.150-10.1.138.174
-  [ue]=10.1.138.175-10.1.138.199
+  [edge]=10.1.138.150-10.1.138.199
 )
 
 MGMT_CP_HOST="${MGMT_CP_HOST:-mgmt-0}"

@@ -45,7 +45,6 @@ Run all three:
 | central  | `nephio/central-repo` | `repos/central-repo`  | `central-repo` | `central-repo-access-token-configsync`  |
 | regional | `nephio/regional-repo`| `repos/regional-repo` | `regional-repo`| `regional-repo-access-token-configsync` |
 | edge     | `nephio/edge-repo`    | `repos/edge-repo`     | `edge-repo`    | `edge-repo-access-token-configsync`     |
-| ue       | `nephio/ue-repo`      | `repos/ue-repo`       | `ue-repo`      | `ue-repo-access-token-configsync`       |
 
 **Clone (GitHub):** submodules use `https://github.com/FCCLab/INA-Infra-*.git` in [`.gitmodules`](../.gitmodules). Clusters still reconcile from **Gitea** `nephio/*` (unchanged RootSync URLs).
 
@@ -99,8 +98,9 @@ Verify:
 ./scripts/render_oai_ran_gitops.sh regional   # CU-CP operator + executor (needs Multus)
 ./scripts/render_oai_ran_du_gitops.sh edge  # DU operator + rfsim RU (needs Multus + regional CU-CP)
 ./scripts/render_oai_ran_cuup_gitops.sh edge  # CU-UP (needs Multus + regional CU-CP + central UPF)
-./scripts/render_metallb_gitops.sh mgmt central regional edge ue
-./scripts/render_dashboard_gitops.sh mgmt central regional edge ue
+./scripts/render_metallb_gitops.sh mgmt central regional edge
+./scripts/render_dashboard_gitops.sh mgmt central regional edge
+./scripts/render_metrics_server_gitops.sh mgmt central regional edge
 ./bringup/03_push_to_git_repos/push_git_repos.sh
 ./scripts/check-configsync.sh
 ```

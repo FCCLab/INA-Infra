@@ -19,7 +19,7 @@ Use the ID with:
   ./pingtest.sh <id>
 
 Environment:
-  UE_HOST      SSH host for ue cluster (default: ue-0)
+  UE_HOST      SSH host with kubectl for edge UE pods (default: usrp)
   SSH_CONFIG   SSH config (default: utils/ssh_config/config)
 EOF
 }

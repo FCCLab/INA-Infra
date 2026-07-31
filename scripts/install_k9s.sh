@@ -22,7 +22,7 @@ ALL_HOSTS=(
   central-0 central-1
   regional-0 regional-1
   edge-0 edge-1
-  ue-0 ue-1
+
 )
 
 usage() {
@@ -30,7 +30,7 @@ usage() {
 Usage: $(basename "$0") [host ...]
 
 Install k9s ${K9S_VERSION} to ${INSTALL_DIR} on this machine and on testbed hosts.
-With no arguments, installs locally and on all nodes (mgmt, central, regional, edge, ue).
+With no arguments, installs locally and on all nodes (mgmt, central, regional, edge).
 
 Examples:
   $(basename "$0")

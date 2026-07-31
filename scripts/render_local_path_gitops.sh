@@ -141,7 +141,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 Usage: $(basename "$0") [cluster ...]
 
 Write rancher/local-path provisioner + StorageClass to repos/<gitea-repo>/.
-Default: mgmt, central, regional, edge, ue.
+Default: mgmt, central, regional, edge.
 
 Source: ${LOCAL_PATH_MANIFEST}
 

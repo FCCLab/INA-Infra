@@ -15,8 +15,8 @@ alwaysApply: false
 ./scripts/render_oai_core_gitops.sh central
 ./scripts/render_oai_ran_gitops.sh regional
 ./scripts/render_oai_ran_du_gitops.sh edge
-./scripts/render_metallb_gitops.sh mgmt central regional edge ue
-./scripts/render_dashboard_gitops.sh mgmt central regional edge ue
+./scripts/render_metallb_gitops.sh mgmt central regional edge
+./scripts/render_dashboard_gitops.sh mgmt central regional edge
 ./bringup/03_push_to_git_repos/push_git_repos.sh
 ./scripts/check-configsync.sh
 ```
@@ -34,4 +34,4 @@ Rendered manifests go under `repos/{cluster}-repo/` (or `repos/mgmt/`). Do not h
 
 ## Cluster args
 
-Most render scripts accept cluster names: `mgmt central regional edge ue`. OAI render scripts are cluster-specific (central-only for core/operators).
+Most render scripts accept cluster names: `mgmt central regional edge`. OAI render scripts are cluster-specific (central-only for core/operators).

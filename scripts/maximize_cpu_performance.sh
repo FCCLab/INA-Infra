@@ -37,7 +37,7 @@ Usage: $(basename "$0") [options] [cluster|host ...]
 
 Set CPU scaling governor to performance (and disable idle states) on lab nodes.
 
-Targets (default: mgmt, central, regional, edge, ue, usrp):
+Targets (default: mgmt, central, regional, edge, usrp):
   cluster name → both CP + worker SSH aliases (e.g. edge → edge-0 edge-1)
   host alias   → as in utils/ssh_config/config (e.g. usrp, central-0)
   Or set HOSTS="usrp edge-0" to override.
@@ -76,7 +76,7 @@ resolve_targets() {
       central-0 central-1
       regional-0 regional-1
       edge-0 edge-1
-      ue-0 ue-1
+
       usrp
     )
     printf '%s\n' "${out[@]}"
@@ -87,7 +87,7 @@ resolve_targets() {
       mgmt)
         out+=(mgmt-0 mgmt-1)
         ;;
-      central|regional|edge|ue)
+      central|regional|edge)
         cluster="$arg"
         out+=("${CLUSTER_CP_HOST[$cluster]}" "${CLUSTER_WORKER_HOST[$cluster]}")
         ;;

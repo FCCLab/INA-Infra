@@ -15,9 +15,8 @@ Multi-cluster Nephio lab for 5G network slicing with GitOps (Config Sync + Gitea
 | central | `central@central` | `~/.kube/config-central` | central-0 |
 | regional | `regional@regional` | `~/.kube/config-regional` | regional-0 |
 | edge | `edge@edge` | `~/.kube/config-edge` | edge-0 |
-| ue | `ue@ue` | `~/.kube/config-ue` | ue-0 |
 
-Combine kubeconfigs: `export KUBECONFIG=~/.kube/config:~/.kube/config-central:...`
+Combine kubeconfigs: `export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge`
 
 IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `docs/ip_plan.md`. SSH aliases: `utils/ssh_config/config`.
 
@@ -26,7 +25,7 @@ IP addresses, VIPs, and pools live in `scripts/cluster_lib.sh` and `docs/ip_plan
 - `bringup/` — staged install: Gitea (`01_gitea`), Config Sync (`02_configsync`), git push (`03_push_to_git_repos`); Nephio packages under `bringup/nephio/`
 - `docs/` — platform + OAI docs (testbed, IPs, Config Sync, Gitea, topology)
 - `docs/` — OAI / network-slicing docs (`oai.md`, `oai-deployment.md`)
-- `repos/` — **Gitea submodules** per cluster (`mgmt`, `central-repo`, `regional-repo`, `edge-repo`, `ue-repo`); init with `git submodule update --init --recursive`
+- `repos/` — **Gitea submodules** per cluster (`mgmt`, `central-repo`, `regional-repo`, `edge-repo`); init with `git submodule update --init --recursive`
 - `scripts/` — render GitOps manifests, cluster bringup, diagnostics (`check-configsync.sh`, `bringup_cluster.sh`)
 - `utils/` — netplan, registry, SSH config
 

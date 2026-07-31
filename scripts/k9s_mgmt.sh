@@ -12,14 +12,13 @@ source "$SCRIPT_DIR/cluster_lib.sh"
 SSH_CONFIG="${SSH_CONFIG:-$REPO_ROOT/utils/ssh_config/config}"
 STATE_DIR="${K9S_MGMT_STATE_DIR:-${XDG_RUNTIME_DIR:-/tmp}/k9s-mgmt}"
 MERGED_KUBECONFIG="${K9S_MGMT_KUBECONFIG:-$STATE_DIR/kubeconfig}"
-BASE_KUBECONFIG="${K9S_MGMT_BASE_KUBECONFIG:-${HOME}/.kube/config:${HOME}/.kube/config-central:${HOME}/.kube/config-regional:${HOME}/.kube/config-edge:${HOME}/.kube/config-ue}"
+BASE_KUBECONFIG="${K9S_MGMT_BASE_KUBECONFIG:-${HOME}/.kube/config:${HOME}/.kube/config-central:${HOME}/.kube/config-regional:${HOME}/.kube/config-edge}"
 
 # Local listen ports for SSH -L (mgmt uses native kubeconfig, no tunnel).
 declare -A TUNNEL_PORT=(
   [central]=16443
   [regional]=16444
   [edge]=16445
-  [ue]=16446
 )
 
 usage() {
@@ -186,7 +185,7 @@ cmd_start() {
   if [[ "$failed" -ne 0 ]]; then
     return 1
   fi
-  echo "==> contexts: mgmt@mgmt + central/regional/edge/ue via 127.0.0.1:16443-16446"
+  echo "==> contexts: mgmt@mgmt + central/regional/edge via 127.0.0.1:16443-16445"
 }
 
 cmd_status() {

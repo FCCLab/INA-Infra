@@ -229,9 +229,12 @@ data:
             target_label: kubernetes_name
           - source_labels: [__meta_kubernetes_pod_node_name]
             action: replace
+            target_label: node
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            action: replace
             target_label: kubernetes_node
 
-      # Pods annotated for scrape (e.g. MetalLB speaker/controller).
+      # Pods annotated for scrape (node_exporter, MetalLB, DCGM, …).
       - job_name: kubernetes-pods
         kubernetes_sd_configs:
           - role: pod
@@ -263,6 +266,12 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             action: replace
             target_label: kubernetes_pod_name
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            action: replace
+            target_label: node
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            action: replace
+            target_label: kubernetes_node
 EOF
 }
 
@@ -447,7 +456,7 @@ main() {
 
   for cluster in "${clusters[@]}"; do
     case "$cluster" in
-      mgmt|central|regional|edge|ue) ;;
+      mgmt|central|regional|edge) ;;
       *)
         echo "error: unknown cluster '${cluster}'" >&2
         exit 1

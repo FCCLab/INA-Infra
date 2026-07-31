@@ -6,7 +6,7 @@ Related detail: [mgmt.md](mgmt.md) · [ip_plan.md](ip_plan.md) · [testbed.md](t
 
 ## Overview
 
-Five Kubernetes clusters (mgmt + central + regional + edge + ue). Workload VMs are 2 nodes each; **edge** also has physical workers `edge-2`, `edge-3`, and `usrp`. Workload VMs sit on two L2 planes:
+Four Kubernetes clusters (mgmt + central + regional + edge). Workload VMs are 2 nodes each; **edge** also has physical workers `edge-2`, `edge-3`, and `usrp`. (The former **ue** cluster VMs/`br-int-ue` fabric may still exist on the hypervisor but are out of inventory.) Workload VMs sit on two L2 planes:
 
 | Plane | Guest NIC | Host bridge | Subnet(s) |
 |-------|-----------|-------------|-----------|
@@ -141,9 +141,6 @@ Live bridge ports:
 | regional | worker | `regional-1` | `Nephio-Regional-1` | `10.1.132.221` | `10.1.137.121` | `10.1.138.121` | — |
 | edge | CP | `edge-0` | `Nephio-Edge-0` | `10.1.132.230` | `10.1.137.130` | `10.1.138.130` | API `.137:6443` · dash `.132:30443` |
 | edge | worker | `edge-1` | `Nephio-Edge-1` | `10.1.132.231` | `10.1.137.131` | `10.1.138.131` | — |
-| ue | CP | `ue-0` | `Nephio-UE-0` | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | API `.137:6443` · dash `.132:30443` |
-| ue | worker | `ue-1` | `Nephio-UE-1` | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | — |
-
 ### Physical edge workers (bare metal)
 
 Extra edge-cluster workers on VLAN 137 (same L2 as `br-int-edge`). Site netplan only under [`workloads/netplan/<host>/55-k8s.yaml`](../workloads/netplan/); bootstrap with [`workloads/wl_setup_ssh_mgmt_ip.sh`](../workloads/wl_setup_ssh_mgmt_ip.sh). SSH is via a separate NIC (not `10.1.132.0/24`).

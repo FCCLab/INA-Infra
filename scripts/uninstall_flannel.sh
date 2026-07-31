@@ -16,7 +16,7 @@ usage() {
 Usage: $(basename "$0") [cluster ...]
 
 Uninstall Flannel (kube-flannel namespace and cluster RBAC).
-With no arguments, targets mgmt, central, regional, edge, and ue.
+With no arguments, targets mgmt, central, regional, edge.
 
 Warning: pod networking stops until another CNI is deployed via GitOps.
 

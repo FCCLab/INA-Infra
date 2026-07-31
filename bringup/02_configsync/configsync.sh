@@ -37,7 +37,7 @@ Steps:
   install   3. Install operator + RootSync on each cluster
   all       Run repos → tokens → install (default)
 
-Default clusters: mgmt, central, regional, edge, ue.
+Default clusters: mgmt, central, regional, edge.
 
 Config:     ${CONFIG_FILE}
 Operator:   manifests/operator/
@@ -502,7 +502,6 @@ pin_configsync_to_node0() {
     central) node0="central-0" ;;
     regional) node0="regional-0" ;;
     edge) node0="edge-0" ;;
-    ue) node0="ue-0" ;;
     *) echo "Unknown cluster: $cluster" >&2; return 1 ;;
   esac
 

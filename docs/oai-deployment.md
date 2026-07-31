@@ -28,7 +28,7 @@ graph TD
     subgraph edge-0 ["🖥 Far Edge — CU-UP / DU / gNB"]
         CUUP["oai-cu-up\n(split-deploy)"]
         DU["oai-du\n(split-deploy)"]
-        GNB["oai-gnb\n(oai-nws-1ue, usrp node)"]
+        GNB["oai-gnb\n(oai-nws-1usrp node)"]
     end
 
     subgraph ue-0 ["📱 User Equipment"]

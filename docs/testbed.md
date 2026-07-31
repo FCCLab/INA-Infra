@@ -3,7 +3,7 @@
 
 Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default route) and **site** on `enp7s0` with two subnets on the same L2 (`br-int-*`): **`10.1.137.0/24`** (Kubernetes API, node traffic, Flannel) and **`10.1.138.0/24`** (MetalLB LoadBalancer VIPs). Configure with [`scripts/setup_ip.sh`](../scripts/setup_ip.sh).
 
-**Physical uplinks:** hypervisor **`eno1`** carries **802.1Q VLANs** to join clusters to external L2 — **`eno1.132` → `br-mgmt`** (all clusters), **`eno1.135` → central**, **`eno1.136` → regional**, **`eno1.137` → edge**. **`br-int-ue`** has no VLAN uplink. See [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md) and [docs/topology.md](topology.md).
+**Physical uplinks:** hypervisor **`eno1`** carries **802.1Q VLANs** to join clusters to external L2 — **`eno1.132` → `br-mgmt`** (all clusters), **`eno1.135` → central**, **`eno1.136` → regional**, **`eno1.137` → edge**. See [bringup/00_testbed/readme.md](../bringup/00_testbed/readme.md) and [docs/topology.md](topology.md).
 
 **Mgmt:** `mgmt-0`/`mgmt-1` @ `10.1.132.200`/`201` (Pi-hole, Nephio mgmt cluster); workload nodes use `+10` blocks on `enp1s0` for SSH only. Default route on all nodes: `via 10.1.132.1`; DNS: `10.1.132.200`.
 
@@ -15,7 +15,6 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 | central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:30443` · fwd `:8443` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
 | regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:30443` · fwd `:8443` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
 | edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` (+ physical `edge-2`/`edge-3`/`usrp`) | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
-| ue | `ue-0` `10.1.137.140` | `ue-1` `10.1.137.141` | `.132.240`/`.241` | `https://10.1.137.140:6443` | `https://10.1.132.240:30443` · fwd `:8443` | `http://10.1.138.176` | `ue@ue` | `~/.kube/config-ue` |
 
 **Physical edge workers** (VLAN 137; netplan [`workloads/netplan/*/55-k8s.yaml`](../workloads/netplan/)): `edge-2` `10.1.137.132` (`eno1`), `edge-3` `10.1.137.133` (`ens12f0`), `usrp` `10.1.137.134` (`enp4s0f0`). SSH: see [`utils/ssh_config/config`](../utils/ssh_config/config). Detail: [ip_plan.md](ip_plan.md) · [docs/topology.md](topology.md).
 
@@ -35,7 +34,7 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 ./scripts/k9s_mgmt.sh status
 
 # On a control-plane node (native API), or when .137 is routed:
-export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge:~/.kube/config-ue
+export KUBECONFIG=~/.kube/config:~/.kube/config-central:~/.kube/config-regional:~/.kube/config-edge
 k9s --context central@central
 ```
 
@@ -94,26 +93,8 @@ flowchart LR
     BE --- E_IN
   end
 
-  BEU["br-ext-eu<br/>10.1.137.22/24"]
-
-  subgraph ue["UE site"]
-    direction TB
-    U0["UE-0<br/>mgmt .132.240<br/>site .137.140"] & U1["UE-1<br/>mgmt .132.241<br/>site .137.141"]
-    BU["br-int-ue<br/>10.1.137.13/24"]
-    subgraph SWU["vm-sw-ue"]
-      direction TB
-      U_IN["inf-internal"]
-      U_UP["inf-upper"] --- USW[["SW"]] --- U_LO["inf unused"]
-      U_IN --- USW
-    end
-    U0 --- BU
-    U1 --- BU
-    BU --- U_IN
-  end
-
   C_LO --- BCR --- R_UP
   R_LO --- BRE --- E_UP
-  E_LO --- BEU --- U_UP
 ```
 
 
@@ -247,8 +228,6 @@ virsh domiflist vm-sw-central
 | Regional-1 | `10.1.132.221` | `10.1.137.121` | `10.1.138.121` | `br-int-regional` |
 | Edge-0 | `10.1.132.230` | `10.1.137.130` | `10.1.138.130` | `br-int-edge` |
 | Edge-1 | `10.1.132.231` | `10.1.137.131` | `10.1.138.131` | `br-int-edge` |
-| UE-0 | `10.1.132.240` | `10.1.137.140` | `10.1.138.140` | `br-int-ue` |
-| UE-1 | `10.1.132.241` | `10.1.137.141` | `10.1.138.141` | `br-int-ue` |
 
 Per-node mgmt IPs (SSH) are in the table above; site IPs are on `enp7s0` (`.137` for K8s, `.138` for node identity on the MetalLB subnet). Full address plan: [ip_plan.md](ip_plan.md). SSH aliases: [`utils/ssh_config/config`](../utils/ssh_config/config). Non-mgmt hosts use Pi-hole on `mgmt-0` (`10.1.132.200`) for DNS.
 
@@ -266,8 +245,7 @@ After bridges and vm-sw are up, attach Nephio workload VMs to site bridges:
 
 ```bash
 sudo ./attach_vm.sh status
-sudo ./attach_vm.sh attach          # all sites (central, regional, edge, ue)
-sudo ./attach_vm.sh attach ue       # UE only
+sudo ./attach_vm.sh attach          # all sites (central, regional, edge)
 ```
 
 See [`attach_vm.sh`](attach_vm.sh).
