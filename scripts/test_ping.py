@@ -92,6 +92,10 @@ def dnn_gw(slice_n: int, prefix: str = DEFAULT_DNN_PREFIX) -> str:
 
 
 def n6_addr(slice_n: int, prefix: str = DEFAULT_N6_PREFIX, base: int = DEFAULT_N6_BASE) -> str:
+    # Live DHCP lease exported by profile_ping_test.sh (N6_ADDR_1=...).
+    live = (os.environ.get(f"N6_ADDR_{slice_n}") or "").strip()
+    if live:
+        return live
     if prefix:
         return f"{prefix}.{base + slice_n}"
     # Legacy oai-slice-deployment pool on 10.1.139.0/24
@@ -366,9 +370,12 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument(
+        "-d",
+        "--dest",
         "--host",
+        dest="host",
         default=DEFAULT_HOST,
-        help="Ping target for all UEs (default: mgmt-0)",
+        help="Ping destination for all UEs (default: mgmt-0)",
     )
     ap.add_argument(
         "--dnn",

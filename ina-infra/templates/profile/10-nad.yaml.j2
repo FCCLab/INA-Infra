@@ -11,4 +11,9 @@ metadata:
     ina-infra.nephio.lab/slice: "{{ slice_n }}"
 {% endif %}
 spec:
+{% if ipam_mode is defined and ipam_mode == "none" %}
+  # Bare macvlan: no address. UPF init runs dhclient on this iface (Glass 10.1.137).
+  config: '{"cniVersion": "0.3.1", "name": "{{ nad_name }}", "plugins": [{"type": "macvlan", "capabilities": {"ips": true}, "master": "{{ master }}", "mode": "bridge", "ipam": {}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}, "sysctl": {"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}]}'
+{% else %}
   config: '{"cniVersion": "0.3.1", "name": "{{ nad_name }}", "plugins": [{"type": "macvlan", "capabilities": {"ips": true}, "master": "{{ master }}", "mode": "bridge", "ipam": {"type": "static", "addresses": [{"address": "{{ address }}/{{ prefix_len }}", "gateway": "{{ gateway }}"}]{% if routes %}, "routes": {{ routes | tojson }}{% endif %}}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}, "sysctl": {"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}]}'
+{% endif %}

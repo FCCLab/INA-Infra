@@ -26,7 +26,7 @@ data:
     upf:\n  support_features:\n    enable_bpf_datapath: no    # If \"on\": BPF is\
     \ used as datapath else simpleswitch is used, DEFAULT= off\n    enable_snat: yes\
     \           # If \"on\": Source natting is done for UE, DEFAULT= off\n  remote_n6_gw:\
-    \ 127.0.0.1      # Dummy host since simple-switch does not use N6 GW\n  upf_info:\n\
+    \ 10.1.137.1      # Site internet GW on Multus N6 (Glass 10.1.137)\n  upf_info:\n\
     \    sNssaiUpfInfoList:\n      {%- for i in conf['PLMN']['plmnInfo'] %}\n    \
     \  {%- for x in i['nssai'] %}\n      - sNssai: *slice_{{ i['nssai'].index(x) }}\n\
     \        dnnUpfInfoList:\n      {%- for d in x['dnnInfo'] %}\n          - dnn:\

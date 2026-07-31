@@ -9,6 +9,7 @@
 # Default target: mgmt-0 10.1.132.200 (same as scripts/test_ping.py).
 # Use --dnn for per-slice DNN GW ${DNN_PREFIX}.{N}.1 (default DNN_PREFIX=10.1).
 # Use --n6 for per-slice UPF N6 (${N6_PREFIX}.$((N6_BASE+N)) or upf_slice_n6).
+# Use -d/--dest/--host IP for a fixed destination (overrides --dnn/--n6).
 # For ina-infra profile UEs, prefer ./scripts/ina-infra-ping-test.sh (ns + DNN/N6 defaults).
 #
 # Usage:
@@ -17,6 +18,7 @@
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --dnn
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --n6
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --host 10.1.132.11
+#   ./scripts/oai_slice_deployment_namespace_ping_test.sh -d 8.8.8.8 -t
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh --tmux   # forever panes via test_ping.py
 #   ./scripts/oai_slice_deployment_namespace_ping_test.sh -t       # same as --tmux
 set -euo pipefail
@@ -52,7 +54,12 @@ while [[ $# -gt 0 ]]; do
     --n6) USE_N6=1; USE_DNN=0; shift ;;
     -t|--tmux) TMUX_MODE=1; shift ;;
     --count) PING_COUNT="${2:?}"; shift 2 ;;
-    --host) PING_HOST="${2:?}"; USE_DNN=0; USE_N6=0; shift 2 ;;
+    -d|--dest|--host)
+      PING_HOST="${2:?}"
+      USE_DNN=0
+      USE_N6=0
+      shift 2
+      ;;
     --ue1|--ue2|--ue3|--ue4|--ue5)
       SELECTED+=("${1#--ue}")
       shift
@@ -130,8 +137,12 @@ ue_oaitun() {
 
 target_for() {
   local n="$1"
+  local live_var="N6_ADDR_${n}"
   if [[ "$USE_N6" == "1" ]]; then
-    if [[ -n "$N6_PREFIX" ]]; then
+    # Prefer live DHCP N6 from profile_ping_test.sh (N6_ADDR_N).
+    if [[ -n "${!live_var:-}" ]]; then
+      printf '%s' "${!live_var}"
+    elif [[ -n "$N6_PREFIX" ]]; then
       printf '%s.%s' "$N6_PREFIX" "$((N6_BASE + n))"
     else
       upf_slice_n6 "$n"
@@ -145,7 +156,9 @@ target_for() {
 
 echo "==> ping test (ns=${SLICE_NS} edge=${EDGE_HOST})"
 if [[ "$USE_N6" == "1" ]]; then
-  if [[ -n "$N6_PREFIX" ]]; then
+  if [[ -n "${N6_ADDR_1:-}${N6_ADDR_2:-}${N6_ADDR_3:-}${N6_ADDR_4:-}${N6_ADDR_5:-}" ]]; then
+    echo "    target=UPF N6 live N6_ADDR_N  count=${PING_COUNT}"
+  elif [[ -n "$N6_PREFIX" ]]; then
     echo "    target=UPF N6 ${N6_PREFIX}.$((N6_BASE+1))..${N6_PREFIX}.$((N6_BASE+SLICE_COUNT))  count=${PING_COUNT}"
   else
     echo "    target=UPF N6 upf_slice_n6(N)  count=${PING_COUNT}"

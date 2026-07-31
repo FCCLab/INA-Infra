@@ -31,9 +31,10 @@ spec:
           gateway: {{ gateway }}
         vlanID: 2
       - name: n6
+        # DHCP on Multus (Glass 10.1.137); UPF discovers IP via ioctl on iface n6.
         ipv4:
-          address: {{ upf_n6 }}/{{ prefix_len }}
-          gateway: {{ gateway }}
+          address: 0.0.0.0/24
+          gateway: 10.1.137.1
         vlanID: 3
       networkInstances:
       - name: vpc-internal

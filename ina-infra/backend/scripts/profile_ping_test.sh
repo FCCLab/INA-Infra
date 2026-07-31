@@ -10,17 +10,19 @@
 #   [3] ping target via that iface
 #
 # Default target: mgmt-0 10.1.132.200. Use --dnn for per-slice DNN GW.
-# Use --n6 for per-slice UPF N6.
+# Use --n6 for per-slice UPF N6 (live DHCP from UPF pods; override with N6_PREFIX).
+# Use -d/--dest/--host IP for a fixed destination (overrides --dnn/--n6).
 #
 # Usage:
 #   ./backend/scripts/profile_ping_test.sh <profilename>
 #   ./backend/scripts/profile_ping_test.sh ina-infra --dnn
 #   ./backend/scripts/profile_ping_test.sh ina-infra --ue1 --ue3 --count 10
 #   ./backend/scripts/profile_ping_test.sh test --n6
+#   ./backend/scripts/profile_ping_test.sh ina-infra -d 8.8.8.8 -t
 #   ./backend/scripts/profile_ping_test.sh ina-infra --tmux
 #   # tmux session is oai_ping_<profilename> (does not kill other profiles)
 #
-# Env: SLICE_COUNT, DNN_PREFIX, N6_PREFIX, N6_BASE, EDGE_HOST, INA_SMF_CONTEXT
+# Env: SLICE_COUNT, DNN_PREFIX, N6_PREFIX, N6_BASE, N6_ADDR_N, EDGE_HOST, INA_SMF_CONTEXT
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,21 +77,46 @@ except Exception:
 fi
 SLICE_COUNT="${SLICE_COUNT:-4}"
 
-# DNN/N6 defaults aligned with ina-infra Multus plan (override via env).
+# DNN defaults; N6 is DHCP on 10.1.137 — resolve live leases from UPF pods.
 DNN_PREFIX="${DNN_PREFIX:-10.140}"
 N6_PREFIX="${N6_PREFIX:-}"
-if [[ -z "$N6_PREFIX" ]]; then
-  _subnet="$(
-    kubectl --context "$SMF_CTX" -n "$NS" get cm ina-core-ips \
-      -o jsonpath='{.data.subnet}' 2>/dev/null || true
-  )"
-  if [[ "$_subnet" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\. ]]; then
-    N6_PREFIX="${BASH_REMATCH[1]}"
-  else
-    N6_PREFIX="10.1.140"
-  fi
-fi
 N6_BASE="${N6_BASE:-60}"
+CONTEXTS=(central@central regional@regional edge@edge)
+
+# Read current UPF n6 inet (DHCP). Empty if pod/iface missing.
+discover_upf_n6() {
+  local n="$1" ctx pod addr
+  for ctx in "${CONTEXTS[@]}"; do
+    pod="$(
+      kubectl --context "$ctx" -n "$NS" get pods \
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+        | awk -v p="^upf-slice-${n}-" '$0 ~ p {print; exit}'
+    )"
+    [[ -n "$pod" ]] || continue
+    addr="$(
+      kubectl --context "$ctx" -n "$NS" exec "$pod" -c "upf-slice-${n}" -- \
+        ip -4 -o addr show n6 2>/dev/null \
+        | awk '{print $4}' | cut -d/ -f1 | head -1
+    )"
+    if [[ -n "$addr" ]]; then
+      printf '%s' "$addr"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Unless caller forces N6_PREFIX (static Multus plan), publish live N6_ADDR_N.
+if [[ -z "$N6_PREFIX" ]]; then
+  for n in $(seq 1 "$SLICE_COUNT"); do
+    if addr="$(discover_upf_n6 "$n")"; then
+      export "N6_ADDR_${n}=$addr"
+      echo "  UPF${n} N6=${addr} (live DHCP)"
+    else
+      echo "  UPF${n} N6=(undiscovered)" >&2
+    fi
+  done
+fi
 
 export OAI_SLICE_NS="$NS"
 export PROFILE_NS="$NS"
@@ -98,5 +125,9 @@ export DNN_PREFIX
 export N6_PREFIX
 export N6_BASE
 
-echo "Ping test ns=${NS} slices=${SLICE_COUNT} dnn_prefix=${DNN_PREFIX} n6=${N6_PREFIX}.$((N6_BASE+1)).."
+if [[ -n "$N6_PREFIX" ]]; then
+  echo "Ping test ns=${NS} slices=${SLICE_COUNT} dnn_prefix=${DNN_PREFIX} n6=${N6_PREFIX}.$((N6_BASE+1)).."
+else
+  echo "Ping test ns=${NS} slices=${SLICE_COUNT} dnn_prefix=${DNN_PREFIX} n6=live-from-upf"
+fi
 exec "$ROOT/scripts/oai_slice_deployment_namespace_ping_test.sh" --ns "$NS" "$@"

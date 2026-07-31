@@ -252,8 +252,10 @@ def create_deployment(name: str=None,
                 }
 
     if interfaces is not None:
+        has_n6 = False
         for interface in interfaces:
-            nad_name=f"{name}-{interface['name']}"
+            if_name = interface['name']
+            nad_name=f"{name}-{if_name}"
             nad_status = create_nad(
                                 name=nad_name,
                                 namespace=namespace,
@@ -263,11 +265,21 @@ def create_deployment(name: str=None,
                                 kopf=kopf,
                                 nf_type=nf_type)
             if nad_status['status']:
-                _interfaces.append({'name':nad_status['name'],
-                                    'interface':interface['name'],
-                                    'ips':[interface['ipv4']['address']],
-                                    'gateway':[interface['ipv4']['gateway']]
-                                    })
+                # N6: bare Multus macvlan + dhclient in init (Glass 10.1.137).
+                # Do not pass ips/gateway — UPF config only uses interface_name.
+                if if_name == 'n6':
+                    has_n6 = True
+                    _interfaces.append({
+                        'name': nad_status['name'],
+                        'interface': if_name,
+                    })
+                else:
+                    _interfaces.append({
+                        'name': nad_status['name'],
+                        'interface': if_name,
+                        'ips': [interface['ipv4']['address']],
+                        'gateway': [interface['ipv4']['gateway']],
+                    })
             else:
                 output = {'message': 'Deployment failure',
                           'reason': nad_status['reason'],
@@ -283,6 +295,49 @@ def create_deployment(name: str=None,
         deployment['spec']['template']['metadata'].update(
                                         {'annotations':
                                             {'k8s.v1.cni.cncf.io/networks': json.dumps(_interfaces)}})
+        if has_n6:
+            # Multus attaches n6 before initContainers; lease must exist before UPF ioctl.
+            deployment['spec']['template']['spec']['initContainers'].append({
+                "name": "n6-dhcp",
+                "image": os.getenv("INA_N6_DHCP_IMAGE", "nicolaka/netshoot"),
+                "imagePullPolicy": "IfNotPresent",
+                "securityContext": {
+                    "capabilities": {"add": ["NET_ADMIN", "NET_RAW"]},
+                },
+                "command": [
+                    "sh",
+                    "-c",
+                    "set -eu\n"
+                    "echo 'waiting for Multus n6'\n"
+                    "for i in $(seq 1 60); do ip link show n6 >/dev/null 2>&1 && break; sleep 1; done\n"
+                    "ip link show n6 >/dev/null 2>&1 || { echo 'n6 iface missing' >&2; exit 1; }\n"
+                    "ip link set n6 up || true\n"
+                    "ip -4 addr flush dev n6 || true\n"
+                    "if command -v dhclient >/dev/null 2>&1; then\n"
+                    "  dhclient -v -1 -lf /tmp/dhclient.n6.leases n6\n"
+                    "elif command -v udhcpc >/dev/null 2>&1; then\n"
+                    "  udhcpc -i n6 -q -n -f\n"
+                    "else\n"
+                    "  echo 'no dhclient/udhcpc in image' >&2; exit 1\n"
+                    "fi\n"
+                    "for i in $(seq 1 30); do\n"
+                    "  ip -4 -o addr show n6 | grep -q 'inet ' && break\n"
+                    "  sleep 1\n"
+                    "done\n"
+                    "ip -4 -o addr show n6 | grep -q 'inet ' || { echo 'n6 DHCP lease failed' >&2; exit 1; }\n"
+                    "gw=$(ip -4 route show default dev n6 2>/dev/null | awk '{print $3; exit}')\n"
+                    "gw=${gw:-10.1.137.1}\n"
+                    "# Prefer N6 for UE DN traffic; CNI eth0 default otherwise steals 0.0.0.0/0.\n"
+                    "ip route show default | while read -r line; do\n"
+                    "  case \"$line\" in *'dev eth0'*) ip route del $line 2>/dev/null || true ;; esac\n"
+                    "done\n"
+                    "ip route replace default via \"$gw\" dev n6 metric 50\n"
+                    "ip route replace 10.244.0.0/16 via 10.244.1.1 dev eth0 2>/dev/null || true\n"
+                    "ip -4 -o addr show n6\n"
+                    "ip route | grep -E '^default|^10\\.244' || true\n"
+                    "exit 0\n",
+                ],
+            })
     if TESTING == 'yes':
         deployment['spec']['template']['spec'].pop('initContainers')
 
@@ -418,11 +473,17 @@ def create_sa(name:str=None, namespace: str=None, labels:dict=None, logger=None,
                 namespace=namespace,
                 body=sa
             ).to_dict()
-        creation_time =  obj['metadata']['creation_timestamp']
+        creation_timestamp =  obj['metadata']['creation_timestamp']
         name = obj['metadata']['name']
     except ApiException as e:
-        logger.error(f"Exception with reason {e.reason}, code {e.status} in creating service account {name} in namespace {namespace}")
-        raise kopf.PermanentError(f"Can not create service account {name} in namespace {namespace} reason {e.reason}")
+        if getattr(e, 'status', None) == 409 or getattr(e, 'reason', None) == 'Conflict':
+            logger.warning(f"ServiceAccount {name} already exists in namespace {namespace}; reusing")
+            obj = api.read_namespaced_service_account(name=name, namespace=namespace).to_dict()
+            creation_timestamp = obj['metadata'].get('creation_timestamp')
+            name = obj['metadata']['name']
+        else:
+            logger.error(f"Exception with reason {e.reason}, code {e.status} in creating service account {name} in namespace {namespace}")
+            raise kopf.PermanentError(f"Can not create service account {name} in namespace {namespace} reason {e.reason}")
 
     return {'creation_timestamp':creation_timestamp,'name':name}
 

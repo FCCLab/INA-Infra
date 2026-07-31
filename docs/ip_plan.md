@@ -15,7 +15,7 @@ Two planes split **operator/mgmt** from **cluster/data** traffic.
 | `10.1.140.0/24` | macvlan | INA-Infra profile Multus (`ina-infra`; host = `base[role]+n`) |
 | `10.1.101.0/24` | WAN / external | Bootstrap SSH for bare-metal workers |
 
-Pi-hole on `mgmt-0` is **DNS-only** (`10.1.132.200`); static records: [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf). Site DHCP is **Glass / ISC** on **central** Kubernetes (`hostNetwork` on `central-0` `enp7s0`), pool `10.1.137.160–199` — build/push: [services/glass-dhcp/build_push.sh](../services/glass-dhcp/build_push.sh), render: [scripts/render_glass_dhcp_gitops.sh](../scripts/render_glass_dhcp_gitops.sh), UI `http://10.1.132.210:3000`.
+Pi-hole on `mgmt-0` is **DNS-only** (`10.1.132.200`); static records: [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf). Site DHCP is **Glass / ISC** on **central** Kubernetes (`hostNetwork` on `central-0` `enp7s0`), pool `10.1.137.160–199`, gateway `10.1.137.1` — used by ina-infra **UPF N6** (Multus macvlan + dhclient). Build/push: [services/glass-dhcp/build_push.sh](../services/glass-dhcp/build_push.sh), UI `http://10.1.132.210:3000`.
 
 ## VLAN uplinks (`eno1` trunk)
 
@@ -53,7 +53,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.151` | `gh81` | edge cluster, GH200 arm64 |
 | `.152` | `gh82` | central cluster, GH200 arm64 |
 | `.153`–`.159` | — | Spare |
-| **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC Deployment on `central-0` |
+| **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC on `central-0`; ina-infra UPF N6 dhclient |
 
 ## `10.1.132.0/24` allocation (mgmt)
 

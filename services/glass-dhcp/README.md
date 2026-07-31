@@ -26,4 +26,6 @@ Glass UI: http://10.1.132.210:3000
 - Username: `glassadmin`  
 - Password: `glassadmin`  
 
-Pool: `10.1.137.160–199` (see `dhcpd.conf`)
+Pool: `10.1.137.160–199` (see `dhcpd.conf`), gateway `10.1.137.1`.
+
+ina-infra **UPF N6**: Multus bare macvlan + `n6-dhcp` init (`dhclient`); UPF config uses `interface_name: n6` only (ioctl after lease).

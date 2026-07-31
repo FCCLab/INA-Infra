@@ -176,18 +176,35 @@ fi
 
 # UPF Deployments share selector workload.nephio.org/oai=upf — resolve pod by name.
 upf_pod_name() {
-  local n="$1" ctx="$2"
-  kubectl --context "$ctx" -n "$NS" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-    2>/dev/null | grep -E "^upf-slice-${n}-" | head -1
+  local n="$1" ctx="$2" name
+  while IFS= read -r name; do
+    if [[ "$name" =~ ^upf-slice-${n}- ]]; then
+      printf '%s' "$name"
+      return 0
+    fi
+  done < <(
+    kubectl --context "$ctx" -n "$NS" get pods \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+  )
+  return 1
+}
+
+# Avoid `cmd | grep -q` under pipefail: early match → SIGPIPE → false failure.
+logs_match() {
+  local re="$1"
+  local text="${2-}"
+  grep -qiE "$re" <<<"$text"
 }
 
 upf_pfcp_ok() {
-  local n="$1" ctx="$2" pod
-  pod="$(upf_pod_name "$n" "$ctx")"
+  local n="$1" ctx="$2" pod logs
+  pod="$(upf_pod_name "$n" "$ctx")" || return 1
   [[ -n "$pod" ]] || return 1
-  kubectl --context "$ctx" -n "$NS" logs "$pod" \
-    -c "upf-slice-${n}" --since="$SINCE" 2>/dev/null \
-    | grep -qiE "$UPF_PFCP_RE"
+  logs="$(
+    kubectl --context "$ctx" -n "$NS" logs "$pod" \
+      -c "upf-slice-${n}" --since="$SINCE" 2>/dev/null || true
+  )"
+  logs_match "$UPF_PFCP_RE" "$logs"
 }
 
 smf_pfcp_ok_for_n4() {
@@ -197,12 +214,15 @@ smf_pfcp_ok_for_n4() {
     kubectl --context "$SMF_CTX" -n "$NS" logs "deploy/${SMF_DEPLOY}" \
       -c smf-core --since="$SINCE" 2>/dev/null || true
   )"
-  # Prefer a success line that mentions this N4; else any SMF assoc success
-  # while we still require UPF-side evidence per slice.
-  if echo "$logs" | grep -F "$n4" | grep -qiE "$SMF_PFCP_RE"; then
+  # Prefer node-added / assoc lines that mention this N4.
+  local n4_lines
+  n4_lines="$(grep -F "$n4" <<<"$logs" || true)"
+  if logs_match \
+    "Successfully added UPF node|pending PFCP association|$SMF_PFCP_RE" \
+    "$n4_lines"; then
     return 0
   fi
-  echo "$logs" | grep -qiE "$SMF_PFCP_RE"
+  logs_match "$SMF_PFCP_RE" "$logs"
 }
 
 # Resolve and cache UPF site in the current shell (not via $(...), which
@@ -224,9 +244,12 @@ slice_pfcp_ok() {
     return 0
   fi
   # Soft: SMF logged assoc for this N4 even if UPF log pattern differs.
-  if smf_pfcp_ok_for_n4 "$n4" && kubectl --context "$ctx" -n "$NS" get \
-    "deploy/upf-slice-${n}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null \
-    | grep -qx '1'; then
+  local ready
+  ready="$(
+    kubectl --context "$ctx" -n "$NS" get "deploy/upf-slice-${n}" \
+      -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true
+  )"
+  if smf_pfcp_ok_for_n4 "$n4" && [[ "$ready" == "1" ]]; then
     return 0
   fi
   return 1

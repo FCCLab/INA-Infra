@@ -1123,7 +1123,12 @@ def _write_upf(
                         },
                         {
                             "name": "n6",
-                            "ipv4": {"address": f"{sl.upf_n6}/{plen}", "gateway": gw},
+                            # Placeholder only — Multus has no static IP; UPF init dhclient
+                            # on n6 (Glass 10.1.137). UPF yaml uses interface_name only.
+                            "ipv4": {
+                                "address": "0.0.0.0/24",
+                                "gateway": "10.1.137.1",
+                            },
                             "vlanID": 3,
                         },
                     ],

@@ -101,6 +101,7 @@ def _nad(
     master: str,
     slice_n: int | None = None,
     routes: List[dict] | None = None,
+    ipam_mode: str = "static",
 ) -> str:
     ctx = {
         "namespace": namespace,
@@ -111,6 +112,7 @@ def _nad(
         "prefix_len": prefix_len,
         "master": master,
         "routes": routes or [],
+        "ipam_mode": ipam_mode,
     }
     if slice_n is not None:
         ctx["slice_n"] = slice_n
@@ -567,7 +569,7 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
                         slice_id=sl.slice_id,
                         upf_n3=sl.upf_n3,
                         upf_n4=sl.upf_n4,
-                        upf_n6=sl.upf_n6,
+                        upf_n6="dhcp:10.1.137.0/24",
                         cuup_e1=sl.cuup_e1,
                         cuup_f1u=sl.cuup_f1u,
                         cuup_n3=sl.cuup_n3,
@@ -586,15 +588,11 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
                 )
 
             if cluster == upf_cluster:
-                for nad_name, role, addr, routes in (
-                    (f"upf-slice-{sl.n}-n3", "upf_n3", sl.upf_n3, None),
-                    (f"upf-slice-{sl.n}-n4", "upf_n4", sl.upf_n4, None),
-                    (
-                        f"upf-slice-{sl.n}-n6",
-                        "upf_n6",
-                        sl.upf_n6,
-                        [{"dst": "10.1.132.0/24", "gw": gw}],
-                    ),
+                for nad_name, role, addr, routes, ipam_mode in (
+                    (f"upf-slice-{sl.n}-n3", "upf_n3", sl.upf_n3, None, "static"),
+                    (f"upf-slice-{sl.n}-n4", "upf_n4", sl.upf_n4, None, "static"),
+                    # N6: bare macvlan; UPF init dhclient → Glass 10.1.137 (no static IP).
+                    (f"upf-slice-{sl.n}-n6", "upf_n6", "", None, "none"),
                 ):
                     _write(
                         ns_dir / f"32-nad-{nad_name}.yaml",
@@ -603,12 +601,13 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
                             namespace=ns,
                             nad_name=nad_name,
                             role=role,
-                            address=addr,
-                            gateway=gw,
+                            address=addr or "0.0.0.0",
+                            gateway=gw if ipam_mode == "static" else "0.0.0.0",
                             prefix_len=plen,
                             master=cluster_master,
                             slice_n=sl.n,
                             routes=routes,
+                            ipam_mode=ipam_mode,
                         ),
                         written,
                     )
