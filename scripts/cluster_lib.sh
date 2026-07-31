@@ -44,10 +44,18 @@ declare -A CLUSTER_DASHBOARD_VIP=(
   [regional]=10.1.138.125
   [edge]=10.1.138.150
 )
+# Workload OST addresses on 10.1.137 (.101/.102/.103). Served via hostPort on
+# CLUSTER_OPENSPEEDTEST_NODE with a /32 secondary on that node's site NIC
+# (UPF N6 macvlan cannot reliably ARP MetalLB VIPs).
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
-  [central]=10.1.138.101
-  [regional]=10.1.138.126
-  [edge]=10.1.138.151
+  [central]=10.1.137.101
+  [regional]=10.1.137.102
+  [edge]=10.1.137.103
+)
+declare -A CLUSTER_OPENSPEEDTEST_NODE=(
+  [central]=central-0
+  [regional]=regional-1
+  [edge]=edge-0
 )
 # OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
@@ -189,10 +197,15 @@ metallb_site_pool_name() {
 
 metallb_l2_interface_for_cluster() {
   local cluster="$1"
-  if [[ "$cluster" == "mgmt" ]]; then
+  # METALLB_L2_IFACE overrides (single name, or "any" to omit filter).
+  # Do not reuse SITE_IFACE — that defaults to enp7s0 for Flannel/netplan, but
+  # bare-metal workers (usrp/gh82/edge-2) use different NIC names for .137.
+  if [[ -n "${METALLB_L2_IFACE:-}" ]]; then
+    printf '%s' "$METALLB_L2_IFACE"
+  elif [[ "$cluster" == "mgmt" ]]; then
     printf '%s' "${MGMT_IFACE:-enp1s0}"
   else
-    printf '%s' "${SITE_IFACE:-enp7s0}"
+    printf 'any'
   fi
 }
 

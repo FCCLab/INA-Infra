@@ -24,6 +24,10 @@ OpenSpeedTest URLs (http):
   edge      $(openspeedtest_vip edge)
 
 LoadBalancer VIPs require MetalLB (deploy via GitOps).
+Source of truth for OST manifests is Config Sync — prefer:
+  ./scripts/render_openspeedtest_gitops.sh [cluster ...]
+  ./bringup/03_push_to_git_repos/push_git_repos.sh
+This imperative path is for bootstrap / emergency; sync may overwrite.
 
 Options:
   --uninstall, -u   Remove OpenSpeedTest deployment and service
@@ -63,9 +67,10 @@ run_remote_script() {
 
 install_openspeedtest_on_cluster() {
   local cluster="$1"
-  local host vip
+  local host vip pool_name
   host="$(cluster_cp_host "$cluster")"
   vip="$(openspeedtest_vip "$cluster")"
+  pool_name="$(metallb_site_pool_name "$cluster")"
 
   echo
   echo "========================================"
@@ -120,13 +125,13 @@ spec:
             memory: 128Mi
 DEPLOY
 
-echo "==> OpenSpeedTest LoadBalancer VIP ${vip}"
+echo "==> OpenSpeedTest LoadBalancer VIP ${vip} (pool ${pool_name})"
 kubectl apply -f - <<SVC
 apiVersion: v1
 kind: Service
 metadata:
   annotations:
-    metallb.universe.tf/ip-allocated-from-pool: local-pool
+    metallb.universe.tf/ip-allocated-from-pool: ${pool_name}
     metallb.universe.tf/loadBalancerIPs: ${vip}
   name: openspeedtest-service
   namespace: default

@@ -12,9 +12,9 @@ Workload VMs have two NICs: **mgmt** on `enp1s0` (`10.1.132.0/24`, SSH/default r
 | Cluster | Control plane | Worker | SSH (mgmt) | API (`:6443`, `.137`) | Dashboard (132) | OpenSpeedTest (`.138`) | Context | Kubeconfig |
 |---------|---------------|--------|------------|------------------------|-----------------|-------------------------|---------|------------|
 | mgmt | `mgmt-0` `10.1.132.200` | `mgmt-1` `10.1.132.201` | same | `https://10.1.132.200:6443` | `https://10.1.132.200:30443` · fwd `:8443` | `http://10.1.132.11` | `mgmt@mgmt` | `~/.kube/config` |
-| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:30443` · fwd `:8443` | `http://10.1.138.101` | `central@central` | `~/.kube/config-central` |
-| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:30443` · fwd `:8443` | `http://10.1.138.126` | `regional@regional` | `~/.kube/config-regional` |
-| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` (+ physical `edge-2`/`edge-3`/`usrp`) | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.138.151` | `edge@edge` | `~/.kube/config-edge` |
+| central | `central-0` `10.1.137.110` | `central-1` `10.1.137.111` | `.132.210`/`.211` | `https://10.1.137.110:6443` | `https://10.1.132.210:30443` · fwd `:8443` | `http://10.1.137.101` | `central@central` | `~/.kube/config-central` |
+| regional | `regional-0` `10.1.137.120` | `regional-1` `10.1.137.121` | `.132.220`/`.221` | `https://10.1.137.120:6443` | `https://10.1.132.220:30443` · fwd `:8443` | `http://10.1.137.102` | `regional@regional` | `~/.kube/config-regional` |
+| edge | `edge-0` `10.1.137.130` | `edge-1` `10.1.137.131` (+ physical `edge-2`/`edge-3`/`usrp`) | `.132.230`/`.231` | `https://10.1.137.130:6443` | `https://10.1.132.230:30443` · fwd `:8443` | `http://10.1.137.103` | `edge@edge` | `~/.kube/config-edge` |
 
 **Physical edge workers** (VLAN 137; netplan [`workloads/netplan/*/55-k8s.yaml`](../workloads/netplan/)): `edge-2` `10.1.137.132` (`eno1`), `edge-3` `10.1.137.133` (`ens12f0`), `usrp` `10.1.137.134` (`enp4s0f0`). SSH: see [`utils/ssh_config/config`](../utils/ssh_config/config). Detail: [ip_plan.md](ip_plan.md) · [docs/topology.md](topology.md).
 

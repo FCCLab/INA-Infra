@@ -31,7 +31,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") --dir download -d 0
   $(basename "$0") --dir upload -d 0
-  $(basename "$0") -- --server http://10.1.138.151/ -d 15 -t 4
+  $(basename "$0") -- --server http://10.1.137.103/ -d 15 -t 4
 EOF
 }
 

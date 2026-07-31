@@ -240,16 +240,6 @@ def _bringup_order_sidecar(role: str, steps: Sequence[str]) -> dict:
     }
 
 
-def _tcp_readiness(port: int, *, period: int = 5, delay: int = 10) -> dict:
-    return {
-        "tcpSocket": {"port": port},
-        "initialDelaySeconds": delay,
-        "periodSeconds": period,
-        "timeoutSeconds": 2,
-        "failureThreshold": 12,
-    }
-
-
 def _sa(name: str, namespace: str) -> dict:
     return {
         "apiVersion": "v1",
@@ -753,8 +743,8 @@ def _write_edge_gnb(
                                         {"name": "rfsim", "containerPort": 4043, "protocol": "TCP"},
                                         {"name": "tmgr", "containerPort": 7374, "protocol": "TCP"},
                                     ],
-                                    # rfsim TCP accepts only after DU stack is up.
-                                    "readinessProbe": _tcp_readiness(4043, delay=20),
+                                    # No tcpSocket readiness on rfsim: kubelet probes open/close
+                                    # TCP and look like fake UEs (Client connects / Lost socket).
                                     "volumeMounts": [
                                         {
                                             "name": "configuration",

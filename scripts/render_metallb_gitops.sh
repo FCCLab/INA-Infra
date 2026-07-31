@@ -105,8 +105,7 @@ for doc in yaml.safe_load_all(Path(src).read_text()):
         ns_docs.append(doc)
 
 addresses = [pool_range]
-if ost_vip and not vip_in_pool(ost_vip, pool_range):
-    addresses.append(f"{ost_vip}/32")
+# OpenSpeedTest VIPs use a dedicated pool (see render_openspeedtest_gitops.sh).
 
 pool_doc = {
     "apiVersion": "metallb.io/v1beta1",
@@ -114,14 +113,17 @@ pool_doc = {
     "metadata": {"name": pool_name, "namespace": metallb_ns},
     "spec": {"addresses": addresses, "autoAssign": True},
 }
+# Workload site NICs differ (VMs: enp7s0; bare metal: eno1 / enp4s0f0 / enP*).
+# Pinning only enp7s0 makes speakers on usrp/gh82 fail to announce .137 OST VIPs.
+# Omit interfaces on workload clusters so MetalLB picks any iface on the VIP subnet.
+l2_spec = {"ipAddressPools": [pool_name]}
+if l2_iface and l2_iface != "any":
+    l2_spec["interfaces"] = [l2_iface]
 l2_doc = {
     "apiVersion": "metallb.io/v1beta1",
     "kind": "L2Advertisement",
     "metadata": {"name": f"{pool_name}-l2", "namespace": metallb_ns},
-    "spec": {
-        "ipAddressPools": [pool_name],
-        "interfaces": [l2_iface],
-    },
+    "spec": l2_spec,
 }
 ns_docs.extend([pool_doc, l2_doc])
 
@@ -135,9 +137,10 @@ def write_docs(docs, directory):
 
 write_docs(cluster_docs, dest_cluster)
 write_docs(ns_docs, dest_ns)
+iface_note = l2_iface if (l2_iface and l2_iface != "any") else "any (auto)"
 print(f"  cluster: {len(cluster_docs)} resources")
 print(f"  namespaces/{metallb_ns}: {len(ns_docs)} resources")
-print(f"  pool {pool_name}: {', '.join(addresses)} on {l2_iface}")
+print(f"  pool {pool_name}: {', '.join(addresses)} on {iface_note}")
 PY
 
   echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (MetalLB ${pool_name})"

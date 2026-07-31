@@ -10,9 +10,9 @@ declare -A CLUSTER_MGMT_IP=(
   [edge]=10.1.132.230
 )
 declare -A CLUSTER_OPENSPEEDTEST_VIP=(
-  [central]=10.1.138.101
-  [regional]=10.1.138.126
-  [edge]=10.1.138.151
+  [central]=10.1.137.101
+  [regional]=10.1.137.102
+  [edge]=10.1.137.103
 )
 MGMT_OPENSPEEDTEST_VIP="${MGMT_OPENSPEEDTEST_VIP:-10.1.132.11}"
 

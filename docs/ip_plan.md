@@ -43,6 +43,9 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.20` | `br-ext-cr` | Site-chain bridge (central ↔ regional) |
 | `.21` | `br-ext-re` | Site-chain bridge (regional ↔ edge) |
 | `.22` | `br-ext-eu` | Site-chain bridge (edge ↔ ue) |
+| `.101` | central OpenSpeedTest | `/32` on `central-0` + hostPort 80 |
+| `.102` | regional OpenSpeedTest | `/32` on `regional-1` + hostPort 80 |
+| `.103` | edge OpenSpeedTest | `/32` on `edge-0` + hostPort 80 |
 | `.110`–`.111` | `central-0`, `central-1` | K8s VMs |
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
 | `.130`–`.131` | `edge-0`, `edge-1` | K8s VMs |
@@ -91,7 +94,7 @@ Deploy via `./scripts/render_metallb_gitops.sh`; remove imperative installs with
 | regional | `site-pool` | `10.1.138.125`–`10.1.138.149` | `enp7s0` |
 | edge | `site-pool` | `10.1.138.150`–`10.1.138.199` | `enp7s0` |
 
-Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. Per slice: 1st reserved, 2nd = OpenSpeedTest. VMs also hold a host `.138` address matching their `.137` node IP (e.g. `central-0` → `.138.110`).
+Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. OpenSpeedTest workload VIPs are on **`10.1.137.101`–`.103`** (same L2; see below). VMs also hold a host `.138` address matching their `.137` node IP (e.g. `central-0` → `.138.110`).
 
 ### Mgmt MetalLB VIPs (`10.1.132.0/24`)
 
@@ -103,13 +106,19 @@ Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. Per slice: 1st
 | 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.nephio.lab` |
 | 10.1.132.230 | edge | xApp Swagger (externalIP) | 18080 | [http://10.1.132.230:18080/docs](http://10.1.132.230:18080/docs) | — |
 
-### Workload MetalLB VIPs (`10.1.138.0/24`)
+### Workload OpenSpeedTest (`10.1.137.101`–`.103`)
 
-| VIP | Cluster | Service | Ports | URL | DNS |
-|-----|---------|---------|-------|-----|-----|
-| 10.1.138.101 | central | OpenSpeedTest | 80 | [http://10.1.138.101](http://10.1.138.101) | `openspeedtest-central.nephio.lab` |
-| 10.1.138.126 | regional | OpenSpeedTest | 80 | [http://10.1.138.126](http://10.1.138.126) | `openspeedtest-regional.nephio.lab` |
-| 10.1.138.151 | edge | OpenSpeedTest | 80 | [http://10.1.138.151](http://10.1.138.151) | `openspeedtest-edge.nephio.lab` |
+`/32` secondary on the OST node site NIC + **hostPort 80** (not MetalLB — UPF N6 macvlan cannot reliably ARP MetalLB VIPs). Setup: `./scripts/setup_openspeedtest_secondary_ips.sh`.
+
+| Address | Cluster | Node | Ports | URL | DNS |
+|---------|---------|------|-------|-----|-----|
+| 10.1.137.101 | central | `central-0` | 80 | [http://10.1.137.101](http://10.1.137.101) | `openspeedtest-central.nephio.lab` |
+| 10.1.137.102 | regional | `regional-1` | 80 | [http://10.1.137.102](http://10.1.137.102) | `openspeedtest-regional.nephio.lab` |
+| 10.1.137.103 | edge | `edge-0` | 80 | [http://10.1.137.103](http://10.1.137.103) | `openspeedtest-edge.nephio.lab` |
+
+### Other workload MetalLB VIPs (`10.1.138.0/24`)
+
+Cross-cluster publish range remains `10.1.138.100`–`10.1.138.199` (see pools above).
 
 OAI 5GC CP on **central**; co-located **UPF + CU-UP** per slice (1→central, 2→regional, 3–5→edge); **CU-CP + DU + 5 nrUEs** on **edge `usrp`** — namespace `oai-slice-deployment`, macvlan **`10.1.139.0/24`** ([oai.md](oai.md)). Render: `./scripts/render_oai_slice_deployment_gitops.sh`.
 

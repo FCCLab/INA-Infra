@@ -7,9 +7,9 @@ Throughput and ping helpers for lab OpenSpeedTest (OST) servers, plus a client c
 | Site | URL |
 |------|-----|
 | mgmt (default) | http://10.1.132.11/ |
-| central | http://10.1.138.101/ |
-| regional | http://10.1.138.126/ |
-| edge | http://10.1.138.151/ |
+| central | http://10.1.137.101/ |
+| regional | http://10.1.137.102/ |
+| edge | http://10.1.137.103/ |
 
 ## UE path (via PDU tunnel)
 
@@ -44,7 +44,16 @@ docker run --rm --network host 10.1.132.30:5000/openspeedtest-client:latest \
   --dir upload -d 0 -t 1
 ```
 
-## Layout
+## Profile: all UEs (OST = UPF cluster VIP)
+
+```bash
+./scripts/profile/profile_speedtest.sh ina-infra -d 10 --threads 1
+./scripts/profile/profile_speedtest.sh ina-infra --ue1 --dir download -d 0
+./scripts/profile/profile_speedtest.sh ina-infra -t                  # tmux: one pane/UE forever DL
+./scripts/profile/profile_speedtest.sh ina-infra -t --dir upload
+```
+
+Per UE, server is the OpenSpeedTest VIP on the cluster hosting `upf-slice-N` (regional/edge/central).
 
 | File | Role |
 |------|------|

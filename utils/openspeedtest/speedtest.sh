@@ -79,6 +79,15 @@ main() {
   line="$(resolve_ue "$ue_sel")"
   IFS='|' read -r id ns pod ctr tun ue_ip <<<"$line"
 
+  # Re-read PDU address at run time (SMF may reassign .2 → .3 after rediscovery).
+  ue_ip="$(ssh_ue "sudo kubectl --kubeconfig=${KUBECONFIG_REMOTE} -n $(printf '%q' "$ns") exec \
+    $(printf '%q' "$pod") -c $(printf '%q' "$ctr") -- \
+    sh -c $(printf '%q' "ip -4 -o addr show dev ${tun} | awk '{print \$4}' | cut -d/ -f1")" | tr -d '\r' | head -1)"
+  if [[ -z "$ue_ip" ]]; then
+    echo "error: no IPv4 on ${tun} in ${ns}/${pod}" >&2
+    exit 1
+  fi
+
   dest_ip="${server#http://}"
   dest_ip="${dest_ip#https://}"
   dest_ip="${dest_ip%%[:/]*}"
