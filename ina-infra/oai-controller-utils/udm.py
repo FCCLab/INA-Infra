@@ -40,7 +40,15 @@ LOG_LEVEL = str(os.getenv('LOG_LEVEL','INFO'))    ## Log level of the controller
 TESTING = str(os.getenv('TESTING','yes'))    ## If testing the network function, it will remove the init container which checks for NRFs availability
 HTTPS_VERIFY = bool(os.getenv('HTTPS_VERIFY',False)) ## To verfiy HTTPs certificates when communicating with cluster
 TOKEN=os.popen('cat /var/run/secrets/kubernetes.io/serviceaccount/token').read() ## Token used to communicate with Kube cluster
-KUBERNETES_BASE_URL = str(os.getenv('KUBERNETES_BASE_URL','http://127.0.0.1:8080'))
+_k8s_svc_host = os.getenv('KUBERNETES_SERVICE_HOST')
+_k8s_svc_port = os.getenv('KUBERNETES_SERVICE_PORT', '443')
+_k8s_default = (
+    f'https://{_k8s_svc_host}:{_k8s_svc_port}' if _k8s_svc_host else 'http://127.0.0.1:8080'
+)
+KUBERNETES_BASE_URL = str(os.getenv('KUBERNETES_BASE_URL', _k8s_default))
+# Prefer ClusterIP when DNS name is configured but CoreDNS is unreachable.
+if _k8s_svc_host and 'kubernetes.default' in KUBERNETES_BASE_URL:
+    KUBERNETES_BASE_URL = f'https://{_k8s_svc_host}:{_k8s_svc_port}'
 
 def create_deployment(name: str=None, 
                     namespace: str=None, 

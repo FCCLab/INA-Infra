@@ -38,7 +38,7 @@ spec:
         - name: TESTING
           value: 'no'
         - name: KUBERNETES_BASE_URL
-          value: https://kubernetes.default.svc
+          value: https://$(KUBERNETES_SERVICE_HOST):$(KUBERNETES_SERVICE_PORT)
         - name: DEBUG_SIDECAR
           value: 'yes'
         - name: DEBUG_SIDECAR_IMAGE
