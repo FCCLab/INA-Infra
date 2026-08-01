@@ -479,7 +479,7 @@ write_doc({
                     "image": cuup_image,
                     "securityContext": {"privileged": True},
                     "env": [
-                        {"name": "TZ", "value": "Europe/Paris"},
+                        {"name": "TZ", "value": "Asia/Singapore"},
                         {
                             "name": "USE_ADDITIONAL_OPTIONS",
                             "value": "--sa --log_config.global_log_options level,nocolor,time",

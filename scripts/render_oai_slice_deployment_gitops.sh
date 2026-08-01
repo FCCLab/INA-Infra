@@ -1310,7 +1310,7 @@ ngap_log_level                        ="info";
                                 "imagePullPolicy": "IfNotPresent",
                                 "securityContext": {"privileged": True},
                                 "env": [
-                                    {"name": "TZ", "value": "Europe/Paris"},
+                                    {"name": "TZ", "value": "Asia/Singapore"},
                                     {
                                         "name": "USE_ADDITIONAL_OPTIONS",
                                         "value": "--log_config.global_log_options level,nocolor,time",
@@ -1575,7 +1575,7 @@ dump(
                             "imagePullPolicy": "IfNotPresent",
                             "securityContext": {"privileged": True},
                             "env": [
-                                {"name": "TZ", "value": "Europe/Paris"},
+                                {"name": "TZ", "value": "Asia/Singapore"},
                                 {
                                     "name": "USE_ADDITIONAL_OPTIONS",
                                     "value": "--log_config.global_log_options level,nocolor,time",
@@ -2219,7 +2219,7 @@ channelmod = {{
                                             f"--rfsimulator.serveraddr {du_rf}"
                                         ),
                                     },
-                                    {"name": "TZ", "value": "Europe/Paris"},
+                                    {"name": "TZ", "value": "Asia/Singapore"},
                                 ],
                                 "volumeMounts": [
                                     {
