@@ -14,7 +14,7 @@ REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
 INFLUX_NS="${INFLUX_NS:-influxdb}"
 INFLUX_NAME="${INFLUX_NAME:-influxdb}"
 INFLUX_IMAGE="${INFLUX_IMAGE:-docker.io/library/influxdb:2.7}"
-INFLUX_PVC_SIZE="${INFLUX_PVC_SIZE:-20Gi}"
+INFLUX_PVC_SIZE="${INFLUX_PVC_SIZE:-1900Gi}"
 INFLUX_STORAGE_CLASS="${INFLUX_STORAGE_CLASS:-local-path}"
 INFLUX_HOST_PORT="${INFLUX_HOST_PORT:-8086}"
 # Lab defaults (override via env). Token is also the API auth for writers.

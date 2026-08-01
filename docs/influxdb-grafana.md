@@ -37,6 +37,8 @@ Grafana ships with provisioned datasources:
 
 Namespaces: `influxdb`, `grafana` under `repos/edge-repo/namespaces/`.
 
+PVC: InfluxDB **1900Gi** on `edge-0`’s 2T `local-path` disk (`INFLUX_PVC_SIZE`; leaves headroom for Grafana/Prometheus).
+
 Re-run the `setup_*_secondary_ips.sh` scripts after `edge-0` reboot (the `/32` is not netplan-persistent).
 
 ## Verify
