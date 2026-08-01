@@ -64,22 +64,35 @@ _HEADER_H = 96
 _SLOT_PAD_X = 10
 _SLOT_PAD_TOP = 8
 _SLOT_PAD_BOTTOM = 10
-_CHILD_W = 196
-_CHILD_H = 38
-_GAP_Y = 6
+_CHILD_W = 220
+# Flexible chip heights: CPU/MEM only vs CPU/MEM + GPU/VR.
+# Keep in sync with frontend K8sNode.tsx + ClusterTopology.tsx + .k8s-node CSS.
+_CHILD_H = 42
+_CHILD_H_GPU = 56
+_GAP_Y = 5
 _PAD_X = _SLOT_PAD_X
 _PAD_TOP = _HEADER_H + _SLOT_PAD_TOP
 _PAD_BOTTOM = _SLOT_PAD_BOTTOM
 _CLUSTER_W = _SLOT_PAD_X * 2 + _CHILD_W
 
 
-def _cluster_size(n_children: int) -> Tuple[float, float]:
-    height = (
-        _PAD_TOP
-        + max(n_children, 1) * (_CHILD_H + _GAP_Y)
-        - _GAP_Y
-        + _PAD_BOTTOM
-    )
+def _node_has_gpu(kn: Dict[str, Any]) -> bool:
+    try:
+        return int(kn.get("gpu_count") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _child_h(kn: Dict[str, Any]) -> int:
+    return _CHILD_H_GPU if _node_has_gpu(kn) else _CHILD_H
+
+
+def _cluster_size(children: List[Dict[str, Any]]) -> Tuple[float, float]:
+    if not children:
+        body = _CHILD_H
+    else:
+        body = sum(_child_h(kn) for kn in children) + _GAP_Y * (len(children) - 1)
+    height = _PAD_TOP + body + _PAD_BOTTOM
     return float(_CLUSTER_W), float(height)
 
 
@@ -115,7 +128,7 @@ def build_topology() -> Dict[str, Any]:
             "error": "missing summary",
         }
         children = node_inventory.get(name) or []
-        width, height = _cluster_size(len(children))
+        width, height = _cluster_size(children)
         nodes.append(
             {
                 "id": name,
@@ -136,8 +149,11 @@ def build_topology() -> Dict[str, Any]:
                 },
             }
         )
+        y = float(_PAD_TOP)
         for i, kn in enumerate(children):
             kn_name = kn.get("name") or f"node-{i}"
+            has_gpu = _node_has_gpu(kn)
+            ch = _child_h(kn)
             nodes.append(
                 {
                     "id": f"{name}::{kn_name}",
@@ -148,11 +164,11 @@ def build_topology() -> Dict[str, Any]:
                     "draggable": False,
                     "position": {
                         "x": float(_PAD_X),
-                        "y": float(_PAD_TOP + i * (_CHILD_H + _GAP_Y)),
+                        "y": y,
                     },
                     "style": {
                         "width": _CHILD_W,
-                        "height": _CHILD_H,
+                        "height": ch,
                         "padding": 0,
                         "margin": 0,
                     },
@@ -162,9 +178,12 @@ def build_topology() -> Dict[str, Any]:
                         "ready": bool(kn.get("ready")),
                         "roles": list(kn.get("roles") or []),
                         "kubelet_version": kn.get("kubelet_version") or "",
+                        "gpu_count": int(kn.get("gpu_count") or 0),
+                        "has_gpu": has_gpu,
                     },
                 }
             )
+            y += ch + _GAP_Y
 
     edges: List[Dict[str, Any]] = []
     for e in _EDGES:

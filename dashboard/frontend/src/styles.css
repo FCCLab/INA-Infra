@@ -479,6 +479,16 @@ html, body, #root { height: 100%; }
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+.topology-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  font-size: 13px;
 }
 .topology-toolbar {
   display: flex;
@@ -549,10 +559,15 @@ html, body, #root { height: 100%; }
   border: none !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+.react-flow__node-cluster {
+  border-radius: 12px;
   overflow: visible;
 }
-.react-flow__node-cluster { border-radius: 12px; }
-.react-flow__node-k8sNode { border-radius: 7px; }
+.react-flow__node-k8sNode {
+  border-radius: 7px;
+  overflow: hidden;
+}
 
 .cluster-node {
   width: 100%;
@@ -697,14 +712,17 @@ html, body, #root { height: 100%; }
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  padding: 4px 8px;
+  padding: 0 8px;
   border-radius: 7px;
   border: 1px solid var(--border-2);
   background: var(--surface-2);
   color: var(--text);
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: space-evenly;
+  align-items: stretch;
+  gap: 0;
+  overflow: hidden;
 }
 .k8s-node.not-ready {
   border-color: color-mix(in srgb, var(--bad) 55%, transparent);
@@ -716,28 +734,85 @@ html, body, #root { height: 100%; }
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
 }
-.k8s-node .k8s-name {
+.k8s-node .k8s-head {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 0.68rem;
+  flex: 0 0 auto;
+  height: 13px;
+  font-size: 0.64rem;
   font-weight: 650;
-  line-height: 1.15;
+  line-height: 13px;
 }
 .k8s-node .k8s-name-text {
   min-width: 0;
+  flex: 1 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .k8s-node .k8s-meta {
-  margin-top: 0.05rem;
   margin-left: 14px; /* align under name text (dot 8px + gap 6px) */
+  flex: 0 0 auto;
   color: var(--text-dim);
   font-size: 0.56rem;
   letter-spacing: 0.01em;
   line-height: 1.1;
+}
+.k8s-node .k8s-meter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 8px;
+  margin-left: 14px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.k8s-meter {
+  display: grid;
+  grid-template-columns: 2em minmax(0, 1fr) 2.6em;
+  align-items: center;
+  column-gap: 3px;
+  min-width: 0;
+  height: 9px;
+  font-size: 0.46rem;
+  line-height: 9px;
+  color: var(--text-dim);
+  font-family: 'IBM Plex Mono', monospace;
+  overflow: hidden;
+}
+.k8s-meter-label {
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+.k8s-meter-track {
+  min-width: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--border-2) 80%, transparent);
+  overflow: hidden;
+}
+.k8s-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.35s ease;
+}
+.k8s-meter.warm .k8s-meter-fill {
+  background: var(--accent-orange);
+}
+.k8s-meter.hot .k8s-meter-fill {
+  background: var(--bad);
+}
+.k8s-meter-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dot {

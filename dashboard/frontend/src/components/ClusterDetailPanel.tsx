@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Metrics, type NodeInfo } from "../api/client";
 import { fmtNum, isFiniteNumber } from "../lib/format";
 import InterfaceCharts from "./InterfaceCharts";
@@ -20,31 +20,46 @@ export default function ClusterDetailPanel({
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const clusterRef = useRef(cluster);
+  const inFlight = useRef<string | null>(null);
+
+  useEffect(() => {
+    clusterRef.current = cluster;
+  }, [cluster]);
 
   useEffect(() => {
     if (!cluster) {
+      inFlight.current = null;
       setNodes([]);
       setMetrics(null);
       setError(null);
+      setLoading(false);
       return;
     }
-    let cancelled = false;
+
+    // /metrics often takes > poll interval; stacking requests means every
+    // response is treated as stale and the panel stays empty.
+    if (inFlight.current === cluster) return;
+
+    const reqCluster = cluster;
+    inFlight.current = reqCluster;
+    setLoading(true);
     (async () => {
       try {
-        const [n, m] = await Promise.all([api.nodes(cluster), api.metrics(cluster)]);
-        if (cancelled) return;
+        const [n, m] = await Promise.all([api.nodes(reqCluster), api.metrics(reqCluster)]);
+        if (clusterRef.current !== reqCluster) return;
         setNodes(n.items);
         setMetrics(m);
         setError(n.error || m.error || null);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (clusterRef.current !== reqCluster) return;
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (inFlight.current === reqCluster) inFlight.current = null;
+        if (clusterRef.current === reqCluster) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [cluster, refreshToken]);
 
   if (!cluster) {
@@ -67,6 +82,7 @@ export default function ClusterDetailPanel({
   return (
     <div className="panel-body">
       {error ? <div className="error-banner">{error}</div> : null}
+      {loading && !metrics ? <p className="muted">Loading metrics…</p> : null}
       <ResourceCharts metrics={metrics} focusNode={selectedNode} nodes={nodes} />
       {selectedNode ? (
         <InterfaceCharts
@@ -90,7 +106,7 @@ export default function ClusterDetailPanel({
           ) : null}
         </h3>
         {nodes.length === 0 ? (
-          <p className="muted">No nodes returned.</p>
+          <p className="muted">{loading ? "Loading nodes…" : "No nodes returned."}</p>
         ) : (
           <table className="node-table">
             <thead>

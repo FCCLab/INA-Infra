@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -36,13 +36,21 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
   const [series, setSeries] = useState<
     Record<string, { rx_mbps?: (number | null)[]; tx_mbps?: (number | null)[] }>
   >({});
+  const targetRef = useRef(`${cluster}::${node}`);
+  const inFlight = useRef<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    targetRef.current = `${cluster}::${node}`;
+  }, [cluster, node]);
+
+  useEffect(() => {
+    const key = `${cluster}::${node}`;
+    if (inFlight.current === key) return;
+    inFlight.current = key;
     (async () => {
       try {
         const res = await api.nodeInterfaces(cluster, node);
-        if (cancelled) return;
+        if (targetRef.current !== key) return;
         setError(res.error || null);
         const physical = (res.interfaces || []).filter((i) => i.kind === "physical");
         setIfaces(physical);
@@ -50,14 +58,12 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
         setLabels(hist?.labels || []);
         setSeries(hist?.series || {});
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (targetRef.current !== key) return;
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (inFlight.current === key) inFlight.current = null;
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [cluster, node, refreshToken]);
 
   const colors = readThemeColors();
