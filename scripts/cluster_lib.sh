@@ -57,17 +57,16 @@ declare -A CLUSTER_OPENSPEEDTEST_NODE=(
   [regional]=regional-1
   [edge]=edge-0
 )
-# InfluxDB on site L2 (10.1.137). Served via hostPort 8086 on
-# CLUSTER_INFLUXDB_NODE with a /32 secondary on that node's site NIC
-# (same pattern as OpenSpeedTest — UPF N6 macvlan cannot reliably ARP MetalLB).
+# InfluxDB on site L2 (10.1.137). Multus macvlan on CLUSTER_INFLUXDB_NODE
+# (pod IP = VIP/24 on enp7s0; no hostPort / host /32 — N6 peers on same L2).
 declare -A CLUSTER_INFLUXDB_VIP=(
   [edge]=10.1.137.104
 )
 declare -A CLUSTER_INFLUXDB_NODE=(
   [edge]=edge-0
 )
-# Grafana on site L2 (10.1.137). Served via hostPort 3000 on
-# CLUSTER_GRAFANA_NODE with a /32 secondary (same pattern as InfluxDB/OST).
+# Grafana on site L2 (10.1.137). Multus macvlan on CLUSTER_GRAFANA_NODE
+# (same pattern as InfluxDB).
 declare -A CLUSTER_GRAFANA_VIP=(
   [edge]=10.1.137.105
 )

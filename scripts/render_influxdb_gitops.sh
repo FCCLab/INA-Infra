@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render InfluxDB into repos/ for Config Sync GitOps.
-# Edge: hostPort 8086 on CLUSTER_INFLUXDB_NODE; address is influxdb_vip
-# (10.1.137.104). Add the /32 on that node first:
+# Edge: Multus macvlan on site L2 (10.1.137.104) + ClusterIP for in-cluster.
+# No hostPort / host /32 — remove leftovers with:
 #   ./scripts/setup_influxdb_secondary_ips.sh
 set -euo pipefail
 
@@ -16,7 +16,9 @@ INFLUX_NAME="${INFLUX_NAME:-influxdb}"
 INFLUX_IMAGE="${INFLUX_IMAGE:-docker.io/library/influxdb:2.7}"
 INFLUX_PVC_SIZE="${INFLUX_PVC_SIZE:-1900Gi}"
 INFLUX_STORAGE_CLASS="${INFLUX_STORAGE_CLASS:-local-path}"
-INFLUX_HOST_PORT="${INFLUX_HOST_PORT:-8086}"
+INFLUX_PORT="${INFLUX_PORT:-8086}"
+INFLUX_NAD_NAME="${INFLUX_NAD_NAME:-influxdb-site}"
+INFLUX_IFACE="${INFLUX_IFACE:-site}"
 # Lab defaults (override via env). Token is also the API auth for writers.
 INFLUX_ADMIN_USER="${INFLUX_ADMIN_USER:-inainfra}"
 INFLUX_ADMIN_PASSWORD="${INFLUX_ADMIN_PASSWORD:-inainfra}"
@@ -30,15 +32,15 @@ Usage: $(basename "$0") [cluster ...]
 
 Default cluster: edge
 
-InfluxDB on site L2 via hostPort ${INFLUX_HOST_PORT} + /32 secondary:
-  edge  http://$(influxdb_vip edge):${INFLUX_HOST_PORT}/
+InfluxDB on site L2 via Multus macvlan (no hostPort):
+  edge  http://$(influxdb_vip edge):${INFLUX_PORT}/
 
-Secondary IP: ./scripts/setup_influxdb_secondary_ips.sh
-Push:         ./bringup/03_push_to_git_repos/push_git_repos.sh edge
-Verify:       ./scripts/check-configsync.sh edge
+Cleanup host /32: ./scripts/setup_influxdb_secondary_ips.sh
+Push:            ./bringup/03_push_to_git_repos/push_git_repos.sh edge
+Verify:          ./scripts/check-configsync.sh edge
 
 Environment:
-  INFLUX_IMAGE INFLUX_NS INFLUX_PVC_SIZE INFLUX_STORAGE_CLASS INFLUX_HOST_PORT
+  INFLUX_IMAGE INFLUX_NS INFLUX_PVC_SIZE INFLUX_STORAGE_CLASS INFLUX_PORT
   INFLUX_ADMIN_USER INFLUX_ADMIN_PASSWORD INFLUX_ORG INFLUX_BUCKET INFLUX_ADMIN_TOKEN
 EOF
 }
@@ -102,9 +104,72 @@ spec:
 EOF
 }
 
+# Multus NAD: macvlan on site NIC, static /24, no gateway (keep flannel default).
+write_nad() {
+  local dir="$1"
+  local master="$2"
+  local nad_config
+
+  # No default gw on site iface (keep flannel). Route mgmt plane back via site gw.
+  nad_config="$(python3 -c "
+import json
+cfg = {
+  'cniVersion': '0.3.1',
+  'name': '${INFLUX_NAD_NAME}',
+  'plugins': [
+    {
+      'type': 'macvlan',
+      'capabilities': {'ips': True},
+      'master': '${master}',
+      'mode': 'bridge',
+      'ipam': {
+        'type': 'static',
+        'routes': [{'dst': '10.1.132.0/24', 'gw': '10.1.137.1'}],
+      },
+    },
+    {
+      'type': 'tuning',
+      'capabilities': {'mac': True},
+      'ipam': {},
+      'sysctl': {
+        'net.ipv4.conf.IFNAME.arp_ignore': '1',
+        'net.ipv4.conf.IFNAME.arp_announce': '2',
+      },
+    },
+  ],
+}
+print(json.dumps(cfg))
+")"
+
+  cat >"${dir}/network-attachment-definition-${INFLUX_NAD_NAME}.yaml" <<EOF
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ${INFLUX_NAD_NAME}
+  namespace: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+spec:
+  config: '${nad_config}'
+EOF
+}
+
 write_deployment() {
   local dir="$1"
   local node="$2"
+  local vip="$3"
+  local networks_json
+
+  networks_json="$(python3 -c "
+import json
+print(json.dumps([{
+  'name': '${INFLUX_NAD_NAME}',
+  'interface': '${INFLUX_IFACE}',
+  'ips': ['${vip}/24'],
+  'routes': [{'dst': '10.1.132.0/24', 'gw': '10.1.137.1'}],
+}]))
+")"
+
   cat >"${dir}/deployment-${INFLUX_NAME}.yaml" <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -124,6 +189,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: ${INFLUX_NAME}
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '${networks_json}'
     spec:
       nodeSelector:
         kubernetes.io/hostname: ${node}
@@ -133,14 +200,26 @@ spec:
         effect: NoSchedule
       securityContext:
         fsGroup: 1000
+      initContainers:
+      - name: setup-pbr
+        image: busybox:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command:
+        - sh
+        - -c
+        - |
+          ip route add default via 10.1.137.1 dev ${INFLUX_IFACE} table 100 || true
+          ip rule add from ${vip} lookup 100 || true
       containers:
       - name: influxdb
         image: ${INFLUX_IMAGE}
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
-          containerPort: 8086
-          hostPort: ${INFLUX_HOST_PORT}
+          containerPort: ${INFLUX_PORT}
           protocol: TCP
         env:
         - name: DOCKER_INFLUXDB_INIT_MODE
@@ -213,7 +292,7 @@ spec:
   type: ClusterIP
   ports:
   - name: http
-    port: 8086
+    port: ${INFLUX_PORT}
     targetPort: http
     protocol: TCP
   selector:
@@ -223,12 +302,13 @@ EOF
 
 write_cluster_influxdb() {
   local cluster="$1"
-  local repo_name dest_ns vip node
+  local repo_name dest_ns vip node master
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   dest_ns="${REPOS_DIR}/${repo_name}/namespaces/${INFLUX_NS}"
   vip="$(influxdb_vip "$cluster")"
   node="${CLUSTER_INFLUXDB_NODE[$cluster]:-}"
+  master="${SITE_IFACE}"
 
   if [[ -z "$vip" || -z "$node" ]]; then
     echo "error: CLUSTER_INFLUXDB_VIP/NODE unset for '${cluster}' (edge only today)" >&2
@@ -239,13 +319,15 @@ write_cluster_influxdb() {
   purge_influxdb_manifests "$dest_ns"
 
   write_namespace "$dest_ns"
+  write_nad "$dest_ns" "$master"
   write_secret "$dest_ns"
   write_pvc "$dest_ns"
-  write_deployment "$dest_ns" "$node"
+  write_deployment "$dest_ns" "$node" "$vip"
   write_service "$dest_ns"
 
   echo "==> [${cluster}] ${dest_ns}"
-  echo "    UI/API: http://${vip}:${INFLUX_HOST_PORT}/ on ${node} (need ${vip}/32 on site NIC)"
+  echo "    Multus macvlan ${vip}/24 on ${master} (${INFLUX_IFACE}); node=${node}"
+  echo "    UI/API: http://${vip}:${INFLUX_PORT}/"
   echo "    org=${INFLUX_ORG} bucket=${INFLUX_BUCKET} user=${INFLUX_ADMIN_USER}"
 }
 
@@ -266,7 +348,7 @@ main() {
     write_cluster_influxdb "$cluster"
   done
   echo
-  echo "Secondary IP: ./scripts/setup_influxdb_secondary_ips.sh ${clusters[*]}"
+  echo "Cleanup host /32: ./scripts/setup_influxdb_secondary_ips.sh ${clusters[*]}"
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
   echo "Verify: ./scripts/check-configsync.sh ${clusters[*]}"
 }

@@ -46,8 +46,8 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.101` | central OpenSpeedTest | `/32` on `central-0` + hostPort 80 |
 | `.102` | regional OpenSpeedTest | `/32` on `regional-1` + hostPort 80 |
 | `.103` | edge OpenSpeedTest | `/32` on `edge-0` + hostPort 80 |
-| `.104` | edge InfluxDB | `/32` on `edge-0` + hostPort 8086 |
-| `.105` | edge Grafana | `/32` on `edge-0` + hostPort 3000 |
+| `.104` | edge InfluxDB | Multus macvlan on `edge-0` (port 8086) |
+| `.105` | edge Grafana | Multus macvlan on `edge-0` (port 3000) |
 | `.106` | central DynDNS | `/32` on `central-0` + hostPort 53/8088 |
 | `.110`–`.111` | `central-0`, `central-1` | K8s VMs |
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
@@ -121,7 +121,7 @@ Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. OpenSpeedTest 
 
 ### Workload InfluxDB (`10.1.137.104`)
 
-`/32` secondary on the InfluxDB node site NIC + **hostPort 8086** (same pattern as OpenSpeedTest). Setup: `./scripts/setup_influxdb_secondary_ips.sh`. GitOps: `./scripts/render_influxdb_gitops.sh`. Full notes (creds, datasources): [influxdb-grafana.md](influxdb-grafana.md).
+**Multus macvlan** on `edge-0` `enp7s0` (static `10.1.137.104/24`, no gateway on the attachment). Same site L2 as UPF N6. Cleanup leftover host `/32`: `./scripts/setup_influxdb_secondary_ips.sh`. GitOps: `./scripts/render_influxdb_gitops.sh`. Full notes: [influxdb-grafana.md](influxdb-grafana.md).
 
 | Address | Cluster | Node | Ports | URL | DNS |
 |---------|---------|------|-------|-----|-----|
@@ -131,7 +131,7 @@ Lab login: user `inainfra` / password `inainfra` · org `ina-infra` · token `in
 
 ### Workload Grafana (`10.1.137.105`)
 
-`/32` secondary on the Grafana node site NIC + **hostPort 3000**. Setup: `./scripts/setup_grafana_secondary_ips.sh`. GitOps: `./scripts/render_grafana_gitops.sh`. Pre-provisioned datasources: InfluxDB + Prometheus (in-cluster). Details: [influxdb-grafana.md](influxdb-grafana.md).
+**Multus macvlan** on `edge-0` `enp7s0` (static `10.1.137.105/24`). Cleanup: `./scripts/setup_grafana_secondary_ips.sh`. GitOps: `./scripts/render_grafana_gitops.sh`. Pre-provisioned datasources: InfluxDB + Prometheus (in-cluster). Details: [influxdb-grafana.md](influxdb-grafana.md).
 
 | Address | Cluster | Node | Ports | URL | DNS |
 |---------|---------|------|-------|-----|-----|

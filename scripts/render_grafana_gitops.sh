@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render Grafana into repos/ for Config Sync GitOps.
-# Edge: hostPort 3000 on CLUSTER_GRAFANA_NODE; address is grafana_vip
-# (10.1.137.105). Add the /32 on that node first:
+# Edge: Multus macvlan on site L2 (10.1.137.105) + ClusterIP for in-cluster.
+# No hostPort / host /32 — remove leftovers with:
 #   ./scripts/setup_grafana_secondary_ips.sh
 set -euo pipefail
 
@@ -16,7 +16,9 @@ GRAFANA_NAME="${GRAFANA_NAME:-grafana}"
 GRAFANA_IMAGE="${GRAFANA_IMAGE:-docker.io/grafana/grafana:11.5.2}"
 GRAFANA_PVC_SIZE="${GRAFANA_PVC_SIZE:-5Gi}"
 GRAFANA_STORAGE_CLASS="${GRAFANA_STORAGE_CLASS:-local-path}"
-GRAFANA_HOST_PORT="${GRAFANA_HOST_PORT:-3000}"
+GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+GRAFANA_NAD_NAME="${GRAFANA_NAD_NAME:-grafana-site}"
+GRAFANA_IFACE="${GRAFANA_IFACE:-site}"
 GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-inainfra}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-inainfra}"
 # InfluxDB 2 datasource (in-cluster); must match render_influxdb_gitops.sh defaults.
@@ -33,15 +35,15 @@ Usage: $(basename "$0") [cluster ...]
 
 Default cluster: edge
 
-Grafana on site L2 via hostPort ${GRAFANA_HOST_PORT} + /32 secondary:
-  edge  http://$(grafana_vip edge):${GRAFANA_HOST_PORT}/
+Grafana on site L2 via Multus macvlan (no hostPort):
+  edge  http://$(grafana_vip edge):${GRAFANA_PORT}/
 
-Secondary IP: ./scripts/setup_grafana_secondary_ips.sh
-Push:         ./bringup/03_push_to_git_repos/push_git_repos.sh edge
-Verify:       ./scripts/check-configsync.sh edge
+Cleanup host /32: ./scripts/setup_grafana_secondary_ips.sh
+Push:            ./bringup/03_push_to_git_repos/push_git_repos.sh edge
+Verify:          ./scripts/check-configsync.sh edge
 
 Environment:
-  GRAFANA_IMAGE GRAFANA_NS GRAFANA_PVC_SIZE GRAFANA_STORAGE_CLASS GRAFANA_HOST_PORT
+  GRAFANA_IMAGE GRAFANA_NS GRAFANA_PVC_SIZE GRAFANA_STORAGE_CLASS GRAFANA_PORT
   GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD
   INFLUX_URL INFLUX_ORG INFLUX_BUCKET INFLUX_ADMIN_TOKEN PROM_URL
 EOF
@@ -139,9 +141,72 @@ spec:
 EOF
 }
 
+# Multus NAD: macvlan on site NIC, static /24, no gateway (keep flannel default).
+write_nad() {
+  local dir="$1"
+  local master="$2"
+  local nad_config
+
+  # No default gw on site iface (keep flannel). Route mgmt plane back via site gw.
+  nad_config="$(python3 -c "
+import json
+cfg = {
+  'cniVersion': '0.3.1',
+  'name': '${GRAFANA_NAD_NAME}',
+  'plugins': [
+    {
+      'type': 'macvlan',
+      'capabilities': {'ips': True},
+      'master': '${master}',
+      'mode': 'bridge',
+      'ipam': {
+        'type': 'static',
+        'routes': [{'dst': '10.1.132.0/24', 'gw': '10.1.137.1'}],
+      },
+    },
+    {
+      'type': 'tuning',
+      'capabilities': {'mac': True},
+      'ipam': {},
+      'sysctl': {
+        'net.ipv4.conf.IFNAME.arp_ignore': '1',
+        'net.ipv4.conf.IFNAME.arp_announce': '2',
+      },
+    },
+  ],
+}
+print(json.dumps(cfg))
+")"
+
+  cat >"${dir}/network-attachment-definition-${GRAFANA_NAD_NAME}.yaml" <<EOF
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ${GRAFANA_NAD_NAME}
+  namespace: ${GRAFANA_NS}
+  labels:
+    app.kubernetes.io/name: ${GRAFANA_NAME}
+spec:
+  config: '${nad_config}'
+EOF
+}
+
 write_deployment() {
   local dir="$1"
   local node="$2"
+  local vip="$3"
+  local networks_json
+
+  networks_json="$(python3 -c "
+import json
+print(json.dumps([{
+  'name': '${GRAFANA_NAD_NAME}',
+  'interface': '${GRAFANA_IFACE}',
+  'ips': ['${vip}/24'],
+  'routes': [{'dst': '10.1.132.0/24', 'gw': '10.1.137.1'}],
+}]))
+")"
+
   cat >"${dir}/deployment-${GRAFANA_NAME}.yaml" <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -161,6 +226,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: ${GRAFANA_NAME}
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '${networks_json}'
     spec:
       nodeSelector:
         kubernetes.io/hostname: ${node}
@@ -172,14 +239,26 @@ spec:
         fsGroup: 472
         runAsUser: 472
         runAsGroup: 472
+      initContainers:
+      - name: setup-pbr
+        image: busybox:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command:
+        - sh
+        - -c
+        - |
+          ip route add default via 10.1.137.1 dev ${GRAFANA_IFACE} table 100 || true
+          ip rule add from ${vip} lookup 100 || true
       containers:
       - name: grafana
         image: ${GRAFANA_IMAGE}
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
-          containerPort: 3000
-          hostPort: ${GRAFANA_HOST_PORT}
+          containerPort: ${GRAFANA_PORT}
           protocol: TCP
         env:
         - name: GF_SECURITY_ADMIN_USER
@@ -195,7 +274,7 @@ spec:
         - name: GF_USERS_ALLOW_SIGN_UP
           value: "false"
         - name: GF_SERVER_ROOT_URL
-          value: http://$(grafana_vip edge):${GRAFANA_HOST_PORT}/
+          value: http://${vip}:${GRAFANA_PORT}/
         readinessProbe:
           httpGet:
             path: /api/health
@@ -245,7 +324,7 @@ spec:
   type: ClusterIP
   ports:
   - name: http
-    port: 3000
+    port: ${GRAFANA_PORT}
     targetPort: http
     protocol: TCP
   selector:
@@ -255,12 +334,13 @@ EOF
 
 write_cluster_grafana() {
   local cluster="$1"
-  local repo_name dest_ns vip node
+  local repo_name dest_ns vip node master
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
   dest_ns="${REPOS_DIR}/${repo_name}/namespaces/${GRAFANA_NS}"
   vip="$(grafana_vip "$cluster")"
   node="${CLUSTER_GRAFANA_NODE[$cluster]:-}"
+  master="${SITE_IFACE}"
 
   if [[ -z "$vip" || -z "$node" ]]; then
     echo "error: CLUSTER_GRAFANA_VIP/NODE unset for '${cluster}' (edge only today)" >&2
@@ -271,14 +351,16 @@ write_cluster_grafana() {
   purge_grafana_manifests "$dest_ns"
 
   write_namespace "$dest_ns"
+  write_nad "$dest_ns" "$master"
   write_secret "$dest_ns"
   write_datasources "$dest_ns"
   write_pvc "$dest_ns"
-  write_deployment "$dest_ns" "$node"
+  write_deployment "$dest_ns" "$node" "$vip"
   write_service "$dest_ns"
 
   echo "==> [${cluster}] ${dest_ns}"
-  echo "    UI: http://${vip}:${GRAFANA_HOST_PORT}/ on ${node} (need ${vip}/32 on site NIC)"
+  echo "    Multus macvlan ${vip}/24 on ${master} (${GRAFANA_IFACE}); node=${node}"
+  echo "    UI: http://${vip}:${GRAFANA_PORT}/"
   echo "    user=${GRAFANA_ADMIN_USER} datasources=InfluxDB(${INFLUX_URL}) Prometheus(${PROM_URL})"
 }
 
@@ -299,7 +381,7 @@ main() {
     write_cluster_grafana "$cluster"
   done
   echo
-  echo "Secondary IP: ./scripts/setup_grafana_secondary_ips.sh ${clusters[*]}"
+  echo "Cleanup host /32: ./scripts/setup_grafana_secondary_ips.sh ${clusters[*]}"
   echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
   echo "Verify: ./scripts/check-configsync.sh ${clusters[*]}"
 }

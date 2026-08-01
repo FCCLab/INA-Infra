@@ -1,6 +1,6 @@
 # Edge InfluxDB + Grafana
 
-Time-series stack on the **edge** cluster (site L2 `10.1.137.0/24`). Same addressing pattern as OpenSpeedTest: `/32` secondary on `edge-0` `enp7s0` + **hostPort** (not MetalLB — UPF N6 macvlan cannot reliably ARP MetalLB VIPs).
+Time-series stack on the **edge** cluster (site L2 `10.1.137.0/24`). **Multus macvlan** on `edge-0` `enp7s0` (static `/24`, no default gateway on the attachment — flannel stays default). Same L2 as ina-infra UPF N6 (DHCP), so N6 can ARP the service IPs directly. Not MetalLB / hostPort.
 
 | Service | Address | Port | DNS |
 |---------|---------|------|-----|
@@ -27,7 +27,7 @@ Grafana ships with provisioned datasources:
 ## GitOps
 
 ```bash
-./scripts/setup_influxdb_secondary_ips.sh edge   # /32 + mgmt-jump route
+./scripts/setup_influxdb_secondary_ips.sh edge   # remove leftover host /32 + /32 routes
 ./scripts/setup_grafana_secondary_ips.sh edge
 ./scripts/render_influxdb_gitops.sh edge
 ./scripts/render_grafana_gitops.sh edge
@@ -39,13 +39,14 @@ Namespaces: `influxdb`, `grafana` under `repos/edge-repo/namespaces/`.
 
 PVC: InfluxDB **1900Gi** on `edge-0`’s 2T `local-path` disk (`INFLUX_PVC_SIZE`; leaves headroom for Grafana/Prometheus).
 
-Re-run the `setup_*_secondary_ips.sh` scripts after `edge-0` reboot (the `/32` is not netplan-persistent).
+Do **not** add `.104`/`.105` as host secondaries — Multus owns those addresses on the pod `site` interface. Pods get a route `10.1.132.0/24 via 10.1.137.1` so mgmt-plane clients can get replies (flannel stays the default route).
 
 ## Verify
 
 ```bash
 curl -sS http://10.1.137.104:8086/health
 curl -sS -u inainfra:inainfra http://10.1.137.105:3000/api/org
-kubectl --context edge@edge -n influxdb get deploy,pods,svc,pvc
-kubectl --context edge@edge -n grafana get deploy,pods,svc,pvc
+kubectl --context edge@edge -n influxdb get deploy,pods,svc,pvc,net-attach-def
+kubectl --context edge@edge -n grafana get deploy,pods,svc,pvc,net-attach-def
+kubectl --context edge@edge -n influxdb exec deploy/influxdb -- ip -4 addr show site
 ```
