@@ -15,7 +15,7 @@ Two planes split **operator/mgmt** from **cluster/data** traffic.
 | `10.1.140.0/24` | macvlan | INA-Infra profile Multus (`ina-infra`; host = `base[role]+n`) |
 | `10.1.101.0/24` | WAN / external | Bootstrap SSH for bare-metal workers |
 
-Pi-hole on `mgmt-0` is **DNS-only** (`10.1.132.200`); static records: [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf). Site DHCP is **Glass / ISC** on **central** Kubernetes (`hostNetwork` on `central-0` `enp7s0`), pool `10.1.137.160–199`, gateway `10.1.137.1` — used by ina-infra **UPF N6** (Multus macvlan + dhclient). Build/push: [services/glass-dhcp/build_push.sh](../services/glass-dhcp/build_push.sh), UI `http://10.1.132.210:3000`.
+Pi-hole on `mgmt-0` is **DNS-only** (`10.1.132.200`); static records use `<service>.<cluster>.inainfra` — [services/etc-dnsmasq.d/99-nephio-static.conf](../services/etc-dnsmasq.d/99-nephio-static.conf). Site DHCP is **Glass / ISC** on **central** Kubernetes (`hostNetwork` on `central-0` `enp7s0`), pool `10.1.137.160–199`, gateway `10.1.137.1` — used by ina-infra **UPF N6** (Multus macvlan + dhclient). Build/push: [services/glass-dhcp/build_push.sh](../services/glass-dhcp/build_push.sh), UI `http://10.1.132.210:3000`.
 
 ## VLAN uplinks (`eno1` trunk)
 
@@ -46,6 +46,9 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.101` | central OpenSpeedTest | `/32` on `central-0` + hostPort 80 |
 | `.102` | regional OpenSpeedTest | `/32` on `regional-1` + hostPort 80 |
 | `.103` | edge OpenSpeedTest | `/32` on `edge-0` + hostPort 80 |
+| `.104` | edge InfluxDB | `/32` on `edge-0` + hostPort 8086 |
+| `.105` | edge Grafana | `/32` on `edge-0` + hostPort 3000 |
+| `.106` | central DynDNS | `/32` on `central-0` + hostPort 53/8088 |
 | `.110`–`.111` | `central-0`, `central-1` | K8s VMs |
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
 | `.130`–`.131` | `edge-0`, `edge-1` | K8s VMs |
@@ -100,10 +103,10 @@ Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. OpenSpeedTest 
 
 | VIP | Cluster | Service | Ports | URL | DNS |
 |-----|---------|---------|-------|-----|-----|
-| 10.1.132.30 | mgmt | Docker Registry | 5000 | [https://10.1.132.30:5000](https://10.1.132.30:5000) | `registry.nephio.lab` |
-| 10.1.132.11 | mgmt | OpenSpeedTest | 80 | [http://10.1.132.11](http://10.1.132.11) | `openspeedtest-mgmt.nephio.lab` |
-| 10.1.132.200 | mgmt | Gitea | 80, 3000 | [http://10.1.132.200:3000](http://10.1.132.200:3000) | `gitea.nephio.lab` |
-| 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.nephio.lab` |
+| 10.1.132.30 | mgmt | Docker Registry | 5000 | [https://10.1.132.30:5000](https://10.1.132.30:5000) | `registry.mgmt.inainfra` |
+| 10.1.132.11 | mgmt | OpenSpeedTest | 80 | [http://10.1.132.11](http://10.1.132.11) | `openspeedtest.mgmt.inainfra` |
+| 10.1.132.200 | mgmt | Gitea | 80, 3000 | [http://10.1.132.200:3000](http://10.1.132.200:3000) | `gitea.mgmt.inainfra` |
+| 10.1.132.52 | mgmt | Nephio Web UI | 80 | [http://10.1.132.52](http://10.1.132.52) | `webui.mgmt.inainfra` |
 | 10.1.132.230 | edge | xApp Swagger (externalIP) | 18080 | [http://10.1.132.230:18080/docs](http://10.1.132.230:18080/docs) | — |
 
 ### Workload OpenSpeedTest (`10.1.137.101`–`.103`)
@@ -112,9 +115,39 @@ Cross-cluster publish range: **`10.1.138.100`–`10.1.138.199`**. OpenSpeedTest 
 
 | Address | Cluster | Node | Ports | URL | DNS |
 |---------|---------|------|-------|-----|-----|
-| 10.1.137.101 | central | `central-0` | 80 | [http://10.1.137.101](http://10.1.137.101) | `openspeedtest-central.nephio.lab` |
-| 10.1.137.102 | regional | `regional-1` | 80 | [http://10.1.137.102](http://10.1.137.102) | `openspeedtest-regional.nephio.lab` |
-| 10.1.137.103 | edge | `edge-0` | 80 | [http://10.1.137.103](http://10.1.137.103) | `openspeedtest-edge.nephio.lab` |
+| 10.1.137.101 | central | `central-0` | 80 | [http://10.1.137.101](http://10.1.137.101) | `openspeedtest.central.inainfra` |
+| 10.1.137.102 | regional | `regional-1` | 80 | [http://10.1.137.102](http://10.1.137.102) | `openspeedtest.regional.inainfra` |
+| 10.1.137.103 | edge | `edge-0` | 80 | [http://10.1.137.103](http://10.1.137.103) | `openspeedtest.edge.inainfra` |
+
+### Workload InfluxDB (`10.1.137.104`)
+
+`/32` secondary on the InfluxDB node site NIC + **hostPort 8086** (same pattern as OpenSpeedTest). Setup: `./scripts/setup_influxdb_secondary_ips.sh`. GitOps: `./scripts/render_influxdb_gitops.sh`. Full notes (creds, datasources): [influxdb-grafana.md](influxdb-grafana.md).
+
+| Address | Cluster | Node | Ports | URL | DNS |
+|---------|---------|------|-------|-----|-----|
+| 10.1.137.104 | edge | `edge-0` | 8086 | [http://10.1.137.104:8086](http://10.1.137.104:8086) | `influxdb.edge.inainfra` |
+
+Lab login: user `inainfra` / password `inainfra` · org `ina-infra` · token `ina-infra-influxdb-token`.
+
+### Workload Grafana (`10.1.137.105`)
+
+`/32` secondary on the Grafana node site NIC + **hostPort 3000**. Setup: `./scripts/setup_grafana_secondary_ips.sh`. GitOps: `./scripts/render_grafana_gitops.sh`. Pre-provisioned datasources: InfluxDB + Prometheus (in-cluster). Details: [influxdb-grafana.md](influxdb-grafana.md).
+
+| Address | Cluster | Node | Ports | URL | DNS |
+|---------|---------|------|-------|-----|-----|
+| 10.1.137.105 | edge | `edge-0` | 3000 | [http://10.1.137.105:3000](http://10.1.137.105:3000) | `grafana.edge.inainfra` |
+
+Lab login: user `inainfra` / password `inainfra`.
+
+### Workload DynDNS (`10.1.137.106`)
+
+[docker-ddns-server](https://github.com/benjaminbear/docker-ddns-server) on **central**. `/32` + hostPort **53** (DNS) and **8088** (Web UI; host `:8080` is already used on `central-0`). Setup: `./scripts/setup_ddns_secondary_ips.sh`. GitOps: `./scripts/render_ddns_gitops.sh`. Details: [ddns.md](ddns.md).
+
+| Address | Cluster | Node | Ports | URL | DNS |
+|---------|---------|------|-------|-----|-----|
+| 10.1.137.106 | central | `central-0` | 53, 8088 | [http://10.1.137.106:8088](http://10.1.137.106:8088) | `ddns.central.inainfra` / `ns.central.inainfra` |
+
+Zone `central.inainfra` · admin `inainfra` / `inainfra`.
 
 ### Other workload MetalLB VIPs (`10.1.138.0/24`)
 
@@ -128,7 +161,7 @@ Dashboard uses **NodePort 30443** on the control-plane **mgmt** IP (`10.1.132.x`
 
 | Access | Cluster | Service | Ports | URL | DNS |
 |--------|---------|---------|-------|-----|-----|
-| NodePort | mgmt | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.200:30443](https://10.1.132.200:30443) | `dashboard-mgmt.nephio.lab:30443` |
+| NodePort | mgmt | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.200:30443](https://10.1.132.200:30443) | `dashboard.mgmt.inainfra:30443` |
 | NodePort | central | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.210:30443](https://10.1.132.210:30443) | — |
 | NodePort | regional | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.220:30443](https://10.1.132.220:30443) | — |
 | NodePort | edge | Kubernetes Dashboard | 30443/tcp | [https://10.1.132.230:30443](https://10.1.132.230:30443) | — |

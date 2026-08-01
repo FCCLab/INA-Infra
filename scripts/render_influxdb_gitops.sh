@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# Render InfluxDB into repos/ for Config Sync GitOps.
+# Edge: hostPort 8086 on CLUSTER_INFLUXDB_NODE; address is influxdb_vip
+# (10.1.137.104). Add the /32 on that node first:
+#   ./scripts/setup_influxdb_secondary_ips.sh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=cluster_lib.sh
+source "$SCRIPT_DIR/cluster_lib.sh"
+
+REPOS_DIR="${REPOS_DIR:-$REPO_ROOT/repos}"
+INFLUX_NS="${INFLUX_NS:-influxdb}"
+INFLUX_NAME="${INFLUX_NAME:-influxdb}"
+INFLUX_IMAGE="${INFLUX_IMAGE:-docker.io/library/influxdb:2.7}"
+INFLUX_PVC_SIZE="${INFLUX_PVC_SIZE:-20Gi}"
+INFLUX_STORAGE_CLASS="${INFLUX_STORAGE_CLASS:-local-path}"
+INFLUX_HOST_PORT="${INFLUX_HOST_PORT:-8086}"
+# Lab defaults (override via env). Token is also the API auth for writers.
+INFLUX_ADMIN_USER="${INFLUX_ADMIN_USER:-inainfra}"
+INFLUX_ADMIN_PASSWORD="${INFLUX_ADMIN_PASSWORD:-inainfra}"
+INFLUX_ORG="${INFLUX_ORG:-ina-infra}"
+INFLUX_BUCKET="${INFLUX_BUCKET:-default}"
+INFLUX_ADMIN_TOKEN="${INFLUX_ADMIN_TOKEN:-ina-infra-influxdb-token}"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [cluster ...]
+
+Default cluster: edge
+
+InfluxDB on site L2 via hostPort ${INFLUX_HOST_PORT} + /32 secondary:
+  edge  http://$(influxdb_vip edge):${INFLUX_HOST_PORT}/
+
+Secondary IP: ./scripts/setup_influxdb_secondary_ips.sh
+Push:         ./bringup/03_push_to_git_repos/push_git_repos.sh edge
+Verify:       ./scripts/check-configsync.sh edge
+
+Environment:
+  INFLUX_IMAGE INFLUX_NS INFLUX_PVC_SIZE INFLUX_STORAGE_CLASS INFLUX_HOST_PORT
+  INFLUX_ADMIN_USER INFLUX_ADMIN_PASSWORD INFLUX_ORG INFLUX_BUCKET INFLUX_ADMIN_TOKEN
+EOF
+}
+
+purge_influxdb_manifests() {
+  local dest_ns="$1"
+  if [[ -d "$dest_ns" ]]; then
+    find "$dest_ns" -maxdepth 1 -type f -name '*.yaml' -delete
+  fi
+}
+
+write_namespace() {
+  local dir="$1"
+  cat >"${dir}/namespace-${INFLUX_NS}.yaml" <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+EOF
+}
+
+write_secret() {
+  local dir="$1"
+  cat >"${dir}/secret-${INFLUX_NAME}-init.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${INFLUX_NAME}-init
+  namespace: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+type: Opaque
+stringData:
+  DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER}
+  DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD}
+  DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+  DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET}
+  DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_ADMIN_TOKEN}
+EOF
+}
+
+write_pvc() {
+  local dir="$1"
+  cat >"${dir}/persistentvolumeclaim-${INFLUX_NAME}.yaml" <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${INFLUX_NAME}
+  namespace: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ${INFLUX_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${INFLUX_PVC_SIZE}
+EOF
+}
+
+write_deployment() {
+  local dir="$1"
+  local node="$2"
+  cat >"${dir}/deployment-${INFLUX_NAME}.yaml" <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${INFLUX_NAME}
+  namespace: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ${INFLUX_NAME}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ${INFLUX_NAME}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ${node}
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: influxdb
+        image: ${INFLUX_IMAGE}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8086
+          hostPort: ${INFLUX_HOST_PORT}
+          protocol: TCP
+        env:
+        - name: DOCKER_INFLUXDB_INIT_MODE
+          value: setup
+        - name: DOCKER_INFLUXDB_INIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: ${INFLUX_NAME}-init
+              key: DOCKER_INFLUXDB_INIT_USERNAME
+        - name: DOCKER_INFLUXDB_INIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ${INFLUX_NAME}-init
+              key: DOCKER_INFLUXDB_INIT_PASSWORD
+        - name: DOCKER_INFLUXDB_INIT_ORG
+          valueFrom:
+            secretKeyRef:
+              name: ${INFLUX_NAME}-init
+              key: DOCKER_INFLUXDB_INIT_ORG
+        - name: DOCKER_INFLUXDB_INIT_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: ${INFLUX_NAME}-init
+              key: DOCKER_INFLUXDB_INIT_BUCKET
+        - name: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ${INFLUX_NAME}-init
+              key: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/influxdb2
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: ${INFLUX_NAME}
+EOF
+}
+
+write_service() {
+  local dir="$1"
+  cat >"${dir}/service-${INFLUX_NAME}.yaml" <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${INFLUX_NAME}
+  namespace: ${INFLUX_NS}
+  labels:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8086
+    targetPort: http
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: ${INFLUX_NAME}
+EOF
+}
+
+write_cluster_influxdb() {
+  local cluster="$1"
+  local repo_name dest_ns vip node
+
+  repo_name="$(cluster_gitea_repo_name "$cluster")"
+  dest_ns="${REPOS_DIR}/${repo_name}/namespaces/${INFLUX_NS}"
+  vip="$(influxdb_vip "$cluster")"
+  node="${CLUSTER_INFLUXDB_NODE[$cluster]:-}"
+
+  if [[ -z "$vip" || -z "$node" ]]; then
+    echo "error: CLUSTER_INFLUXDB_VIP/NODE unset for '${cluster}' (edge only today)" >&2
+    exit 1
+  fi
+
+  mkdir -p "$dest_ns"
+  purge_influxdb_manifests "$dest_ns"
+
+  write_namespace "$dest_ns"
+  write_secret "$dest_ns"
+  write_pvc "$dest_ns"
+  write_deployment "$dest_ns" "$node"
+  write_service "$dest_ns"
+
+  echo "==> [${cluster}] ${dest_ns}"
+  echo "    UI/API: http://${vip}:${INFLUX_HOST_PORT}/ on ${node} (need ${vip}/32 on site NIC)"
+  echo "    org=${INFLUX_ORG} bucket=${INFLUX_BUCKET} user=${INFLUX_ADMIN_USER}"
+}
+
+main() {
+  local clusters=("$@")
+  if [[ ${#clusters[@]} -eq 0 ]]; then
+    clusters=(edge)
+  fi
+  for cluster in "${clusters[@]}"; do
+    case "$cluster" in
+      edge) ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        echo "error: influxdb render supports edge only (got '${cluster}')" >&2
+        exit 1
+        ;;
+    esac
+    write_cluster_influxdb "$cluster"
+  done
+  echo
+  echo "Secondary IP: ./scripts/setup_influxdb_secondary_ips.sh ${clusters[*]}"
+  echo "Push: ./bringup/03_push_to_git_repos/push_git_repos.sh ${clusters[*]}"
+  echo "Verify: ./scripts/check-configsync.sh ${clusters[*]}"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+main "$@"

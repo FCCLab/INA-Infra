@@ -57,6 +57,31 @@ declare -A CLUSTER_OPENSPEEDTEST_NODE=(
   [regional]=regional-1
   [edge]=edge-0
 )
+# InfluxDB on site L2 (10.1.137). Served via hostPort 8086 on
+# CLUSTER_INFLUXDB_NODE with a /32 secondary on that node's site NIC
+# (same pattern as OpenSpeedTest — UPF N6 macvlan cannot reliably ARP MetalLB).
+declare -A CLUSTER_INFLUXDB_VIP=(
+  [edge]=10.1.137.104
+)
+declare -A CLUSTER_INFLUXDB_NODE=(
+  [edge]=edge-0
+)
+# Grafana on site L2 (10.1.137). Served via hostPort 3000 on
+# CLUSTER_GRAFANA_NODE with a /32 secondary (same pattern as InfluxDB/OST).
+declare -A CLUSTER_GRAFANA_VIP=(
+  [edge]=10.1.137.105
+)
+declare -A CLUSTER_GRAFANA_NODE=(
+  [edge]=edge-0
+)
+# DynDNS (benjaminbear/docker-ddns-server) on site L2. DNS 53 + Web UI hostPort
+# on CLUSTER_DDNS_NODE with a /32 secondary (same pattern as OST/Influx/Grafana).
+declare -A CLUSTER_DDNS_VIP=(
+  [central]=10.1.137.106
+)
+declare -A CLUSTER_DDNS_NODE=(
+  [central]=central-0
+)
 # OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
 OAI_MACVLAN_PREFIX="${OAI_MACVLAN_PREFIX:-10.1.139}"
@@ -216,6 +241,21 @@ openspeedtest_vip() {
   else
     printf '%s' "${CLUSTER_OPENSPEEDTEST_VIP[$cluster]}"
   fi
+}
+
+influxdb_vip() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_INFLUXDB_VIP[$cluster]:-}"
+}
+
+grafana_vip() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_GRAFANA_VIP[$cluster]:-}"
+}
+
+ddns_vip() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_DDNS_VIP[$cluster]:-}"
 }
 
 amf_n2_vip() {
