@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=cluster_lib.sh
 source "$SCRIPT_DIR/cluster_lib.sh"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-v2.2.1-dnn-fix-3}"
+IMAGE_TAG="${IMAGE_TAG:-v2.2.1-dnn-fix-4}"
 REPO_NAME="oaisoftwarealliance/oai-smf"
 DO_BUILD=0
 TAG_ONLY=0

@@ -72,7 +72,7 @@ fi
 OAI_IMAGE_TAG="${INA_OAI_IMAGE_TAG:-v2.2.1}"
 # SMF: custom image from lab registry (DNN fix). Other NFs keep OAI_IMAGE_TAG.
 # Bump INA_OAI_SMF_IMAGE_TAG (-2, -3, ...) after each rebuild/push.
-OAI_SMF_IMAGE_TAG="${INA_OAI_SMF_IMAGE_TAG:-v2.2.1-dnn-fix-3}"
+OAI_SMF_IMAGE_TAG="${INA_OAI_SMF_IMAGE_TAG:-v2.2.1-dnn-fix-4}"
 OAI_SMF_IMAGE="${INA_OAI_SMF_IMAGE:-10.1.132.30:5000/oaisoftwarealliance/oai-smf:${OAI_SMF_IMAGE_TAG}}"
 BASE_DIR="${INA_OAI_CONTROLLER_BASE:-$INA_INFRA_ROOT/oai-controller-base}"
 UTILS_DIR="${INA_OAI_UTILS_DIR:-$INA_INFRA_ROOT/oai-controller-utils}"
