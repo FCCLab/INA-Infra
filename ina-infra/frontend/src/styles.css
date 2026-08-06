@@ -1364,3 +1364,58 @@ code {
   border-color: var(--accent-orange);
   background: color-mix(in srgb, var(--accent-orange) 22%, var(--surface));
 }
+
+/* Docs tab */
+.docs-layout.page-layout {
+  grid-template-columns: 1fr;
+  justify-items: center;
+}
+.docs-page {
+  width: min(920px, 100%);
+  max-width: 920px;
+}
+.docs-page .tier + .tier {
+  margin-top: 16px;
+}
+.docs-h2 {
+  margin: 0 0 12px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+}
+.docs-lead {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.docs-diagram,
+.docs-formula {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.docs-table td code,
+.docs-page code {
+  font-size: 11px;
+}
+.docs-ol {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.docs-ol strong {
+  color: var(--text);
+}
+.docs-ul {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.docs-ul code {
+  font-size: 11px;
+}

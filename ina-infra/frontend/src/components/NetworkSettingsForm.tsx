@@ -176,8 +176,8 @@ export default function NetworkSettingsForm({ value, onChange }: Props) {
           />
         </FieldHelp>
         <FieldHelp
-          label="beta_demand"
-          help="PM-only: weight on demand shortfall vs throughput shortfall. Unused by Planning Layer (PL)."
+          label="Demand weight (PM)"
+          help="beta_demand — PM-only weight on demand shortfall vs throughput shortfall. Unused by Planning Layer (PL)."
         >
           <input
             type="number"

@@ -4,6 +4,11 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/.venv/
 data/
+logs/*
+!logs/.gitkeep
+backend/backend.log
+backend/backend.pid
+.dev/
 .env
 *.pyc
 .pytest_cache/

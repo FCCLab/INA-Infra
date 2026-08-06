@@ -288,6 +288,89 @@ export type ProfileListOut = {
   names: string[];
 };
 
+export type PmLoopParams = {
+  interval_sec: number;
+  demand_multiplier: number;
+  max_cycles: number;
+};
+
+export type PsLoopParams = {
+  interval_sec: number;
+  mcs_min: number;
+  mcs_max: number;
+  mcs_fixed: number | null;
+  max_cycles: number;
+  seed: number;
+};
+
+export type PmSliceResultOut = {
+  id: number;
+  demand: number;
+  compute_cap: number;
+  resources: ResourcesOut;
+};
+
+export type PsSliceResultOut = {
+  id: number;
+  eta: number;
+  b_min: number;
+  b_ded: number;
+  b_max: number;
+  radio_mbps: number;
+  demand: number;
+};
+
+export type PmSolveResponse = {
+  ok: boolean;
+  profile: string;
+  cycle: number;
+  message: string;
+  slices: PmSliceResultOut[];
+  demand: Record<number, number>;
+};
+
+export type PsSolveResponse = {
+  ok: boolean;
+  profile: string;
+  cycle: number;
+  message: string;
+  slices: PsSliceResultOut[];
+  extra: number;
+  demand: Record<number, number>;
+};
+
+export type PmLoopStatusOut = {
+  profile: string;
+  running: boolean;
+  cycle: number;
+  params: PmLoopParams;
+  last_result: PmSolveResponse | null;
+  demand: Record<number, number>;
+};
+
+export type PsLoopStatusOut = {
+  profile: string;
+  running: boolean;
+  cycle: number;
+  params: PsLoopParams;
+  last_result: PsSolveResponse | null;
+  demand: Record<number, number>;
+};
+
+export type PmLoopStopResponse = {
+  ok: boolean;
+  profile: string;
+  stopped: boolean;
+  message: string;
+};
+
+export type PsLoopStopResponse = {
+  ok: boolean;
+  profile: string;
+  stopped: boolean;
+  message: string;
+};
+
 export const DEFAULT_PROFILE: Profile = {
   name: "ina-infra",
   subnet: "10.1.140.0/24",
@@ -618,5 +701,57 @@ export const api = {
     request<ProfileRolloutStopResponse>(
       `/api/v1/profiles/${encodeURIComponent(name)}/rollout/stop`,
       { method: "POST", body: "{}" },
+    ),
+  pmSolve: (profile: Profile, params?: PmLoopParams) =>
+    request<PmSolveResponse>("/api/v1/pm/solve", {
+      method: "POST",
+      body: JSON.stringify({ profile, params }),
+    }),
+  pmLoopStart: (
+    profile: Profile,
+    params?: PmLoopParams,
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<PmLoopStatusOut>(
+      "/api/v1/pm/loop/start",
+      { profile, params },
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 3_600_000, signal: opts?.signal },
+    ),
+  pmLoopStop: (profile: Profile) =>
+    request<PmLoopStopResponse>("/api/v1/pm/loop/stop", {
+      method: "POST",
+      body: JSON.stringify({ profile }),
+    }),
+  pmLoopStatus: (profileName: string) =>
+    request<PmLoopStatusOut>(
+      `/api/v1/pm/loop/status?profile=${encodeURIComponent(profileName)}`,
+    ),
+  psSolve: (profile: Profile, params?: PsLoopParams) =>
+    request<PsSolveResponse>("/api/v1/ps/solve", {
+      method: "POST",
+      body: JSON.stringify({ profile, params }),
+    }),
+  psLoopStart: (
+    profile: Profile,
+    params?: PsLoopParams,
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<PsLoopStatusOut>(
+      "/api/v1/ps/loop/start",
+      { profile, params },
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 3_600_000, signal: opts?.signal },
+    ),
+  psLoopStop: (profile: Profile) =>
+    request<PsLoopStopResponse>("/api/v1/ps/loop/stop", {
+      method: "POST",
+      body: JSON.stringify({ profile }),
+    }),
+  psLoopStatus: (profileName: string) =>
+    request<PsLoopStatusOut>(
+      `/api/v1/ps/loop/status?profile=${encodeURIComponent(profileName)}`,
     ),
 };

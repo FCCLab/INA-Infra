@@ -1,10 +1,12 @@
 import { useMemo, useState, type ReactNode } from "react";
 import PlanningPage from "./pages/PlanningPage";
-import PlaceholderPage from "./pages/PlaceholderPage";
+import MediumPage from "./pages/MediumPage";
+import ShortPage from "./pages/ShortPage";
+import DocsPage from "./pages/DocsPage";
 import AppShell, { type NavTab } from "./components/ui/AppShell";
 import { DialogProvider } from "./components/ui/Dialog";
 
-type Tab = "planning" | "medium" | "short";
+type Tab = "planning" | "medium" | "short" | "docs";
 
 const IconOverview = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -28,6 +30,13 @@ const IconSignal = (
   </svg>
 );
 
+const IconBook = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+);
+
 const BRAND = {
   product: "NeuroRAN",
   title: "INA-Infra · NeuroRAN",
@@ -44,6 +53,7 @@ export default function App() {
       { id: "planning", label: "Planning", icon: IconOverview },
       { id: "medium", label: "Medium", icon: IconClock },
       { id: "short", label: "Short", icon: IconSignal },
+      { id: "docs", label: "Docs", icon: IconBook },
     ],
     [],
   );
@@ -53,25 +63,19 @@ export default function App() {
       ? "Planning (PL)"
       : tab === "medium"
         ? "Medium (PM)"
-        : "Short (PS)";
+        : tab === "short"
+          ? "Short (PS)"
+          : "Docs";
 
   let body: ReactNode = null;
   if (tab === "planning") {
     body = <PlanningPage />;
   } else if (tab === "medium") {
-    body = (
-      <PlaceholderPage
-        title="Medium (PM)"
-        subtitle="Medium-timescale planning controls will appear here. Status for the active profile stays live on the right."
-      />
-    );
+    body = <MediumPage />;
+  } else if (tab === "short") {
+    body = <ShortPage />;
   } else {
-    body = (
-      <PlaceholderPage
-        title="Short (PS)"
-        subtitle="Short-timescale planning controls will appear here. Status for the active profile stays live on the right."
-      />
-    );
+    body = <DocsPage />;
   }
 
   return (
@@ -83,9 +87,11 @@ export default function App() {
       crumb={crumb}
       siteLabel="INA · Multi-timescale slice planning"
       topbarExtra={
-        <a className="docs-link" href="/docs" target="_blank" rel="noreferrer">
-          Swagger
-        </a>
+        <>
+          <a className="docs-link" href="/docs" target="_blank" rel="noreferrer">
+            Swagger
+          </a>
+        </>
       }
     >
       {/* Inside .app so dialogs inherit theme tokens (opaque --bg1, etc.) */}

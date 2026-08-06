@@ -17,6 +17,10 @@ from app.schemas import (
     PlSolveResponse,
     PlUndeployRequest,
     PlUndeployResponse,
+    PmLoopRequest,
+    PmLoopStatusOut,
+    PmLoopStopResponse,
+    PmSolveResponse,
     ProfileClusterStatusOut,
     ProfileCreateRequest,
     ProfileDefaultsOut,
@@ -25,14 +29,20 @@ from app.schemas import (
     ProfileRolloutRequest,
     ProfileRolloutResponse,
     ProfileRolloutStopResponse,
+    PsLoopRequest,
+    PsLoopStatusOut,
+    PsLoopStopResponse,
+    PsSolveResponse,
     SliceIn,
 )
 from app.services import (
     cluster_status,
     gitea_apply,
     pl_solver,
+    pm_loop,
     profile_rollout,
     profile_store,
+    ps_loop,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -522,38 +532,123 @@ def pl_undeploy_stream(body: PlUndeployRequest):
     return _sse_response(gitea_apply.iter_undeploy_sse(body))
 
 
-# ── Medium / Short (stubs) ───────────────────────────────────────────────────
+# ── Medium (PM) ──────────────────────────────────────────────────────────────
 
 
 @router.post(
     "/pm/solve",
-    status_code=501,
+    response_model=PmSolveResponse,
     tags=["Medium (PM)"],
-    summary="Medium-layer solve (stub)",
+    summary="Run PM once",
     description=(
-        "**Not implemented.** MediumLayer (PM) will re-allocate compute with "
-        "placement fixed from PL. Returns HTTP **501**."
+        "Single MediumLayer solve using placement from the profile's last PL "
+        "result. Reads demand from PS loop state (fallback: slice t_bar)."
     ),
 )
-def pm_solve():
-    raise HTTPException(
-        status_code=501,
-        detail="MediumLayer (PM) not implemented in this UI phase",
-    )
+def pm_solve(body: PmLoopRequest):
+    try:
+        return pm_loop.solve_pm_once(body.profile.name, body.params, cycle=0)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/pm/loop/start",
+    tags=["Medium (PM)"],
+    summary="Start PM background loop (SSE)",
+    description=(
+        "Run MediumLayer on an interval until Stop or max_cycles. Streams "
+        "cycle logs as Server-Sent Events."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from PM loop",
+        }
+    },
+)
+def pm_loop_start(body: PmLoopRequest):
+    return _sse_response(pm_loop.iter_pm_loop_sse(body))
+
+
+@router.post(
+    "/pm/loop/stop",
+    response_model=PmLoopStopResponse,
+    tags=["Medium (PM)"],
+    summary="Stop PM background loop",
+)
+def pm_loop_stop(body: PmLoopRequest):
+    return pm_loop.stop_pm_loop(body.profile.name)
+
+
+@router.get(
+    "/pm/loop/status",
+    response_model=PmLoopStatusOut,
+    tags=["Medium (PM)"],
+    summary="PM loop status",
+)
+def pm_loop_status(profile: str):
+    return pm_loop.pm_loop_status(profile)
+
+
+# ── Short (PS) ───────────────────────────────────────────────────────────────
 
 
 @router.post(
     "/ps/solve",
-    status_code=501,
+    response_model=PsSolveResponse,
     tags=["Short (PS)"],
-    summary="Short-layer solve (stub)",
+    summary="Run PS once",
     description=(
-        "**Not implemented.** ShortLayer (PS) will allocate PRBs "
-        "(`b_min` / `b_ded`) on a short timescale. Returns HTTP **501**."
+        "Single ShortLayer solve using SLAs from the profile's last PL result. "
+        "Updates shared demand for the PM loop."
     ),
 )
-def ps_solve():
-    raise HTTPException(
-        status_code=501,
-        detail="ShortLayer (PS) not implemented in this UI phase",
-    )
+def ps_solve(body: PsLoopRequest):
+    try:
+        return ps_loop.solve_ps_once(body.profile.name, body.params, cycle=0)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/ps/loop/start",
+    tags=["Short (PS)"],
+    summary="Start PS background loop (SSE)",
+    description=(
+        "Run ShortLayer on an interval until Stop or max_cycles. Streams "
+        "cycle logs as Server-Sent Events."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from PS loop",
+        }
+    },
+)
+def ps_loop_start(body: PsLoopRequest):
+    return _sse_response(ps_loop.iter_ps_loop_sse(body))
+
+
+@router.post(
+    "/ps/loop/stop",
+    response_model=PsLoopStopResponse,
+    tags=["Short (PS)"],
+    summary="Stop PS background loop",
+)
+def ps_loop_stop(body: PsLoopRequest):
+    return ps_loop.stop_ps_loop(body.profile.name)
+
+
+@router.get(
+    "/ps/loop/status",
+    response_model=PsLoopStatusOut,
+    tags=["Short (PS)"],
+    summary="PS loop status",
+)
+def ps_loop_status(profile: str):
+    return ps_loop.ps_loop_status(profile)

@@ -489,3 +489,149 @@ class ProfileCreateRequest(BaseModel):
 class ProfileListOut(BaseModel):
     profiles: List[ProfileRecord]
     names: List[str]
+
+
+# ── Medium (PM) / Short (PS) loops ───────────────────────────────────────────
+
+
+class PmLoopParams(BaseModel):
+    interval_sec: float = Field(
+        10.0,
+        ge=0.1,
+        le=3600.0,
+        description="Loop interval (s) — interval_sec: seconds between PM solves",
+    )
+    demand_multiplier: float = Field(
+        1.0,
+        ge=0.0,
+        le=100.0,
+        description="Demand scale — demand_multiplier: scale PS/t_bar demand before PM",
+    )
+    max_cycles: int = Field(
+        0,
+        ge=0,
+        description="Max cycles — max_cycles: stop after N solves; 0 = until Stop",
+    )
+
+
+class PsLoopParams(BaseModel):
+    interval_sec: float = Field(
+        1.0,
+        ge=0.1,
+        le=3600.0,
+        description="Loop interval (s) — interval_sec: seconds between PS solves",
+    )
+    mcs_min: int = Field(
+        5,
+        ge=1,
+        le=28,
+        description="MCS min — mcs_min: lower bound for random η sampling",
+    )
+    mcs_max: int = Field(
+        28,
+        ge=1,
+        le=28,
+        description="MCS max — mcs_max: upper bound for random η sampling",
+    )
+    mcs_fixed: Optional[int] = Field(
+        None,
+        ge=1,
+        le=28,
+        description="Fixed MCS — mcs_fixed: use fixed MCS instead of random",
+    )
+    max_cycles: int = Field(
+        0,
+        ge=0,
+        description="Max cycles — max_cycles: stop after N solves; 0 = until Stop",
+    )
+    seed: int = Field(
+        2025,
+        description="Random seed — seed: RNG seed for MCS sampling",
+    )
+
+
+class PmLoopRequest(BaseModel):
+    profile: Profile
+    params: Optional[PmLoopParams] = None
+
+
+class PsLoopRequest(BaseModel):
+    profile: Profile
+    params: Optional[PsLoopParams] = None
+
+
+class PmSliceResultOut(BaseModel):
+    id: int
+    demand: float = Field(..., description="Demand (Mbps) — demand: PM input throughput target")
+    compute_cap: float = Field(
+        ...,
+        description="Compute cap (Mbps) — compute_cap: achievable throughput from resources",
+    )
+    resources: ResourcesOut
+
+
+class PsSliceResultOut(BaseModel):
+    id: int
+    eta: float = Field(..., description="Channel η — eta: Mbps per PRB from MCS")
+    b_min: float = Field(..., description="Reserved PRBs — b_min: guaranteed PRB reservation")
+    b_ded: float = Field(..., description="Dedicated PRBs — b_ded: isolated subset of b_min")
+    b_max: float = Field(..., description="PRB ceiling — b_max: b_min + shared extra")
+    radio_mbps: float = Field(
+        ...,
+        description="Radio Mbps — radio_mbps: estimated b_max × eta",
+    )
+    demand: float = Field(
+        ...,
+        description="Demand→PM — demand: radio potential fed to PM loop state",
+    )
+
+
+class PmSolveResponse(BaseModel):
+    ok: bool
+    profile: str
+    cycle: int = 0
+    message: str = ""
+    slices: List[PmSliceResultOut] = Field(default_factory=list)
+    demand: Dict[int, float] = Field(default_factory=dict)
+
+
+class PsSolveResponse(BaseModel):
+    ok: bool
+    profile: str
+    cycle: int = 0
+    message: str = ""
+    slices: List[PsSliceResultOut] = Field(default_factory=list)
+    extra: float = 0.0
+    demand: Dict[int, float] = Field(default_factory=dict)
+
+
+class PmLoopStatusOut(BaseModel):
+    profile: str
+    running: bool = False
+    cycle: int = 0
+    params: PmLoopParams = Field(default_factory=PmLoopParams)
+    last_result: Optional[PmSolveResponse] = None
+    demand: Dict[int, float] = Field(default_factory=dict)
+
+
+class PsLoopStatusOut(BaseModel):
+    profile: str
+    running: bool = False
+    cycle: int = 0
+    params: PsLoopParams = Field(default_factory=PsLoopParams)
+    last_result: Optional[PsSolveResponse] = None
+    demand: Dict[int, float] = Field(default_factory=dict)
+
+
+class PmLoopStopResponse(BaseModel):
+    ok: bool
+    profile: str
+    stopped: bool = False
+    message: str = ""
+
+
+class PsLoopStopResponse(BaseModel):
+    ok: bool
+    profile: str
+    stopped: bool = False
+    message: str = ""

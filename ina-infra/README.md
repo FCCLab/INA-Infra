@@ -2,7 +2,7 @@
 
 Web UI + Swagger REST API for **PlanningLayer (PL)**: edit slice SLAs, solve placement + Multus IP plan, apply profile manifests to lab Gitea.
 
-PM / PS are stubbed (HTTP 501).
+PM / PS run via Medium and Short tabs (`/pm/solve`, `/ps/solve`, loop start/stop).
 
 ## Profiles
 
@@ -24,6 +24,12 @@ N6 GWs on `.140`: `./ina-infra/scripts/setup_ina_n6_gw.sh`
 ```bash
 cd /path/to/nephio-network-slicing
 
+# Local dev (uvicorn --reload + Vite HMR, background by default)
+./ina-infra/dev up          # or: ./ina-infra/dev
+./ina-infra/dev up -f       # foreground
+./ina-infra/dev logs
+./ina-infra/dev down
+
 # Host API (Gurobi) — prefer systemd
 sudo bash ina-infra/scripts/install-host-backend.sh
 # or: ./ina-infra/run-backend.sh
@@ -38,6 +44,8 @@ kubectl --context mgmt@mgmt -n ina-infra rollout restart deploy/ina-infra-fronte
 |---------|-----|
 | UI | http://10.1.132.200:30518 |
 | API | http://10.1.132.200:8082/docs |
+
+Layer docs: [docs/pl-pm-ps.md](docs/pl-pm-ps.md) (also **Docs** tab in the UI).
 
 ## API
 
