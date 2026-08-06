@@ -23,6 +23,7 @@ OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
 OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:latest}"
+IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:n3}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 N6_DHCP_GW="${OAI_N6_DHCP_GW:-10.1.137.1}"
 
@@ -116,7 +117,7 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   "$CUUP_E1" "$CUUP_F1U" "$CUUP_N3" "$DU_F1" "$DU_RF" "$UE_RF" \
   "$UPF_N3" "$UPF_N4" "$UPF_N6_LOGICAL" "$SMF_N4" "$GW" "$N6_DHCP_GW" \
   "$NAD_PARENT" "$USRP_IFACE" "$BENCH_IMSI" "$UPF_NAME" \
-  "$OAI_RAN_OPERATOR_IMAGE" \
+  "$OAI_RAN_OPERATOR_IMAGE" "$IPERF3_N6_IMAGE" \
   <<'PY'
 import importlib.util
 import json
@@ -136,8 +137,8 @@ import yaml
     cuup_e1, cuup_f1u, cuup_n3, du_f1, du_rf, ue_rf,
     upf_n3, upf_n4, upf_n6_logical, smf_n4, gw, n6_dhcp_gw,
     nad_parent, usrp_iface, bench_imsi, upf_name,
-    ran_op_image,
-) = sys.argv[1:37]
+    ran_op_image, iperf3_n6_image,
+) = sys.argv[1:38]
 
 repos = Path(repos_dir)
 gw_default = gw
@@ -386,6 +387,10 @@ ip route show default | while read -r line; do
 done
 ip route replace default via "$gw" dev n6 metric 50
 ip route replace 10.244.0.0/16 via 10.244.1.1 dev eth0 2>/dev/null || true
+# Keep ClusterIP / Influx reachable via flannel eth0 (N6 is default).
+flannel_gw=$(ip -4 route show 10.244.0.0/16 | awk '{print $3; exit}')
+flannel_gw=${flannel_gw:-10.244.1.1}
+ip route replace 10.96.0.0/12 via "$flannel_gw" dev eth0 2>/dev/null || true
 exit 0
 """
 
@@ -716,13 +721,36 @@ def render_upf_executor() -> None:
                         ],
                         "resources": {"requests": {"cpu": "100m", "memory": "512Mi"}, "limits": {"cpu": "100m", "memory": "512Mi"}},
                         "volumeMounts": [{"name": "configuration", "mountPath": "/openair-upf/etc"}],
+                    }, {
+                        # Share UPF netns → bind iperf3 to Multus N3 address.
+                        "name": "iperf3-n6",
+                        "image": iperf3_n6_image,
+                        "imagePullPolicy": "IfNotPresent",
+                        "command": ["python3", "server.py"],
+                        "env": [
+                            {"name": "BIND_IFACE", "value": "n3"},
+                            {"name": "N6_IFACE", "value": "n3"},
+                            {"name": "PORT_START", "value": "5201"},
+                            {"name": "PORT_COUNT", "value": "126"},
+                            {"name": "IDLE_TIMEOUT", "value": "30"},
+                            {"name": "REPORT_INTERVAL", "value": "1"},
+                            {"name": "TESTBED", "value": bench_ns},
+                            {"name": "INFLUX_URL", "value": "http://influxdb.influxdb.svc.cluster.local:8086"},
+                            {"name": "INFLUX_TOKEN", "value": "ina-infra-influxdb-token"},
+                            {"name": "INFLUX_ORG", "value": "ina-infra"},
+                            {"name": "INFLUX_BUCKET", "value": "default"},
+                        ],
+                        "resources": {
+                            "requests": {"cpu": "50m", "memory": "128Mi"},
+                            "limits": {"cpu": "500m", "memory": "256Mi"},
+                        },
                     }, debug_ctr],
                     "volumes": [{"name": "configuration", "configMap": {"name": upf_name}}],
                 },
             },
         },
     }, edge_dir / f"40-deployment-{upf_name}.yaml")
-    print(f"  UPF executor {upf_name} @ {bench_ns} (N6 DHCP)")
+    print(f"  UPF executor {upf_name} @ {bench_ns} (N6 DHCP + iperf3-n6 sidecar {iperf3_n6_image})")
 
 
 render_core_executors()
@@ -1280,11 +1308,51 @@ dump(
                                 "subPath": "ue.conf",
                             }],
                         },
+                        {
+                            # Auto-starts after PDU (oaitun_ue1); needs IPERF_SERVER / ConfigMap
+                            # from ./scripts/sync_iperf3_n6_server_ip.sh (UPF N3 Multus IP).
+                            "name": "iperf3-client",
+                            "image": iperf3_n6_image,
+                            "imagePullPolicy": "Always",
+                            "command": ["/bin/sh", "client_entrypoint.sh"],
+                            "env": [
+                                {"name": "PORT_START", "value": "5201"},
+                                {"name": "PROCESSES", "value": "5"},
+                                {"name": "BANDWIDTH", "value": "50M"},
+                                {"name": "REPORT_INTERVAL", "value": "1"},
+                                {"name": "LOG_INTERVAL", "value": "5"},
+                                {"name": "BIND_DEV", "value": "oaitun_ue1"},
+                                {"name": "TESTBED", "value": bench_ns},
+                                {"name": "INFLUX_URL", "value": "http://influxdb.influxdb.svc.cluster.local:8086"},
+                                {"name": "INFLUX_TOKEN", "value": "ina-infra-influxdb-token"},
+                                {"name": "INFLUX_ORG", "value": "ina-infra"},
+                                {"name": "INFLUX_BUCKET", "value": "default"},
+                            ],
+                            "volumeMounts": [{
+                                "name": "iperf3-n6-endpoint",
+                                "mountPath": "/config",
+                                "readOnly": True,
+                            }],
+                            "resources": {
+                                "requests": {"cpu": "20m", "memory": "64Mi"},
+                                "limits": {"cpu": "500m", "memory": "256Mi"},
+                            },
+                        },
                         debug_ctr,
                     ],
                     "volumes": [{
                         "name": "configuration",
                         "configMap": {"name": "oai-ue-configmap"},
+                    }, {
+                        "name": "iperf3-n6-endpoint",
+                        "configMap": {
+                            "name": "iperf3-n6-endpoint",
+                            "optional": True,
+                            "items": [
+                                {"key": "server_ip", "path": "server_ip"},
+                                {"key": "n6_server_ip", "path": "n6_server_ip"},
+                            ],
+                        },
                     }],
                 },
             },
@@ -1302,6 +1370,7 @@ print(f"  CU-CP N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
 print(f"  CU-UP E1/F1U/N3 {cuup_e1}/{cuup_f1u}/{cuup_n3} → UPF N3 {upf_n3}")
 print(f"  DU F1/rfsim {du_f1}/{du_rf}, UE RF {ue_rf} (IMSI {bench_imsi}, DNN internet)")
 print(f"  UPF {upf_name} N3/N4 {upf_n3}/{upf_n4} N6=DHCP (logical {upf_n6_logical} for SMF)")
+print(f"  iperf3-n6: {iperf3_n6_image} (UPF sidecar :5201-5326 → InfluxDB; UE client helper)")
 print(f"  Core {bench_ns}: AMF {amf_n2} SMF {smf_n4}")
 PY
 
