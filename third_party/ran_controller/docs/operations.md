@@ -2,13 +2,28 @@
 
 ## INA-Infra usage
 
-In this testbed, Config Sync often **prunes operator-created** Deployments/pods. RAN GitOps scripts therefore also render **static executor** manifests (Deployment + ConfigMap + NADs) alongside the operator Deployment. Prefer those executors for long-lived RAN stacks; keep the image from [build.md](build.md) in sync if you still run the operator.
+### oai-benchmark (operator-driven RAN)
+
+[`scripts/render_oai_benchmark_gitops.sh`](../../../scripts/render_oai_benchmark_gitops.sh) deploys **`oai-ran-controller`** in `oai-benchmark` on **edge**. It reconciles `NFDeployment`s `cucp-bench` / `cuup-bench` / `du-bench` into ConfigMaps, Deployments, and Services. Multus NADs stay in git (names must match `{nfdeployment}-{iface}`). UPF and nrUE remain static executors.
+
+```bash
+# Image must include rf Multus + usrp pin (see ina-infra-oai-ran-controller DuResources)
+./third_party/ran_controller/scripts/build_ran_controller_image.sh
+export OAI_RAN_OPERATOR_IMAGE=10.1.132.30:5000/oai-ran-controller:latest
+./scripts/render_oai_benchmark_gitops.sh
+./bringup/03_push_to_git_repos/push_git_repos.sh central edge
+kubectl --context edge@edge -n oai-benchmark get nfdeployment,deploy
+```
+
+### Other RAN GitOps (hybrid)
+
+In this testbed, Config Sync often **prunes** or conflicts with operator-created workloads when the same objects are also owned by git. Legacy RAN scripts therefore also render **static executor** manifests alongside the operator. Prefer executors for long-lived non-benchmark stacks; keep the image from [build.md](build.md) in sync if you still run the operator.
 
 | Path | Role |
 |------|------|
-| Operator Deployment | `oai-ran-operators` (or per-slice ns) — watches `NFDeployment` |
+| Operator Deployment | `oai-ran-operators` or workload ns — watches `NFDeployment` |
 | Executor manifests | Written by `scripts/render_oai_ran_*.sh` / `render_oai_slice_deployment_gitops.sh` |
-| Lab image default in scripts | `docker.io/nephio/oai-ran-controller:latest` — override with `OAI_RAN_OPERATOR_IMAGE` |
+| Lab image default in scripts | Override with `OAI_RAN_OPERATOR_IMAGE` (registry `10.1.132.30:5000/oai-ran-controller`) |
 
 Verify sync: `./scripts/check-configsync.sh`. Topology / IPs: [`docs/oai.md`](../../../docs/oai.md).
 

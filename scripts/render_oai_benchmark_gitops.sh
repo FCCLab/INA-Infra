@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Render oai-benchmark GitOps: non-slice OAI stack for throughput/latency benchmarks.
 #   central — dedicated 5GC CP executors in oai-benchmark (no Kopf operators)
-#   edge    — RAN + UPF executors in oai-benchmark (UPF N6 = DHCP)
+#   edge    — oai-ran-controller reconciles CU-CP/CU-UP/DU NFDeployments;
+#             UPF + nrUE remain static executors (UPF N6 = DHCP)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,6 +22,7 @@ OAI_CUCP_IMAGE="${OAI_CUCP_IMAGE:-${OAI_REGISTRY}/oai-cucp:${OAI_IMAGE_TAG}}"
 OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
+OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:latest}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 N6_DHCP_GW="${OAI_N6_DHCP_GW:-10.1.137.1}"
 
@@ -114,6 +116,7 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   "$CUUP_E1" "$CUUP_F1U" "$CUUP_N3" "$DU_F1" "$DU_RF" "$UE_RF" \
   "$UPF_N3" "$UPF_N4" "$UPF_N6_LOGICAL" "$SMF_N4" "$GW" "$N6_DHCP_GW" \
   "$NAD_PARENT" "$USRP_IFACE" "$BENCH_IMSI" "$UPF_NAME" \
+  "$OAI_RAN_OPERATOR_IMAGE" \
   <<'PY'
 import importlib.util
 import json
@@ -133,7 +136,8 @@ import yaml
     cuup_e1, cuup_f1u, cuup_n3, du_f1, du_rf, ue_rf,
     upf_n3, upf_n4, upf_n6_logical, smf_n4, gw, n6_dhcp_gw,
     nad_parent, usrp_iface, bench_imsi, upf_name,
-) = sys.argv[1:36]
+    ran_op_image,
+) = sys.argv[1:37]
 
 repos = Path(repos_dir)
 gw_default = gw
@@ -724,172 +728,168 @@ def render_upf_executor() -> None:
 render_core_executors()
 
 # ---------------------------------------------------------------------------
-# Edge RAN in oai-benchmark
+# Edge RAN via oai-ran-controller (NFDeployment) + static UE executor
 # ---------------------------------------------------------------------------
 purge_dir(edge_dir)
 edge_dir.mkdir(parents=True)
 write_ns(edge_dir, bench_ns)
+
+# Operator RBAC (cluster-scoped) + Deployment in oai-benchmark
+dump(
+    {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRole",
+        "metadata": {"name": "oai-ran-operator-cluster-role"},
+        "rules": [
+            {"apiGroups": [""], "resources": ["configmaps", "services", "serviceaccounts"],
+             "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
+            {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
+            {"apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list", "watch"]},
+            {"apiGroups": ["apps"], "resources": ["deployments"],
+             "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
+            {"apiGroups": ["apps"], "resources": ["deployments/status"], "verbs": ["get"]},
+            {"apiGroups": ["k8s.cni.cncf.io"], "resources": ["network-attachment-definitions"],
+             "verbs": ["get", "list", "watch", "create"]},
+            {"apiGroups": ["workload.nephio.org"],
+             "resources": ["nfdeployments", "nfdeployments/status", "nfdeployments/finalizers"],
+             "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
+            {"apiGroups": ["workload.nephio.org"], "resources": ["nfconfigs"],
+             "verbs": ["get", "list", "watch"]},
+            {"apiGroups": ["ref.nephio.org"], "resources": ["configs"],
+             "verbs": ["get", "list", "watch"]},
+        ],
+    },
+    edge_cluster / "clusterrole-oai-ran-operator-cluster-role.yaml",
+)
+
+crb_path = edge_cluster / "clusterrolebinding-oai-ran-operator-rolebinding-cluster.yaml"
+subject = {"kind": "ServiceAccount", "name": "oai-ran-operator", "namespace": bench_ns}
+if crb_path.is_file():
+    crb = yaml.safe_load(crb_path.read_text())
+    subjects = crb.setdefault("subjects", [])
+    if subject not in subjects:
+        subjects.append(subject)
+    dump(crb, crb_path)
+else:
+    dump(
+        {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "ClusterRoleBinding",
+            "metadata": {"name": "oai-ran-operator-rolebinding-cluster"},
+            "roleRef": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "ClusterRole",
+                "name": "oai-ran-operator-cluster-role",
+            },
+            "subjects": [subject],
+        },
+        crb_path,
+    )
+
+dump(
+    {"apiVersion": "v1", "kind": "ServiceAccount",
+     "metadata": {"name": "oai-ran-operator", "namespace": bench_ns}},
+    edge_dir / "05-serviceaccount-oai-ran-operator.yaml",
+)
+dump(
+    {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "oai-ran-operator", "namespace": bench_ns},
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "oai-ran-operator",
+                    "app.kubernetes.io/component": "controller",
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app.kubernetes.io/name": "oai-ran-operator",
+                        "app.kubernetes.io/component": "controller",
+                    }
+                },
+                "spec": {
+                    "serviceAccountName": "oai-ran-operator",
+                    "affinity": edge_node_affinity(),
+                    "containers": [{
+                        "name": "operator",
+                        "image": ran_op_image,
+                        "imagePullPolicy": "IfNotPresent",
+                        "resources": {
+                            "limits": {"cpu": "500m", "memory": "128Mi"},
+                            "requests": {"cpu": "10m", "memory": "64Mi"},
+                        },
+                        "securityContext": {
+                            "allowPrivilegeEscalation": False,
+                            "capabilities": {"drop": ["ALL"]},
+                        },
+                    }],
+                },
+            },
+        },
+    },
+    edge_dir / "05-deployment-oai-ran-operator.yaml",
+)
 
 for nad_name, ip in (
     ("cucp-bench-n2", cucp_n2),
     ("cucp-bench-f1c", cucp_f1c),
     ("cucp-bench-e1", cucp_e1),
 ):
-    dump(nad(nad_name, bench_ns, nad_parent, ip), edge_dir / f"12-networkattachmentdefinition-{nad_name}.yaml")
+    dump(nad(nad_name, bench_ns, nad_parent, ip),
+         edge_dir / f"12-networkattachmentdefinition-{nad_name}.yaml")
 
 for nad_name, ip in (
     ("cuup-bench-e1", cuup_e1),
     ("cuup-bench-f1u", cuup_f1u),
     ("cuup-bench-n3", cuup_n3),
 ):
-    dump(nad(nad_name, bench_ns, nad_parent, ip), edge_dir / f"30-networkattachmentdefinition-{nad_name}.yaml")
+    dump(nad(nad_name, bench_ns, nad_parent, ip),
+         edge_dir / f"30-networkattachmentdefinition-{nad_name}.yaml")
 
-dump(nad("du-bench-f1", bench_ns, usrp_iface, du_f1), edge_dir / "12-networkattachmentdefinition-du-bench-f1.yaml")
-dump(nad("du-bench-rf", bench_ns, usrp_iface, du_rf), edge_dir / "12-networkattachmentdefinition-du-bench-rf.yaml")
-dump(nad("ue-bench-sim-rf", bench_ns, usrp_iface, ue_rf), edge_dir / "50-networkattachmentdefinition-ue-bench-sim-rf.yaml")
+dump(nad("du-bench-f1", bench_ns, usrp_iface, du_f1),
+     edge_dir / "12-networkattachmentdefinition-du-bench-f1.yaml")
+dump(nad("du-bench-rf", bench_ns, usrp_iface, du_rf),
+     edge_dir / "12-networkattachmentdefinition-du-bench-rf.yaml")
+dump(nad("ue-bench-sim-rf", bench_ns, usrp_iface, ue_rf),
+     edge_dir / "50-networkattachmentdefinition-ue-bench-sim-rf.yaml")
 
-cucp_conf = f"""Active_gNBs = ( "oai-cu-cp-bench");
-Asn1_verbosity = "none";
-sa = 1;
-
-gNBs =
-(
- {{
-    gNB_ID = {GNB_ID};
-    gNB_name  =  "oai-cu-cp-bench";
-    tracking_area_code  =  0x0051;
-    plmn_list = ({{ mcc = 001;
-                   mnc = 01;
-                   mnc_length =2;
-                   snssaiList = ({{ sst = 1, sd = 0xFFFFFF }})
-                }});
-
-    nr_cellid = {NR_CELLID};
-    tr_s_preference = "f1";
-    local_s_address = "{cucp_f1c}";
-    remote_s_address = "0.0.0.0";
-    local_s_portc   = 501;
-    local_s_portd   = 2152;
-    remote_s_portc  = 500;
-    remote_s_portd  = 2152;
-
-    SCTP :
-    {{
-        SCTP_INSTREAMS  = 2;
-        SCTP_OUTSTREAMS = 2;
-    }};
-
-    amf_ip_address      = ( {{ ipv4       = "{amf_n2}"; }});
-
-    E1_INTERFACE =
-    (
-      {{
-        type = "cp";
-        ipv4_cucp = "{cucp_e1}";
-        port_cucp = 38462;
-        ipv4_cuup = "0.0.0.0";
-        port_cuup = 38462;
-      }}
-    )
-
-    NETWORK_INTERFACES :
-    {{
-        GNB_IPV4_ADDRESS_FOR_NG_AMF              = "{cucp_n2}";
-    }};
-  }}
-);
-
-security = {{
-  ciphering_algorithms = ( "nea0" );
-  integrity_algorithms = ( "nia2", "nia0" );
-  drb_ciphering = "yes";
-  drb_integrity = "no";
-}};
-log_config :
-{{
-global_log_level                      ="info";
-ngap_log_level                        ="debug";
-}};
-"""
-
-cuup_conf = f"""Active_gNBs = ( "oai-cu-up-bench");
-Asn1_verbosity = "none";
-sa = 1;
-gNBs =
-(
- {{
-    gNB_ID = {GNB_ID};
-    gNB_CU_UP_ID = {GNB_CU_ID};
-    gNB_name  =  "oai-cu-up-bench";
-    tracking_area_code  =  0x0051;
-    plmn_list = ({{ mcc = 001;
-                   mnc = 01;
-                   mnc_length =2;
-                   snssaiList = ({{ sst = 1, sd = 0xFFFFFF }})
-                }});
-
-    tr_s_preference = "f1";
-    local_s_address = "{cuup_f1u}";
-    remote_s_address = "0.0.0.0";
-    local_s_portc   = 501;
-    local_s_portd   = 2152;
-    remote_s_portc  = 500;
-    remote_s_portd  = 2152;
-
-    SCTP :
-    {{
-        SCTP_INSTREAMS  = 2;
-        SCTP_OUTSTREAMS = 2;
-    }};
-
-    E1_INTERFACE =
-    (
-      {{
-        type = "up";
-        ipv4_cucp = "{cucp_e1}";
-        ipv4_cuup = "{cuup_e1}";
-      }}
-    )
-
-    NETWORK_INTERFACES :
-    {{
-        GNB_IPV4_ADDRESS_FOR_NG_AMF              = "{cuup_n3}";
-        GNB_IPV4_ADDRESS_FOR_NGU                 = "{cuup_n3}";
-        GNB_PORT_FOR_S1U                         = 2152;
-    }};
-  }}
-);
-
-security = {{
-  ciphering_algorithms = ( "nea0" );
-  integrity_algorithms = ( "nia2", "nia0" );
-  drb_ciphering = "yes";
-  drb_integrity = "no";
-}};
-
-log_config :
-{{
-global_log_level                      ="info";
-pdcp_log_level                        ="info";
-f1ap_log_level                        ="info";
-ngap_log_level                        ="info";
-}};
-"""
-
-du_conf = f"""Active_gNBs = ( "oai-du-bench");
+# Lab RF profile (same as oai-slice-deployment / nws 133 PRB band78 rfsim).
+# GitOps owns this ConfigMap so create-once operator template (106 PRB / ARFCN 640704)
+# is overwritten with the known-good DU conf.
+du_conf = f"""Active_gNBs = ( "oai-du");
 Asn1_verbosity = "none";
 gNBs =
 (
  {{
-    gNB_ID = {GNB_ID};
-    gNB_DU_ID = {GNB_CU_ID};
-    gNB_name  =  "oai-du-bench";
-    tracking_area_code  =  0x0051;
+    gNB_ID = 0xe00;
+    gNB_DU_ID = 0xe00;
+    gNB_name  =  "oai-du";
+    disable_harq = 0;
+    TIMERS = {{
+      sr_ProhibitTimer = 0;
+      sr_TransMax = 64;
+      sr_ProhibitTimer_v1700 = 0;
+      t300 = 400;
+      t301 = 400;
+      t310 = 2000;
+      n310 = 20;
+      t311 = 3000;
+      n311 = 1;
+      t319 = 400;
+    }};
+    tracking_area_code  =  81;
+    uess_agg_levels = [8, 8, 8, 5, 2];
+    coreset_duration = 2;
     plmn_list = ({{ mcc = 001; mnc = 01; mnc_length = 2; snssaiList = ({{ sst = 1, sd = 0xFFFFFF }}) }});
     nr_cellid = {NR_CELLID};
     min_rxtxtime = 6;
     servingCellConfigCommon = (
     {{
+      physCellId = 0;
       absoluteFrequencySSB = 620640;
       dl_frequencyBand = 78;
       dl_absoluteFrequencyPointA = 620112;
@@ -943,7 +943,7 @@ gNBs =
     SCTP :
     {{
         SCTP_INSTREAMS  = 2;
-        SCTP_OUTSTREAMS = 2;
+        SCTP_OUTSTREAMS  = 2;
     }};
   }}
 );
@@ -961,7 +961,18 @@ MACRLCs = (
     remote_n_portd = 2152;
     pusch_TargetSNRx10 = 150;
     pucch_TargetSNRx10 = 150;
+    stats_max_ue = 17;
+    dl_scheduler_type = 1;
+    ul_scheduler_type = 1;
+    pusch_FailureThres = 1000;
+    pucch_FailureThres = 1000;
+    dl_harq_round_max = 8;
+    ul_harq_round_max = 8;
   }}
+);
+
+Slices = (
+  {{ slice_id = 0; sst = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; }}
 );
 
 L1s = (
@@ -986,7 +997,7 @@ RUs = (
     bf_weights = [0x00007fff, 0x0000, 0x0000, 0x0000];
     clock_src = "internal";
     }}
-);
+  );
 
 rfsimulator: {{
     serveraddr = "server";
@@ -1006,7 +1017,186 @@ log_config :
     f1ap_log_level = "info";
 }};
 """
+dump(
+    {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": "oai-du-configmap", "namespace": bench_ns},
+        "data": {"gnb.conf": du_conf},
+    },
+    edge_dir / "13-configmap-oai-du-configmap.yaml",
+)
 
+
+def iface(name, ip, vlan=None):
+    doc = {"name": name, "ipv4": {"address": f"{ip}/24", "gateway": gw}}
+    if vlan is not None:
+        doc["vlanID"] = vlan
+    return doc
+
+
+def nfconfig(name, image):
+    return {
+        "apiVersion": "workload.nephio.org/v1alpha1",
+        "kind": "NFConfig",
+        "metadata": {"name": name, "namespace": bench_ns},
+        "spec": {
+            "configRefs": [
+                {
+                    "apiVersion": "workload.nephio.org/v1alpha1",
+                    "kind": "RANConfig",
+                    "metadata": {"name": f"{name}-ran", "namespace": bench_ns},
+                    "spec": {
+                        "cellIdentity": str(NR_CELLID),
+                        "physicalCellID": 0,
+                        "downlinkFrequencyBand": 78,
+                        "downlinkSubCarrierSpacing": 1,
+                        "downlinkCarrierBandwidth": 133,
+                        "uplinkFrequencyBand": 78,
+                        "uplinkSubCarrierSpacing": 1,
+                        "uplinkCarrierBandwidth": 133,
+                    },
+                },
+                {
+                    "apiVersion": "workload.nephio.org/v1alpha1",
+                    "kind": "PLMN",
+                    "metadata": {"name": f"{name}-plmn", "namespace": bench_ns},
+                    "spec": {
+                        "PLMNInfo": [{
+                            "plmnID": {"mcc": "001", "mnc": "01"},
+                            "tac": 81,
+                            "nssai": [{"sst": 1, "sd": "FFFFFF"}],
+                        }],
+                    },
+                },
+                {
+                    "apiVersion": "workload.nephio.org/v1alpha1",
+                    "kind": "OAIConfig",
+                    "metadata": {"name": f"{name}-oai", "namespace": bench_ns},
+                    "spec": {"image": image},
+                },
+            ],
+        },
+    }
+
+
+def ref_config(name, embedded_nf):
+    return {
+        "apiVersion": "ref.nephio.org/v1alpha1",
+        "kind": "Config",
+        "metadata": {"name": name, "namespace": bench_ns},
+        "spec": {"config": embedded_nf},
+    }
+
+
+def nfdeployment(name, provider, interfaces, network_instances, param_refs, annotations=None):
+    meta = {"name": name, "namespace": bench_ns}
+    if annotations:
+        meta["annotations"] = annotations
+    return {
+        "apiVersion": "workload.nephio.org/v1alpha1",
+        "kind": "NFDeployment",
+        "metadata": meta,
+        "spec": {
+            "provider": provider,
+            "interfaces": interfaces,
+            "networkInstances": network_instances,
+            "parametersRefs": param_refs,
+        },
+    }
+
+
+# Optional hint only (operator create-once does not consume this). Live CU/DU
+# Deployments are patched with the same nodeSelector after create.
+bench_vpc_annotation = {"ina-infra.nephio.lab/multus-master": nad_parent}
+du_vpc_annotation = {"ina-infra.nephio.lab/multus-master": usrp_iface}
+
+
+amf_embedded = {
+    "apiVersion": "workload.nephio.org/v1alpha1",
+    "kind": "NFDeployment",
+    "metadata": {"name": "amf-core", "namespace": bench_ns},
+    "spec": {
+        "provider": "amf.openairinterface.org",
+        "interfaces": [iface("n2", amf_n2, 4)],
+    },
+}
+cucp_embedded = {
+    "apiVersion": "workload.nephio.org/v1alpha1",
+    "kind": "NFDeployment",
+    "metadata": {"name": "cucp-bench", "namespace": bench_ns},
+    "spec": {
+        "provider": "cucp.openairinterface.org",
+        "interfaces": [
+            iface("n2", cucp_n2, 4),
+            iface("f1c", cucp_f1c, 5),
+            iface("e1", cucp_e1, 6),
+        ],
+    },
+}
+
+dump(nfconfig("cucp-bench-config", cucp_image), edge_dir / "10-nfconfig-cucp-bench-config.yaml")
+dump(nfconfig("cuup-bench-config", cuup_image), edge_dir / "10-nfconfig-cuup-bench-config.yaml")
+dump(nfconfig("du-bench-config", du_image), edge_dir / "10-nfconfig-du-bench-config.yaml")
+
+dump(ref_config("cucp-bench-amf", amf_embedded), edge_dir / "11-config-cucp-bench-amf.yaml")
+dump(ref_config("cuup-bench-cucp", cucp_embedded), edge_dir / "11-config-cuup-bench-cucp.yaml")
+dump(ref_config("du-bench-cucp", cucp_embedded), edge_dir / "11-config-du-bench-cucp.yaml")
+
+dump(
+    nfdeployment(
+        "cucp-bench",
+        "cucp.openairinterface.org",
+        [iface("n2", cucp_n2, 4), iface("f1c", cucp_f1c, 5), iface("e1", cucp_e1, 6)],
+        [
+            {"name": "vpc-ran", "interfaces": ["n2"]},
+            {"name": "vpc-cudu-f1", "interfaces": ["f1c"]},
+            {"name": "vpc-cu-e1", "interfaces": ["e1"]},
+        ],
+        [
+            {"name": "cucp-bench-config", "apiVersion": "workload.nephio.org/v1alpha1", "kind": "NFConfig"},
+            {"name": "cucp-bench-amf", "apiVersion": "ref.nephio.org/v1alpha1", "kind": "Config"},
+        ],
+        annotations=bench_vpc_annotation,
+    ),
+    edge_dir / "20-nfdeployment-cucp-bench.yaml",
+)
+dump(
+    nfdeployment(
+        "cuup-bench",
+        "cuup.openairinterface.org",
+        [iface("e1", cuup_e1, 6), iface("f1u", cuup_f1u, 5), iface("n3", cuup_n3, 4)],
+        [
+            {"name": "vpc-cu-e1", "interfaces": ["e1"]},
+            {"name": "vpc-cudu-f1", "interfaces": ["f1u"]},
+            {"name": "vpc-ran", "interfaces": ["n3"]},
+        ],
+        [
+            {"name": "cuup-bench-config", "apiVersion": "workload.nephio.org/v1alpha1", "kind": "NFConfig"},
+            {"name": "cuup-bench-cucp", "apiVersion": "ref.nephio.org/v1alpha1", "kind": "Config"},
+        ],
+        annotations=bench_vpc_annotation,
+    ),
+    edge_dir / "20-nfdeployment-cuup-bench.yaml",
+)
+dump(
+    nfdeployment(
+        "du-bench",
+        "du.openairinterface.org",
+        [iface("f1", du_f1, 5), iface("rf", du_rf)],
+        [{"name": "vpc-cudu-f1", "interfaces": ["f1"]}],
+        [
+            {"name": "du-bench-config", "apiVersion": "workload.nephio.org/v1alpha1", "kind": "NFConfig"},
+            {"name": "du-bench-cucp", "apiVersion": "ref.nephio.org/v1alpha1", "kind": "Config"},
+        ],
+        annotations=du_vpc_annotation,
+    ),
+    edge_dir / "20-nfdeployment-du-bench.yaml",
+)
+
+print(f"  RAN operator {ran_op_image} + NFDeployments cucp/cuup/du-bench")
+
+# UE stays a static executor (nrUE is not managed by oai-ran-controller)
 ue_conf = f"""uicc0 = {{
   imsi = "{bench_imsi}";
   key = "fec86ba6eb707ed08905757b1bb44b8f";
@@ -1027,191 +1217,26 @@ log_config = {{
 }}
 """
 
-for name, conf, prefix in (
-    ("oai-cu-cp-configmap", cucp_conf, "13-configmap-oai-cu-cp-configmap.yaml"),
-    ("oai-cu-up-configmap", cuup_conf, "31-configmap-oai-cu-up-configmap.yaml"),
-    ("oai-du-configmap", du_conf, "13-configmap-oai-du-configmap.yaml"),
-    ("oai-ue-configmap", ue_conf, "51-configmap-oai-ue-configmap.yaml"),
-):
-    dump({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": bench_ns}, "data": {"gnb.conf" if "ue" not in name else "ue.conf": conf}}, edge_dir / prefix)
-
-for sa_name, prefix in (
-    ("oai-cu-cp-sa", "14-serviceaccount-oai-cu-cp-sa.yaml"),
-    ("oai-cu-up-sa", "32-serviceaccount-oai-cu-up-sa.yaml"),
-    ("oai-du-sa", "14-serviceaccount-oai-du-sa.yaml"),
-    ("oai-ue-sa", "52-serviceaccount-oai-ue-sa.yaml"),
-):
-    dump({"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": sa_name, "namespace": bench_ns}}, edge_dir / prefix)
-
 dump(
-    {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "oai-cu-cp", "namespace": bench_ns, "labels": {"app.kubernetes.io/name": "oai-cu-cp"}},
-        "spec": {
-            "replicas": 1,
-            "strategy": {"type": "Recreate"},
-            "selector": {"matchLabels": {"app.kubernetes.io/name": "oai-cu-cp"}},
-            "template": {
-                "metadata": {
-                    "labels": {"app": "oai-cu-cp", "app.kubernetes.io/name": "oai-cu-cp"},
-                    "annotations": {
-                        "k8s.v1.cni.cncf.io/networks": networks_annot([
-                            ("cucp-bench-e1", "e1", cucp_e1),
-                            ("cucp-bench-f1c", "f1c", cucp_f1c),
-                            ("cucp-bench-n2", "n2", cucp_n2),
-                        ]),
-                    },
-                },
-                "spec": {
-                    "serviceAccountName": "oai-cu-cp-sa",
-                    "terminationGracePeriodSeconds": 5,
-                    "affinity": edge_node_affinity(),
-                    "initContainers": cucp_inits,
-                    "containers": [
-                        bringup_order_sidecar(
-                            "cu-cp",
-                            [
-                                "CU-UP Multus E1 (ping)",
-                                "AMF N2 SCTP :38412",
-                                "UPF N3 reachable (upf-benchmark)",
-                            ],
-                        ),
-                        {
-                        "name": "cucp",
-                        "image": cucp_image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "securityContext": {"privileged": True},
-                        "env": [
-                            {"name": "TZ", "value": "Asia/Singapore"},
-                            {"name": "USE_ADDITIONAL_OPTIONS", "value": "--log_config.global_log_options level,nocolor,time"},
-                            {"name": "USE_VOLUMED_CONF", "value": "yes"},
-                        ],
-                        "ports": [
-                            {"name": "n2", "containerPort": 36412, "protocol": "SCTP"},
-                            {"name": "e1", "containerPort": 38462, "protocol": "SCTP"},
-                            {"name": "f1c", "containerPort": 38472, "protocol": "UDP"},
-                        ],
-                        "readinessProbe": softmodem_readiness(),
-                        "volumeMounts": [{"name": "configuration", "mountPath": "/opt/oai-gnb/etc/gnb.conf", "subPath": "gnb.conf"}],
-                    }, debug_ctr],
-                    "volumes": [{"name": "configuration", "configMap": {"name": "oai-cu-cp-configmap"}}],
-                },
-            },
-        },
-    },
-    edge_dir / "15-deployment-oai-cu-cp.yaml",
+    {"apiVersion": "v1", "kind": "ConfigMap",
+     "metadata": {"name": "oai-ue-configmap", "namespace": bench_ns},
+     "data": {"ue.conf": ue_conf}},
+    edge_dir / "51-configmap-oai-ue-configmap.yaml",
 )
-
 dump(
-    {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "oai-cu-up", "namespace": bench_ns, "labels": {"app.kubernetes.io/name": "oai-cu-up"}},
-        "spec": {
-            "replicas": 1,
-            "strategy": {"type": "Recreate"},
-            "selector": {"matchLabels": {"app.kubernetes.io/name": "oai-cu-up"}},
-            "template": {
-                "metadata": {
-                    "labels": {"app": "oai-cu-up", "app.kubernetes.io/name": "oai-cu-up"},
-                    "annotations": {
-                        "k8s.v1.cni.cncf.io/networks": networks_annot([
-                            ("cuup-bench-e1", "e1", cuup_e1),
-                            ("cuup-bench-f1u", "f1u", cuup_f1u),
-                            ("cuup-bench-n3", "n3", cuup_n3),
-                        ]),
-                    },
-                },
-                "spec": {
-                    "serviceAccountName": "oai-cu-up-sa",
-                    "terminationGracePeriodSeconds": 5,
-                    "affinity": edge_node_affinity(),
-                    "containers": [
-                        bringup_order_sidecar(
-                            "cu-up",
-                            [
-                                "none (starts before CU-CP)",
-                                "E1: dials CU-CP :38462 after CU-CP is up",
-                            ],
-                        ),
-                        {
-                        "name": "cuup",
-                        "image": cuup_image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "securityContext": {"privileged": True},
-                        "env": [
-                            {"name": "TZ", "value": "Asia/Singapore"},
-                            {"name": "USE_ADDITIONAL_OPTIONS", "value": "--log_config.global_log_options level,nocolor,time"},
-                            {"name": "USE_VOLUMED_CONF", "value": "yes"},
-                        ],
-                        "ports": [
-                            {"name": "n3", "containerPort": 2152, "protocol": "UDP"},
-                            {"name": "e1", "containerPort": 38462, "protocol": "SCTP"},
-                        ],
-                        "readinessProbe": softmodem_readiness(),
-                        "volumeMounts": [{"name": "configuration", "mountPath": "/opt/oai-gnb/etc/gnb.conf", "subPath": "gnb.conf"}],
-                    }, debug_ctr],
-                    "volumes": [{"name": "configuration", "configMap": {"name": "oai-cu-up-configmap"}}],
-                },
-            },
-        },
-    },
-    edge_dir / "33-deployment-oai-cu-up.yaml",
+    {"apiVersion": "v1", "kind": "ServiceAccount",
+     "metadata": {"name": "oai-ue-sa", "namespace": bench_ns}},
+    edge_dir / "52-serviceaccount-oai-ue-sa.yaml",
 )
-
 dump(
     {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": {"name": "oai-du", "namespace": bench_ns, "labels": {"app.kubernetes.io/name": "oai-du"}},
-        "spec": {
-            "replicas": 1,
-            "strategy": {"type": "Recreate"},
-            "selector": {"matchLabels": {"app.kubernetes.io/name": "oai-du"}},
-            "template": {
-                "metadata": {
-                    "labels": {"app": "oai-du", "app.kubernetes.io/name": "oai-du"},
-                    "annotations": {
-                        "k8s.v1.cni.cncf.io/networks": networks_annot([
-                            ("du-bench-f1", "f1", du_f1),
-                            ("du-bench-rf", "rf", du_rf),
-                        ]),
-                    },
-                },
-                "spec": {
-                    "serviceAccountName": "oai-du-sa",
-                    "terminationGracePeriodSeconds": 5,
-                    "nodeSelector": {"kubernetes.io/hostname": "usrp"},
-                    "initContainers": du_inits,
-                    "containers": [
-                        bringup_order_sidecar("du", ["CU-CP F1-C SCTP :38472"]),
-                        {
-                        "name": "du",
-                        "image": du_image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "securityContext": {"privileged": True},
-                        "env": [{"name": "USE_ADDITIONAL_OPTIONS", "value": "--rfsim --log_config.global_log_options level,nocolor,time"}],
-                        "ports": [
-                            {"name": "f1c", "containerPort": 38472, "protocol": "SCTP"},
-                            {"name": "f1u", "containerPort": 2152, "protocol": "UDP"},
-                            {"name": "rfsim", "containerPort": 4043, "protocol": "TCP"},
-                        ],
-                        "volumeMounts": [{"name": "configuration", "mountPath": "/opt/oai-gnb/etc/gnb.conf", "subPath": "gnb.conf"}],
-                    }, debug_ctr],
-                    "volumes": [{"name": "configuration", "configMap": {"name": "oai-du-configmap"}}],
-                },
-            },
+        "metadata": {
+            "name": "oai-ue",
+            "namespace": bench_ns,
+            "labels": {"app.kubernetes.io/name": "oai-ue"},
         },
-    },
-    edge_dir / "15-deployment-oai-du.yaml",
-)
-
-dump(
-    {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "oai-ue", "namespace": bench_ns, "labels": {"app.kubernetes.io/name": "oai-ue"}},
         "spec": {
             "replicas": 1,
             "strategy": {"type": "Recreate"},
@@ -1219,7 +1244,11 @@ dump(
             "template": {
                 "metadata": {
                     "labels": {"app": "oai-ue", "app.kubernetes.io/name": "oai-ue"},
-                    "annotations": {"k8s.v1.cni.cncf.io/networks": networks_annot([("ue-bench-sim-rf", "rf", ue_rf)])},
+                    "annotations": {
+                        "k8s.v1.cni.cncf.io/networks": networks_annot(
+                            [("ue-bench-sim-rf", "rf", ue_rf)]
+                        )
+                    },
                 },
                 "spec": {
                     "serviceAccountName": "oai-ue-sa",
@@ -1229,24 +1258,34 @@ dump(
                     "containers": [
                         bringup_order_sidecar("ue", ["DU rfsim TCP :4043"]),
                         {
-                        "name": "ue",
-                        "image": ue_image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "securityContext": {"privileged": True},
-                        "env": [
-                            {
-                                "name": "USE_ADDITIONAL_OPTIONS",
-                                "value": (
-                                    f"-r 133 --numerology 1 -C 3325620000 --ssb 144 "
-                                    f"--rfsim --log_config.global_log_options level,nocolor,time "
-                                    f"--rfsimulator.serveraddr {du_rf}"
-                                ),
-                            },
-                            {"name": "TZ", "value": "Asia/Singapore"},
-                        ],
-                        "volumeMounts": [{"name": "configuration", "mountPath": "/opt/oai-nr-ue/etc/nr-ue.conf", "subPath": "ue.conf"}],
-                    }, debug_ctr],
-                    "volumes": [{"name": "configuration", "configMap": {"name": "oai-ue-configmap"}}],
+                            "name": "ue",
+                            "image": ue_image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "securityContext": {"privileged": True},
+                            "env": [
+                                {
+                                    "name": "USE_ADDITIONAL_OPTIONS",
+                                    "value": (
+                                        # Match lab DU: 133 PRB / ARFCN 620640 (oai-slice-deployment).
+                                        f"-r 133 --numerology 1 -C 3325620000 --ssb 144 "
+                                        f"--rfsim --log_config.global_log_options level,nocolor,time "
+                                        f"--rfsimulator.serveraddr {du_rf}"
+                                    ),
+                                },
+                                {"name": "TZ", "value": "Asia/Singapore"},
+                            ],
+                            "volumeMounts": [{
+                                "name": "configuration",
+                                "mountPath": "/opt/oai-nr-ue/etc/nr-ue.conf",
+                                "subPath": "ue.conf",
+                            }],
+                        },
+                        debug_ctr,
+                    ],
+                    "volumes": [{
+                        "name": "configuration",
+                        "configMap": {"name": "oai-ue-configmap"},
+                    }],
                 },
             },
         },
@@ -1254,9 +1293,11 @@ dump(
     edge_dir / "55-deployment-oai-ue.yaml",
 )
 
+
 render_upf_executor()
 
 print(f"Rendered {bench_ns} @ edge:")
+print(f"  RAN: oai-ran-controller ({ran_op_image}) → NFDeployments cucp/cuup/du-bench")
 print(f"  CU-CP N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
 print(f"  CU-UP E1/F1U/N3 {cuup_e1}/{cuup_f1u}/{cuup_n3} → UPF N3 {upf_n3}")
 print(f"  DU F1/rfsim {du_f1}/{du_rf}, UE RF {ue_rf} (IMSI {bench_imsi}, DNN internet)")
@@ -1267,3 +1308,7 @@ PY
 echo
 echo "Push:  ./bringup/03_push_to_git_repos/push_git_repos.sh central edge"
 echo "Verify: ./scripts/check-configsync.sh central edge"
+echo "       kubectl --context edge@edge -n ${BENCH_NS} get nfdeployment,deploy"
+echo "After operator create-once (or NF recreate), pin VPC Multus parents:"
+echo "       ./scripts/patch_oai_benchmark_ran_vpc.sh"
+echo "       (needs node labels from ./scripts/label_ina_multus_masters.sh edge)"
