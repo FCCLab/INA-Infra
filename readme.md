@@ -49,6 +49,25 @@ GitOps components (render → push → Config Sync): Flannel, Multus, MetalLB, K
 
 Examples: `gitea.gitea.svc.cluster.local:3000`, `api.porch-system`, `resource-backend-controller-grpc-svc.backend-system.svc.cluster.local:9999`.
 
+## Project subnets
+
+Lab addressing uses **`10.1.<octet>.0/24`** planes on `enp1s0` (mgmt) and site NIC `enp7s0` (VMs). Authoritative tables: [docs/ip_plan.md](docs/ip_plan.md). Script constants: [scripts/cluster_lib.sh](scripts/cluster_lib.sh).
+
+| 3rd octet | Subnet | NIC / attach | Purpose |
+|-----------|--------|--------------|---------|
+| **132** | `10.1.132.0/24` | `enp1s0` | SSH, default route, DNS, **mgmt** cluster, Gitea (`10.1.132.200`), registry (`10.1.132.30`), mgmt MetalLB (`.10`–`.99`) |
+| **137** | `10.1.137.0/24` | site | K8s API, node site IPs, Flannel, hypervisor bridges; OpenSpeedTest (`.101`–`.103`); InfluxDB/Grafana (`.104`–`.105`); **UPF N6 DHCP pool** (`.160`–`.199`, GW `.1`) |
+| **138** | `10.1.138.0/24` | site L2 | **MetalLB** LoadBalancer VIPs (central `.100`–`.124`, regional `.125`–`.149`, edge `.150`–`.199`) |
+| **139** | `10.1.139.0/24` | Multus macvlan | **OAI** N2/N3/N4 only (no host IP) — see [docs/oai.md](docs/oai.md) |
+| **140** | `10.1.140.0/24` | Multus macvlan | **INA-Infra** profile networks |
+| **101** | `10.1.101.0/24` | WAN | Bare-metal bootstrap SSH only |
+
+**Logical (not a lab L2):** `10.1.0.0/24` — UE PDU / DNN addresses (e.g. benchmark UE `10.1.0.2` on `oaitun_ue1`).
+
+**Traffic flow (OAI user plane):** UE `10.1.0.0/24` → GTP-U on **`10.1.139.0/24`** (N3) → UPF SNAT → N6 DHCP on **`10.1.137.0/24`** → GW `10.1.137.1`. Mgmt services on **`10.1.132.0/24`** are reachable from UPF N6 via site routing.
+
+**VLAN trunk (`eno1`):** 132 → `br-mgmt`; 135/136/137 → `br-int-central` / `br-int-regional` / `br-int-edge` ([docs/ip_plan.md](docs/ip_plan.md)).
+
 ## Bring up steps
 
 ```

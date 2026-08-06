@@ -14,6 +14,8 @@ OAI_OPERATORS_REF="${OAI_OPERATORS_REF:-main}"
 OAI_OPERATORS_BASE="${OAI_OPERATORS_BASE:-https://raw.githubusercontent.com/openairinterface/oai-operators/${OAI_OPERATORS_REF}}"
 OAI_CN_NS="${OAI_CN_NS:-oai-cn}"
 OAI_UPF_NS="${OAI_UPF_NS:-oai-upf}"
+OAI_CORE_OFFSET0="${OAI_CORE_OFFSET0:-0}"
+SKIP_UPF="${SKIP_UPF:-0}"
 UPF_NF_NAME="${UPF_NF_NAME:-upf-core}"
 UPF_UPSTREAM_NAME="${UPF_UPSTREAM_NAME:-upf-edge}"
 UPSTREAM_CN_NS="${UPSTREAM_CN_NS:-oaicp}"
@@ -61,13 +63,14 @@ write_core_manifests() {
   local mysql_chart="$3"
   local repo_name dest_cn dest_upf dest_cluster
   local amf_n2 smf_n4 upf_n3 upf_n4 upf_n6
+  local off="$OAI_CORE_OFFSET0"
 
   repo_name="$(cluster_gitea_repo_name "$cluster")"
-  amf_n2="$(oai_macvlan_ip central 0)"
-  upf_n3="$(oai_macvlan_ip central 1)"
-  smf_n4="$(oai_macvlan_ip central 2)"
-  upf_n4="$(oai_macvlan_ip central 3)"
-  upf_n6="$(oai_macvlan_ip central 4)"
+  amf_n2="$(oai_macvlan_ip central "$off")"
+  upf_n3="$(oai_macvlan_ip central $((off + 1)))"
+  smf_n4="$(oai_macvlan_ip central $((off + 2)))"
+  upf_n4="$(oai_macvlan_ip central $((off + 3)))"
+  upf_n6="$(oai_macvlan_ip central $((off + 4)))"
   dest_cn="${REPOS_DIR}/${repo_name}/namespaces/${OAI_CN_NS}"
   dest_upf="${REPOS_DIR}/${repo_name}/namespaces/${OAI_UPF_NS}"
   dest_cluster="${REPOS_DIR}/${repo_name}/cluster"
@@ -77,7 +80,7 @@ write_core_manifests() {
     "$OAI_CN_NS" "$OAI_UPF_NS" "$UPSTREAM_CN_NS" "$OAI_NAD_PARENT" \
     "$MYSQL_STORAGE" "$MYSQL_STORAGE_CLASS" "$UPF_NF_NAME" "$UPF_UPSTREAM_NAME" \
     "$amf_n2" "$smf_n4" "$upf_n3" "$upf_n4" "$upf_n6" "$OAI_MACVLAN_GW" \
-    "$OAI_AMF_IMAGE" "$MGMT_CIDR" <<'PY'
+    "$OAI_AMF_IMAGE" "$MGMT_CIDR" "$SKIP_UPF" <<'PY'
 import json
 import subprocess
 import sys
@@ -88,7 +91,8 @@ import yaml
 (src_dir, mysql_chart, dest_cn, dest_upf, dest_cluster,
  cn_ns, upf_ns, upstream_cn_ns, nad_parent, mysql_storage, mysql_sc,
  upf_name, upf_upstream, amf_n2, smf_n4, upf_n3, upf_n4, upf_n6, oai_gw,
- amf_image, mgmt_cidr) = sys.argv[1:22]
+ amf_image, mgmt_cidr, skip_upf_s) = sys.argv[1:23]
+skip_upf = skip_upf_s == "1"
 
 dest_cn = Path(dest_cn)
 dest_upf = Path(dest_upf)
@@ -278,20 +282,22 @@ managed_cn = (
 )
 managed_upf = managed_cn
 purge_managed(dest_cn, managed_cn)
-purge_managed(dest_upf, managed_upf)
-for directory in (dest_cn, dest_upf):
-    for old in directory.glob(f"*{upf_upstream}*.yaml"):
+for old in dest_cn.glob(f"*{upf_upstream}*.yaml"):
+    old.unlink()
+if not skip_upf:
+    purge_managed(dest_upf, managed_upf)
+    for old in dest_upf.glob(f"*{upf_upstream}*.yaml"):
         old.unlink()
 
 # Namespaces
-for ns_name, labels in (
-    (cn_ns, {}),
-    (upf_ns, {
+ns_specs = [(cn_ns, {})]
+if not skip_upf:
+    ns_specs.append((upf_ns, {
         "pod-security.kubernetes.io/warn": "privileged",
         "pod-security.kubernetes.io/audit": "privileged",
         "pod-security.kubernetes.io/enforce": "privileged",
-    }),
-):
+    }))
+for ns_name, labels in ns_specs:
     doc = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns_name}}
     if labels:
         doc["metadata"]["labels"] = labels
@@ -302,6 +308,8 @@ for ns_name, labels in (
 
 # NADs (before NF deployments)
 for path in sorted(Path(src_dir, "nad").glob("*.yaml")):
+    if skip_upf and path.name == "upf-edge.yaml":
+        continue
     for doc in load_docs(path):
         rewrite_ns(doc)
         rename_upf(doc)
@@ -320,6 +328,8 @@ order = {
     "upfdeploy.yaml": "30-",
 }
 for fname, prefix in order.items():
+    if skip_upf and fname == "upfdeploy.yaml":
+        continue
     path = Path(src_dir, "nfdeploy", fname)
     for doc in load_docs(path):
         rewrite_ns(doc)
@@ -368,9 +378,10 @@ for doc in yaml.safe_load_all(helm_out):
     )
 
 cn_count = len(list(dest_cn.glob("*.yaml")))
-upf_count = len(list(dest_upf.glob("*.yaml")))
+upf_count = len(list(dest_upf.glob("*.yaml"))) if not skip_upf else 0
 print(f"  namespaces/{cn_ns}: {cn_count} resources")
-print(f"  namespaces/{upf_ns}: {upf_count} resources")
+if not skip_upf:
+    print(f"  namespaces/{upf_ns}: {upf_count} resources")
 PY
 
   echo "==> [${cluster}] ${REPOS_DIR}/${repo_name} (OAI core → ${OAI_CN_NS}, ${OAI_UPF_NS})"

@@ -21,3 +21,6 @@
 [submodule "ina-infra/frontend/neuroran-ui-ux"]
 	path = ina-infra/frontend/neuroran-ui-ux
 	url = https://github.com/FCCLab/neuroran-ui-ux.git
+[submodule "third_party/ina-infra-oai-ran-controller"]
+	path = third_party/ina-infra-oai-ran-controller
+	url = https://github.com/FCCLab/ina-infra-oai-ran-controller.git

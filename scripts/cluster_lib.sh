@@ -365,6 +365,38 @@ oai_slice_sd_hex() { printf '%06x' "$1"; }
 # IMSI for slice UE N (uses pre-provisioned 001010000000101..105)
 oai_slice_imsi() { printf '00101000000010%d' "$1"; }
 
+# oai-benchmark: non-slice stack (5GC CP@central, RAN+UPF@edge). IPs on shared .139 L2.
+OAI_BENCH_CUCP_N2_OFFSET="${OAI_BENCH_CUCP_N2_OFFSET:-12}"   # edge .122
+OAI_BENCH_CUCP_F1C_OFFSET="${OAI_BENCH_CUCP_F1C_OFFSET:-13}" # edge .123
+OAI_BENCH_CUCP_E1_OFFSET="${OAI_BENCH_CUCP_E1_OFFSET:-14}"   # edge .124
+OAI_BENCH_CUUP_E1_OFFSET="${OAI_BENCH_CUUP_E1_OFFSET:-15}"   # edge .125
+OAI_BENCH_CUUP_F1U_OFFSET="${OAI_BENCH_CUUP_F1U_OFFSET:-16}" # edge .126
+OAI_BENCH_CUUP_N3_OFFSET="${OAI_BENCH_CUUP_N3_OFFSET:-17}"   # edge .127
+OAI_BENCH_DU_F1_OFFSET="${OAI_BENCH_DU_F1_OFFSET:-18}"       # edge .128
+OAI_BENCH_DU_RF_OFFSET="${OAI_BENCH_DU_RF_OFFSET:-19}"       # edge .129
+OAI_BENCH_UE_RF_OFFSET="${OAI_BENCH_UE_RF_OFFSET:-20}"       # edge .130
+OAI_BENCH_UPF_OFFSET0="${OAI_BENCH_UPF_OFFSET0:-25}"         # central pool .35/.36 (N3/N4); N6 = DHCP
+OAI_BENCH_CORE_OFFSET0="${OAI_BENCH_CORE_OFFSET0:-40}"       # central pool .50+ (dedicated 5GC CP)
+OAI_BENCHMARK_NS="${OAI_BENCHMARK_NS:-oai-benchmark}"
+OAI_BENCH_IMSI="${OAI_BENCH_IMSI:-001010000000100}"
+
+oai_bench_amf_n2() { oai_macvlan_ip central $((OAI_BENCH_CORE_OFFSET0 + 0)); }
+oai_bench_nrf_sbi() { oai_macvlan_ip central $((OAI_BENCH_CORE_OFFSET0 + 1)); }
+oai_bench_smf_n4() { oai_macvlan_ip central $((OAI_BENCH_CORE_OFFSET0 + 2)); }
+oai_bench_cucp_n2() { oai_macvlan_ip edge "$OAI_BENCH_CUCP_N2_OFFSET"; }
+oai_bench_cucp_f1c() { oai_macvlan_ip edge "$OAI_BENCH_CUCP_F1C_OFFSET"; }
+oai_bench_cucp_e1() { oai_macvlan_ip edge "$OAI_BENCH_CUCP_E1_OFFSET"; }
+oai_bench_cuup_e1() { oai_macvlan_ip edge "$OAI_BENCH_CUUP_E1_OFFSET"; }
+oai_bench_cuup_f1u() { oai_macvlan_ip edge "$OAI_BENCH_CUUP_F1U_OFFSET"; }
+oai_bench_cuup_n3() { oai_macvlan_ip edge "$OAI_BENCH_CUUP_N3_OFFSET"; }
+oai_bench_du_f1() { oai_macvlan_ip edge "$OAI_BENCH_DU_F1_OFFSET"; }
+oai_bench_du_rf() { oai_macvlan_ip edge "$OAI_BENCH_DU_RF_OFFSET"; }
+oai_bench_ue_rf() { oai_macvlan_ip edge "$OAI_BENCH_UE_RF_OFFSET"; }
+oai_bench_upf_n3() { oai_macvlan_ip central $((OAI_BENCH_UPF_OFFSET0 + 0)); }
+oai_bench_upf_n4() { oai_macvlan_ip central $((OAI_BENCH_UPF_OFFSET0 + 1)); }
+# Logical N6 for SMF UPF-graph only; live N6 is DHCP (Glass 10.1.137).
+oai_bench_upf_n6_logical() { oai_macvlan_ip central $((OAI_BENCH_UPF_OFFSET0 + 2)); }
+
 # Regional/edge CU-CP N2 on site macvlan .139.
 cucp_n2_vip() {
   printf '%s' "${CLUSTER_AMF_N2_VIP[$1]}"
