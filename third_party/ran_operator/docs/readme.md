@@ -1,6 +1,6 @@
 # OAI RAN controller docs
 
-Kubernetes operator for OpenAirInterface RAN NFs (**CU-CP**, **CU-UP**, **DU**). Source lives in the Git submodule [`third_party/ina-infra-oai-ran-controller`](../../ina-infra-oai-ran-controller/) ([FCCLab/ina-infra-oai-ran-controller](https://github.com/FCCLab/ina-infra-oai-ran-controller)), a fork of the Nephio OAI RAN operator.
+Kubernetes operator for OpenAirInterface RAN NFs (**CU-CP**, **CU-UP**, **DU**). Source lives in the Git submodule [`third_party/INA-Infra-ran-oai-operators`](../../INA-Infra-ran-oai-operators/) ([FCCLab/INA-Infra-ran-oai-operators](https://github.com/FCCLab/INA-Infra-ran-oai-operators)), a fork of the Nephio OAI RAN operator.
 
 | Doc | Contents |
 |-----|----------|

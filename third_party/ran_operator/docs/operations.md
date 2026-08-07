@@ -7,7 +7,7 @@
 [`scripts/render_oai_benchmark_gitops.sh`](../../../scripts/render_oai_benchmark_gitops.sh) deploys **`oai-ran-controller`** in `oai-benchmark` on **edge**. It reconciles `NFDeployment`s `cucp-bench` / `cuup-bench` / `du-bench` into ConfigMaps, Deployments, and Services. Multus NADs stay in git (names must match `{nfdeployment}-{iface}`). UPF and nrUE remain static executors.
 
 ```bash
-# Image must include rf Multus + usrp pin (see ina-infra-oai-ran-controller DuResources)
+# Image must include rf Multus + usrp pin (see INA-Infra-ran-oai-operators DuResources)
 ./third_party/ran_operator/scripts/build_ran_operator_image.sh
 export OAI_RAN_OPERATOR_IMAGE=10.1.132.30:5000/oai-ran-controller:latest
 ./scripts/render_oai_benchmark_gitops.sh
@@ -50,7 +50,7 @@ echo o1 start_modem | nc -N "$TELNET_IP" 9090
 echo o1 stats | nc -N "$TELNET_IP" 9090
 ```
 
-Full Nephio kind/Gitea walk-through for local blueprints: [`test-infra/README.md`](../../ina-infra-oai-ran-controller/test-infra/README.md).
+Full Nephio kind/Gitea walk-through for local blueprints: [`test-infra/README.md`](../../INA-Infra-ran-oai-operators/test-infra/README.md).
 
 ## Status and logs
 

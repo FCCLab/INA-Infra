@@ -2,7 +2,7 @@
 
 Side-car client inside **`oai-ran-operator`** that opens a **WebSocket** to the ina-infra API, declares NFs + controllable compute kinds, receives pushed **desired** targets, and applies **CPU** in place on live pods. Used by the ina-infra **Operators** UI for live CU-CP / CU-UP / DU sizing on the lab testbed (typically `oai-benchmark` on **edge**).
 
-Source: [`internal/inainfra/`](../../ina-infra-oai-ran-controller/internal/inainfra/) in the RAN controller submodule. Wired from `cmd/main.go` when not disabled.
+Source: [`internal/inainfra/`](../../INA-Infra-ran-oai-operators/internal/inainfra/) in the RAN controller submodule. Wired from `cmd/main.go` when not disabled.
 
 ## Control model
 

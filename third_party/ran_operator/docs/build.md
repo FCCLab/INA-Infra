@@ -5,7 +5,7 @@ Build the operator image from the submodule and push to the lab registry (`10.1.
 ## Prerequisites
 
 ```bash
-git submodule update --init third_party/ina-infra-oai-ran-controller
+git submodule update --init third_party/INA-Infra-ran-oai-operators
 # Docker (or compatible) on the build host; push helper needs registry access
 ```
 
@@ -19,7 +19,7 @@ Defaults:
 
 | Env | Default |
 |-----|---------|
-| `RAN_CONTROLLER_SRC` | `third_party/ina-infra-oai-ran-controller` |
+| `RAN_CONTROLLER_SRC` | `third_party/INA-Infra-ran-oai-operators` |
 | `REGISTRY` | `10.1.132.30:5000` |
 | `OAI_RAN_CONTROLLER_IMAGE_NAME` | `oai-ran-controller` |
 | `OAI_RAN_CONTROLLER_TAG` | `latest` |
@@ -42,7 +42,7 @@ export OAI_RAN_OPERATOR_IMAGE=10.1.132.30:5000/oai-ran-controller:latest
 ## Manual build (submodule)
 
 ```bash
-cd third_party/ina-infra-oai-ran-controller
+cd third_party/INA-Infra-ran-oai-operators
 docker build --platform linux/amd64 -t oai-ran-controller:latest .
 # then tag/push via scripts/push-image-to-registry.sh
 ```
@@ -52,7 +52,7 @@ Dockerfile: multi-stage Go **1.25.6** → distroless `nonroot`, entrypoint `/man
 ## Develop / test in the submodule
 
 ```bash
-cd third_party/ina-infra-oai-ran-controller
+cd third_party/INA-Infra-ran-oai-operators
 make fmt vet
 make test          # unit tests under internal/controller
 make lint          # golangci-lint (container if Docker/Podman present)
