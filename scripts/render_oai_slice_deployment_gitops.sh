@@ -625,15 +625,23 @@ if retire_old == "1":
         "edge-repo/namespaces/oai-nws-1ue",
     ):
         purge_dir(repos / rel)
-    # Fix regional/edge ClusterRoleBinding subject ns if present
-    for cluster, repo in (("regional", "regional-repo"), ("edge", "edge-repo")):
+    # Drop oai-slice-deployment RAN operator subjects from ClusterRoleBindings
+    # (cluster-wide watch raced with oai-benchmark cpuagent). Keep other SAs.
+    for repo in ("regional-repo", "edge-repo"):
         crb = repos / repo / "cluster" / "clusterrolebinding-oai-ran-operator-rolebinding-cluster.yaml"
         if crb.is_file():
             doc = yaml.safe_load(crb.read_text())
-            for sub in doc.get("subjects", []):
-                if sub.get("name") == "oai-ran-operator":
-                    sub["namespace"] = slice_ns
-            dump(doc, crb)
+            subjects = [
+                s
+                for s in (doc.get("subjects") or [])
+                if not (
+                    s.get("name") == "oai-ran-operator"
+                    and s.get("namespace") == slice_ns
+                )
+            ]
+            if subjects != doc.get("subjects"):
+                doc["subjects"] = subjects
+                dump(doc, crb)
 
 
 # ---------------------------------------------------------------------------
@@ -1094,70 +1102,9 @@ purge_dir(central_slice_dir)
 central_slice_dir.mkdir(parents=True)
 write_ns(central_slice_dir, slice_ns)
 
-dump(
-    {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "oai-ran-operator", "namespace": slice_ns}},
-    reg_dir / "serviceaccount-oai-ran-operator.yaml",
-)
-dump(
-    {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "oai-ran-operator", "namespace": slice_ns},
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app.kubernetes.io/name": "oai-ran-operator",
-                    "app.kubernetes.io/component": "controller",
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app.kubernetes.io/name": "oai-ran-operator",
-                        "app.kubernetes.io/component": "controller",
-                    }
-                },
-                "spec": {
-                    "nodeSelector": {"kubernetes.io/arch": "amd64"},
-                    "serviceAccountName": "oai-ran-operator",
-                    "affinity": {
-                        "nodeAffinity": {
-                            "requiredDuringSchedulingIgnoredDuringExecution": {
-                                "nodeSelectorTerms": [
-                                    {
-                                        "matchExpressions": [
-                                            {
-                                                "key": "kubernetes.io/hostname",
-                                                "operator": "In",
-                                                "values": ["regional-0", "regional-1"],
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    "containers": [
-                        {
-                            "name": "operator",
-                            "image": ran_op_image,
-                            "resources": {
-                                "limits": {"cpu": "500m", "memory": "128Mi"},
-                                "requests": {"cpu": "10m", "memory": "64Mi"},
-                            },
-                            "securityContext": {
-                                "allowPrivilegeEscalation": False,
-                                "capabilities": {"drop": ["ALL"]},
-                            },
-                        }
-                    ],
-                },
-            },
-        },
-    },
-    reg_dir / "deployment-oai-ran-operator.yaml",
-)
+# No RAN controller in oai-slice-deployment: stock nephio/oai-ran-controller
+# watches all namespaces and races create-once with oai-benchmark (cpuagent).
+# Slice CU-UP Deployments are rendered as static YAML below.
 
 
 def emit_cuup(i: int, out_dir: Path, node_names: list) -> None:
@@ -1363,70 +1310,7 @@ for i in range(slice_count):
     site = sites[i]
     emit_cuup(i, SLICE_DIR[site], SITE_NODES[site])
 
-dump(
-    {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "oai-ran-operator", "namespace": slice_ns}},
-    edge_dir / "serviceaccount-oai-ran-operator.yaml",
-)
-dump(
-    {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "oai-ran-operator", "namespace": slice_ns},
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app.kubernetes.io/name": "oai-ran-operator",
-                    "app.kubernetes.io/component": "controller",
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app.kubernetes.io/name": "oai-ran-operator",
-                        "app.kubernetes.io/component": "controller",
-                    }
-                },
-                "spec": {
-                    "nodeSelector": {"kubernetes.io/arch": "amd64"},
-                    "serviceAccountName": "oai-ran-operator",
-                    "affinity": {
-                        "nodeAffinity": {
-                            "requiredDuringSchedulingIgnoredDuringExecution": {
-                                "nodeSelectorTerms": [
-                                    {
-                                        "matchExpressions": [
-                                            {
-                                                "key": "kubernetes.io/hostname",
-                                                "operator": "In",
-                                                "values": ["edge-0", "edge-1"],
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    "containers": [
-                        {
-                            "name": "operator",
-                            "image": ran_op_image,
-                            "resources": {
-                                "limits": {"cpu": "500m", "memory": "128Mi"},
-                                "requests": {"cpu": "10m", "memory": "64Mi"},
-                            },
-                            "securityContext": {
-                                "allowPrivilegeEscalation": False,
-                                "capabilities": {"drop": ["ALL"]},
-                            },
-                        }
-                    ],
-                },
-            },
-        },
-    },
-    edge_dir / "deployment-oai-ran-operator.yaml",
-)
+# No edge RAN controller in oai-slice-deployment (see regional note above).
 
 # CU-CP NADs
 for nad_name, ip in (
@@ -2255,6 +2139,33 @@ channelmod = {{
 emit_slicea_analyzer(central_slice_dir)
 # --- Slice D IoT edge (broker + controller) on central ---
 emit_sliced_edge(central_slice_dir)
+
+# Ensure slice RAN operator stays removed (even if RETIRE_OLD=0).
+for d in (reg_dir, edge_dir):
+    for name in (
+        "deployment-oai-ran-operator.yaml",
+        "serviceaccount-oai-ran-operator.yaml",
+    ):
+        p = d / name
+        if p.is_file():
+            p.unlink()
+for repo in ("regional-repo", "edge-repo"):
+    crb = repos / repo / "cluster" / "clusterrolebinding-oai-ran-operator-rolebinding-cluster.yaml"
+    if not crb.is_file():
+        continue
+    doc = yaml.safe_load(crb.read_text())
+    subjects = [
+        s
+        for s in (doc.get("subjects") or [])
+        if not (
+            s.get("name") == "oai-ran-operator" and s.get("namespace") == slice_ns
+        )
+    ]
+    if not subjects:
+        crb.unlink()
+    elif subjects != doc.get("subjects"):
+        doc["subjects"] = subjects
+        dump(doc, crb)
 
 print(f"Rendered {slice_ns}:")
 for i in range(slice_count):

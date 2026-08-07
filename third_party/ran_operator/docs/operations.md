@@ -65,7 +65,8 @@ kubectl logs -n oai-ran-operators deploy/oai-ran-operator -f
 1. **No in-place `NFDeployment` updates** — recreate the CR (or rely on GitOps executor rewrite + pod restart).
 2. **Create-once semantics** — finalizer path creates resources once; failed mid-create may need manual cleanup of partial SA/CM/Deploy/Svc.
 3. **Config Sync pruning** — do not assume operator-owned pods survive RootSync without matching objects in git (executor pattern).
-4. Upstream README still references specialized Nephio packages; lab IPs and namespaces follow INA-Infra render scripts, not catalog defaults alone.
+4. **Current operator has no effect on SCHED_RR** — CPU update only; see [scheduling.md](scheduling.md).
+5. Upstream README still references specialized Nephio packages; lab IPs and namespaces follow INA-Infra render scripts, not catalog defaults alone.
 
 ## ina-infra operator agent
 

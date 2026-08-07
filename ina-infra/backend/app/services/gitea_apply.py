@@ -897,14 +897,69 @@ def _format_undeploy_message(
     return f"{head}\n{cleanup}" if cleanup else head
 
 
-def _force_delete_profile_ns(cluster: str, ns: str) -> str:
+def _strip_namespaced_finalizers(
+    base: List[str], resources: tuple[str, ...] = ("nfdeployment", "nfconfig")
+) -> int:
+    """Clear finalizers on listed namespaced resources. Returns objects touched."""
+    patched = 0
+    for resource in resources:
+        listed = subprocess.run(
+            [*base, "get", resource, "-o", "name"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        for line in (listed.stdout or "").splitlines():
+            obj = line.strip()
+            if not obj:
+                continue
+            # Empty list is more reliable than null across CRDs; JSON remove as fallback.
+            ok = subprocess.run(
+                [
+                    *base,
+                    "patch",
+                    obj,
+                    "--type",
+                    "merge",
+                    "-p",
+                    '{"metadata":{"finalizers":[]}}',
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if ok.returncode != 0:
+                subprocess.run(
+                    [
+                        *base,
+                        "patch",
+                        obj,
+                        "--type",
+                        "json",
+                        "-p",
+                        '[{"op":"remove","path":"/metadata/finalizers"}]',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+            patched += 1
+    return patched
+
+
+def _force_delete_profile_ns(cluster: str, ns: str, *, wait_sec: int = 90) -> str:
     """Best-effort cluster cleanup when Config Sync prune stalls on finalizers.
 
-    OAI controllers add finalizers on NFDeployments (``*.openairinterface.org``).
-    After GitOps prune, those CRs can linger and leave the namespace ``Terminating``.
-    Strip finalizers then delete the namespace. Returns a short note.
+    RAN / OAI controllers add finalizers on NFDeployments (e.g.
+    ``batch.tutorial.kubebuilder.io/finalizer``). After GitOps prune those CRs
+    linger and leave the namespace ``Terminating``, which blocks RootSync
+    (KNV2009). Strip finalizers, delete the namespace, and wait until gone.
     """
     from app.services import cluster_status
+    import time as _time
 
     kubeconfig = cluster_status._kubeconfig_for(cluster)
     context = cluster_status._context_for(cluster)
@@ -927,45 +982,18 @@ def _force_delete_profile_ns(cluster: str, ns: str) -> str:
     if check.returncode != 0:
         return f"{cluster}: absent"
 
-    # Drop operator finalizers that block prune / namespace deletion.
-    # Prefer merge patch (null) — JSON remove fails when the path is already gone.
-    for resource in ("nfdeployment", "nfconfig"):
-        listed = subprocess.run(
-            [*base, "get", resource, "-o", "name"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-        for line in (listed.stdout or "").splitlines():
-            obj = line.strip()
-            if not obj:
-                continue
-            subprocess.run(
-                [
-                    *base,
-                    "patch",
-                    obj,
-                    "--type",
-                    "merge",
-                    "-p",
-                    '{"metadata":{"finalizers":null}}',
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
+    _strip_namespaced_finalizers(base)
 
     deleted = subprocess.run(
-        [*kc, "delete", "ns", ns, "--wait=false"],
+        [*kc, "delete", "ns", ns, "--wait=false", "--ignore-not-found=true"],
         capture_output=True,
         text=True,
         check=False,
         timeout=60,
     )
-    # Re-check: if still Terminating with leftover NFDeployments, strip again.
-    for _ in range(3):
+
+    deadline = _time.monotonic() + max(5, wait_sec)
+    while _time.monotonic() < deadline:
         phase = subprocess.run(
             [*kc, "get", "ns", ns, "-o", "jsonpath={.status.phase}"],
             capture_output=True,
@@ -975,41 +1003,28 @@ def _force_delete_profile_ns(cluster: str, ns: str) -> str:
         )
         if phase.returncode != 0 or not (phase.stdout or "").strip():
             return f"{cluster}: deleted"
-        if (phase.stdout or "").strip() != "Terminating":
-            break
-        listed = subprocess.run(
-            [*base, "get", "nfdeployment", "-o", "name"],
+        _strip_namespaced_finalizers(base)
+        # Namespace-level finalizers (rare) also block deletion.
+        subprocess.run(
+            [
+                *kc,
+                "patch",
+                "ns",
+                ns,
+                "--type",
+                "merge",
+                "-p",
+                '{"metadata":{"finalizers":[]}}',
+            ],
             capture_output=True,
             text=True,
             check=False,
             timeout=30,
         )
-        leftover = [ln.strip() for ln in (listed.stdout or "").splitlines() if ln.strip()]
-        if not leftover:
-            break
-        for obj in leftover:
-            subprocess.run(
-                [
-                    *base,
-                    "patch",
-                    obj,
-                    "--type",
-                    "merge",
-                    "-p",
-                    '{"metadata":{"finalizers":null}}',
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
-        import time as _time
-
-        _time.sleep(1)
+        _time.sleep(2)
 
     if deleted.returncode != 0:
         err = (deleted.stderr or deleted.stdout or "").strip()
-        # Already deleting is fine.
         if "NotFound" not in err and "not found" not in err.lower():
             return f"{cluster}: delete failed ({err[:120]})"
     phase2 = subprocess.run(
@@ -1019,9 +1034,9 @@ def _force_delete_profile_ns(cluster: str, ns: str) -> str:
         check=False,
         timeout=15,
     )
-    if phase2.returncode != 0:
+    if phase2.returncode != 0 or not (phase2.stdout or "").strip():
         return f"{cluster}: deleted"
-    return f"{cluster}: {(phase2.stdout or 'unknown').strip()}"
+    return f"{cluster}: stuck {(phase2.stdout or 'unknown').strip()}"
 
 
 def _profile_ns_clusters(ns: str, clusters: List[str]) -> List[str]:

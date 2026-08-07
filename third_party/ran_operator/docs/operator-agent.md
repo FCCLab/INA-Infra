@@ -106,6 +106,8 @@ On each declare the agent lists Deployments in `INA_OPERATOR_NAMESPACE` and keep
 | `cucp` | contains `cu-cp` / `cucp` |
 | `du` | `oai-du`, suffix `-du`, or `du` |
 
+Lab NFs where CPU update API works today (`oai-benchmark`): **oai-cu-cp**, **oai-cu-up**, **oai-du** — see [scheduling.md](scheduling.md#nfs-where-the-cpu-update-api-works-lab) (CFS vs RR caveats).
+
 **Live resources** are read from the first ready (or any) matching **pod** `spec.containers[0].resources` (in-place resize updates the pod, not the Deployment template). Fallback: Deployment pod template.
 
 Each NF also reports **`controllable`**: which compute kinds the agent accepts for that NF. Today every discovered NF advertises `["cpu", "memory"]`. GPU/VRAM are reported as live quantities when present but are **not** controllable until the agent adds them to the list.

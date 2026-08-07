@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Render oai-benchmark GitOps: non-slice OAI stack for throughput/latency benchmarks.
 #   central — dedicated 5GC CP executors in oai-benchmark (no Kopf operators)
-#   edge    — oai-ran-controller reconciles CU-CP/CU-UP/DU NFDeployments;
-#             UPF + nrUE remain static executors (UPF N6 = DHCP)
+#   edge    — oai-ran-controller + NFDeployments (operator create-once CU/CUUP/DU);
+#             UPF + nrUE static; DU+UE node via OAI_BENCH_* (default usrp); UPF N6=DHCP
+# Deploy: render → push → operator creates RAN → patch_oai_benchmark_ran_vpc.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,7 +23,7 @@ OAI_CUCP_IMAGE="${OAI_CUCP_IMAGE:-${OAI_REGISTRY}/oai-cucp:${OAI_IMAGE_TAG}}"
 OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
-OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:nosysnice}"
+OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:cpuagent-v7}"
 IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:stalefix}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 N6_DHCP_GW="${OAI_N6_DHCP_GW:-10.1.137.1}"
@@ -47,6 +48,9 @@ GW="$OAI_MACVLAN_GW"
 NAD_PARENT="$SITE_IFACE"
 USRP_IFACE="${USRP_SITE_IFACE:-enp4s0f0}"
 UPF_NAME="upf-benchmark"
+# Edge workers for rfsim DU + nrUE (default: physical usrp node).
+DU_NODE="${OAI_BENCH_DU_NODE:-usrp}"
+UE_NODE="${OAI_BENCH_UE_NODE:-${DU_NODE}}"
 
 echo "==> Dedicated benchmark core (${BENCH_NS})"
 OAI_CN_NS="$BENCH_NS" OAI_CORE_OFFSET0="${OAI_BENCH_CORE_OFFSET0:-40}" SKIP_UPF=1 \
@@ -118,6 +122,7 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   "$UPF_N3" "$UPF_N4" "$UPF_N6_LOGICAL" "$SMF_N4" "$GW" "$N6_DHCP_GW" \
   "$NAD_PARENT" "$USRP_IFACE" "$BENCH_IMSI" "$UPF_NAME" \
   "$OAI_RAN_OPERATOR_IMAGE" "$IPERF3_N6_IMAGE" \
+  "$DU_NODE" "$UE_NODE" \
   <<'PY'
 import importlib.util
 import json
@@ -139,7 +144,8 @@ import yaml
     upf_n3, upf_n4, upf_n6_logical, smf_n4, gw, n6_dhcp_gw,
     nad_parent, usrp_iface, bench_imsi, upf_name,
     ran_op_image, iperf3_n6_image,
-) = sys.argv[1:38]
+    du_node, ue_node,
+) = sys.argv[1:40]
 
 repos = Path(repos_dir)
 gw_default = gw
@@ -239,8 +245,8 @@ def softmodem_readiness() -> dict:
     }
 
 
+# CU-CP must not wait on CU-UP (CU-UP waits on CU-CP E1 — would deadlock).
 cucp_inits = [
-    wait_ready_init([f'wait_ping "cu-up/e1" "{cuup_e1}"'], name="bringup-cuup"),
     wait_ready_init([f'wait_sctp "amf/n2" "{amf_n2}" "38412"'], name="bringup-amf"),
     wait_ready_init([f'wait_ping "upf-benchmark/n3" "{upf_n3}"'], name="bringup-upf"),
 ]
@@ -251,8 +257,8 @@ ue_inits = [
     wait_ready_init([f'wait_tcp "du/rfsim" "{du_rf}" "4043"'], name="bringup-du"),
 ]
 
-GNB_ID = "0xe10"
-GNB_CU_ID = "0xe10"
+GNB_ID = "0xe00"
+GNB_CU_ID = "0xe00"
 NR_CELLID = 87654321
 
 
@@ -757,7 +763,7 @@ def render_upf_executor() -> None:
 render_core_executors()
 
 # ---------------------------------------------------------------------------
-# Edge RAN via oai-ran-controller (NFDeployment) + static UE executor
+# Edge RAN via oai-ran-controller (NFDeployment) + static UE/UPF executors
 # ---------------------------------------------------------------------------
 purge_dir(edge_dir)
 edge_dir.mkdir(parents=True)
@@ -857,6 +863,11 @@ dump(
                              "value": os.environ.get("INA_OPERATOR_ID", f"edge-{bench_ns}")},
                             {"name": "INA_OPERATOR_POLL_SEC",
                              "value": os.environ.get("INA_OPERATOR_POLL_SEC", "5")},
+                            # Create-once RAN Deployments read these for nodeSelector
+                            # (avoids scheduling onto edge-2 / wrong Multus parent).
+                            {"name": "OAI_RAN_CU_MULTUS_MASTER", "value": nad_parent},
+                            {"name": "OAI_RAN_DU_MULTUS_MASTER", "value": usrp_iface},
+                            {"name": "OAI_RAN_DU_NODE", "value": du_node},
                         ],
                         "resources": {
                             "limits": {"cpu": "500m", "memory": "128Mi"},
@@ -898,15 +909,13 @@ dump(nad("ue-bench-sim-rf", bench_ns, usrp_iface, ue_rf),
      edge_dir / "50-networkattachmentdefinition-ue-bench-sim-rf.yaml")
 
 # Lab RF profile (same as oai-slice-deployment / nws 133 PRB band78 rfsim).
-# GitOps owns this ConfigMap so create-once operator template (106 PRB / ARFCN 640704)
-# is overwritten with the known-good DU conf.
 du_conf = f"""Active_gNBs = ( "oai-du");
 Asn1_verbosity = "none";
 gNBs =
 (
  {{
-    gNB_ID = 0xe00;
-    gNB_DU_ID = 0xe00;
+    gNB_ID = {GNB_ID};
+    gNB_DU_ID = {GNB_ID};
     gNB_name  =  "oai-du";
     disable_harq = 0;
     TIMERS = {{
@@ -1068,6 +1077,8 @@ dump(
 )
 
 
+
+
 def iface(name, ip, vlan=None):
     doc = {"name": name, "ipv4": {"address": f"{ip}/24", "gateway": gw}}
     if vlan is not None:
@@ -1146,10 +1157,12 @@ def nfdeployment(name, provider, interfaces, network_instances, param_refs, anno
     }
 
 
-# Optional hint only (operator create-once does not consume this). Live CU/DU
-# Deployments are patched with the same nodeSelector after create.
+# Hints for humans / post-create patch (create-once does not consume these).
 bench_vpc_annotation = {"ina-infra.nephio.lab/multus-master": nad_parent}
-du_vpc_annotation = {"ina-infra.nephio.lab/multus-master": usrp_iface}
+du_vpc_annotation = {
+    "ina-infra.nephio.lab/multus-master": usrp_iface,
+    "ina-infra.nephio.lab/node": du_node,
+}
 
 
 amf_embedded = {
@@ -1234,7 +1247,8 @@ dump(
     edge_dir / "20-nfdeployment-du-bench.yaml",
 )
 
-print(f"  RAN operator {ran_op_image} + NFDeployments cucp/cuup/du-bench")
+print(f"  RAN operator {ran_op_image} + NFDeployments cucp/cuup/du-bench (create-once executors)")
+print(f"  Post-create pin: OAI_BENCH_DU_NODE={du_node} ./scripts/patch_oai_benchmark_ran_vpc.sh")
 
 # UE stays a static executor (nrUE is not managed by oai-ran-controller)
 ue_conf = f"""uicc0 = {{
@@ -1268,6 +1282,23 @@ dump(
      "metadata": {"name": "oai-ue-sa", "namespace": bench_ns}},
     edge_dir / "52-serviceaccount-oai-ue-sa.yaml",
 )
+# Static UPF N3 target for UE iperf3-client (avoid waiting on live sync).
+dump(
+    {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": "iperf3-n6-endpoint",
+            "namespace": bench_ns,
+            "labels": {"app.kubernetes.io/part-of": bench_ns},
+        },
+        "data": {
+            "server_ip": upf_n3,
+            "n6_server_ip": upf_n3,
+        },
+    },
+    edge_dir / "53-configmap-iperf3-n6-endpoint.yaml",
+)
 dump(
     {
         "apiVersion": "apps/v1",
@@ -1293,7 +1324,7 @@ dump(
                 "spec": {
                     "serviceAccountName": "oai-ue-sa",
                     "terminationGracePeriodSeconds": 5,
-                    "nodeSelector": {"kubernetes.io/hostname": "usrp"},
+                    "nodeSelector": {"kubernetes.io/hostname": ue_node},
                     "initContainers": ue_inits,
                     "containers": [
                         bringup_order_sidecar("ue", ["DU rfsim TCP :4043"]),
@@ -1321,8 +1352,8 @@ dump(
                             }],
                         },
                         {
-                            # Auto-starts after PDU (oaitun_ue1); needs IPERF_SERVER / ConfigMap
-                            # from ./scripts/sync_iperf3_n6_server_ip.sh (UPF N3 Multus IP).
+                            # Auto-starts after PDU (oaitun_ue1). IPERF_SERVER / ConfigMap
+                            # seed UPF N3; refresh live with ./scripts/sync_iperf3_n6_server_ip.sh.
                             "name": "iperf3-client",
                             "image": iperf3_n6_image,
                             "imagePullPolicy": "Always",
@@ -1335,6 +1366,7 @@ dump(
                                 {"name": "LOG_INTERVAL", "value": "5"},
                                 {"name": "BIND_DEV", "value": "oaitun_ue1"},
                                 {"name": "TESTBED", "value": bench_ns},
+                                {"name": "IPERF_SERVER", "value": upf_n3},
                                 {"name": "INFLUX_URL", "value": "http://influxdb.influxdb.svc.cluster.local:8086"},
                                 {"name": "INFLUX_TOKEN", "value": "ina-infra-influxdb-token"},
                                 {"name": "INFLUX_ORG", "value": "ina-infra"},
@@ -1378,6 +1410,7 @@ render_upf_executor()
 
 print(f"Rendered {bench_ns} @ edge:")
 print(f"  RAN: oai-ran-controller ({ran_op_image}) → NFDeployments cucp/cuup/du-bench")
+print(f"  Nodes: DU={du_node} UE={ue_node} (rfsim Multus parent {usrp_iface})")
 print(f"  CU-CP N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
 print(f"  CU-UP E1/F1U/N3 {cuup_e1}/{cuup_f1u}/{cuup_n3} → UPF N3 {upf_n3}")
 print(f"  DU F1/rfsim {du_f1}/{du_rf}, UE RF {ue_rf} (IMSI {bench_imsi}, DNN internet)")
@@ -1390,6 +1423,9 @@ echo
 echo "Push:  ./bringup/03_push_to_git_repos/push_git_repos.sh central edge"
 echo "Verify: ./scripts/check-configsync.sh central edge"
 echo "       kubectl --context edge@edge -n ${BENCH_NS} get nfdeployment,deploy"
-echo "After operator create-once (or NF recreate), pin VPC Multus parents:"
-echo "       ./scripts/patch_oai_benchmark_ran_vpc.sh"
+echo "DU/UE nodes: ${DU_NODE} / ${UE_NODE}"
+echo "After operator create-once, pin VPC Multus parents + DU node:"
+echo "       OAI_BENCH_DU_NODE=${DU_NODE} ./scripts/patch_oai_benchmark_ran_vpc.sh"
 echo "       (needs node labels from ./scripts/label_ina_multus_masters.sh edge)"
+echo "UE iperf (UPF N3) seeded in GitOps; optional refresh:"
+echo "       ./scripts/sync_iperf3_n6_server_ip.sh"

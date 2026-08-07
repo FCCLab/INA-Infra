@@ -73,6 +73,36 @@ def render_oai_controllers_script() -> Path:
     return backend_scripts() / "render_oai_controllers.sh"
 
 
+def render_oai_benchmark_script() -> Path:
+    env = os.environ.get("INA_RENDER_OAI_BENCHMARK_SCRIPT")
+    if env:
+        return Path(env).resolve()
+    monorepo = repo_root() / "scripts" / "render_oai_benchmark_gitops.sh"
+    if monorepo.is_file():
+        return monorepo
+    return backend_scripts() / "render_oai_benchmark_gitops.sh"
+
+
+def patch_oai_benchmark_ran_script() -> Path:
+    env = os.environ.get("INA_PATCH_OAI_BENCHMARK_SCRIPT")
+    if env:
+        return Path(env).resolve()
+    monorepo = repo_root() / "scripts" / "patch_oai_benchmark_ran_vpc.sh"
+    if monorepo.is_file():
+        return monorepo
+    return backend_scripts() / "patch_oai_benchmark_ran_vpc.sh"
+
+
+def sync_iperf3_n6_server_ip_script() -> Path:
+    env = os.environ.get("INA_SYNC_IPERF3_N6_SCRIPT")
+    if env:
+        return Path(env).resolve()
+    monorepo = repo_root() / "scripts" / "sync_iperf3_n6_server_ip.sh"
+    if monorepo.is_file():
+        return monorepo
+    return backend_scripts() / "sync_iperf3_n6_server_ip.sh"
+
+
 def profile_patch_mysql_script() -> Path:
     env = os.environ.get("INA_MYSQL_PATCH_SCRIPT")
     if env:

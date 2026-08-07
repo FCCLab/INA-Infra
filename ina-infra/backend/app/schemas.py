@@ -907,3 +907,69 @@ class OperatorApplyReport(BaseModel):
     vram_limit: Optional[str] = None
     vram_request: Optional[str] = None
     message: str = ""
+
+
+# ── Benchmark (oai-benchmark) ─────────────────────────────────────────────────
+
+
+class BenchmarkDeployRequest(BaseModel):
+    """Render + optionally push the oai-benchmark GitOps stack."""
+
+    commit_message: str = "ina-benchmark: deploy oai-benchmark"
+    dry_run: bool = Field(
+        False,
+        description=(
+            "True = render only (no Gitea push). False = render + push "
+            "central/edge."
+        ),
+    )
+    clusters: List[str] = Field(
+        default_factory=lambda: ["central", "edge"],
+        description="Clusters to push (default: central + edge)",
+    )
+    du_node: str = Field(
+        "usrp",
+        description="Edge worker hostname for OAI DU (rfsim)",
+    )
+    ue_node: str = Field(
+        "usrp",
+        description="Edge worker hostname for OAI nrUE (rfsim)",
+    )
+
+
+class BenchmarkDeployResponse(BaseModel):
+    ok: bool
+    dry_run: bool = False
+    message: str = ""
+    written_files: List[str] = Field(default_factory=list)
+    push_stdout: str = ""
+    push_stderr: str = ""
+    exit_code: Optional[int] = None
+    deployed: bool = False
+
+
+class BenchmarkUndeployRequest(BaseModel):
+    """Clear local oai-benchmark GitOps; optionally push + cluster cleanup."""
+
+    commit_message: str = "ina-benchmark: undeploy oai-benchmark"
+    dry_run: bool = Field(
+        False,
+        description=(
+            "True = Clear (remove local namespaces/oai-benchmark/; skip push). "
+            "False = Undeploy (clear + push + force-delete namespaces)."
+        ),
+    )
+    clusters: List[str] = Field(
+        default_factory=lambda: ["central", "edge"],
+    )
+
+
+class BenchmarkUndeployResponse(BaseModel):
+    ok: bool
+    dry_run: bool = False
+    message: str = ""
+    removed_paths: List[str] = Field(default_factory=list)
+    push_stdout: str = ""
+    push_stderr: str = ""
+    exit_code: Optional[int] = None
+    deployed: bool = False

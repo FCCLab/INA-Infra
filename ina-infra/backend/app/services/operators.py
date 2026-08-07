@@ -102,8 +102,16 @@ def push_desired(operator_id: str) -> None:
         pass
 
 
-def register(body: OperatorRegisterRequest) -> OperatorOut:
-    """Declare / refresh NF inventory (HTTP back-compat and WS `declare` handler)."""
+def register(
+    body: OperatorRegisterRequest, *, seed_desired_from_reported: bool = False
+) -> OperatorOut:
+    """Declare / refresh NF inventory (HTTP back-compat and WS `declare` handler).
+
+    When ``seed_desired_from_reported`` is true (first WS declare of a session),
+    replace desired targets with the live values from the agent so reconnect
+    does not re-apply stale UI generations. Seeded targets use generation 0
+    (agent skips apply).
+    """
     with _lock:
         cur = _operators.get(body.id) or {
             "id": body.id,
@@ -124,9 +132,31 @@ def register(body: OperatorRegisterRequest) -> OperatorOut:
                 },
             }
         )
+        if seed_desired_from_reported:
+            seeded: Dict[str, dict] = {}
+            for name, nf in reported.items():
+                seeded[name] = OperatorResourceTarget(
+                    cpu_limit=nf.cpu_limit,
+                    cpu_request=nf.cpu_request,
+                    memory_limit=nf.memory_limit,
+                    memory_request=nf.memory_request,
+                    gpu_limit=nf.gpu_limit,
+                    gpu_request=nf.gpu_request,
+                    vram_limit=nf.vram_limit,
+                    vram_request=nf.vram_request,
+                    changed_fields=[],
+                    generation=0,
+                    updated_at=_now(),
+                ).model_dump(mode="json")
+            cur["targets"] = seeded
+            cur["apply"] = {}
+            cur["message"] = (
+                body.message or "websocket declare"
+            ) + " (desired seeded from live)"
         _operators[body.id] = cur
         out = _to_out(cur)
     # After declare, push desired so the agent does not need to poll.
+    # Generation 0 seeds are ignored by the agent apply loop.
     push_desired(body.id)
     return out
 

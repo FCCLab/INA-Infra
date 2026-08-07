@@ -4,10 +4,11 @@ import MediumPage from "./pages/MediumPage";
 import ShortPage from "./pages/ShortPage";
 import DocsPage from "./pages/DocsPage";
 import OperatorsPage from "./pages/OperatorsPage";
+import BenchmarkPage from "./pages/BenchmarkPage";
 import AppShell, { type NavTab } from "./components/ui/AppShell";
 import { DialogProvider } from "./components/ui/Dialog";
 
-type Tab = "planning" | "medium" | "short" | "operators" | "docs";
+type Tab = "planning" | "medium" | "short" | "operators" | "benchmark" | "docs";
 
 const IconOverview = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -45,6 +46,13 @@ const IconOperator = (
   </svg>
 );
 
+const IconBenchmark = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M4 19V5M4 19h16" strokeLinecap="round" />
+    <path d="M8 16v-5M12 16V8M16 16v-3" strokeLinecap="round" />
+  </svg>
+);
+
 const BRAND = {
   product: "NeuroRAN",
   title: "INA-Infra · NeuroRAN",
@@ -62,6 +70,7 @@ export default function App() {
       { id: "medium", label: "Medium", icon: IconClock },
       { id: "short", label: "Short", icon: IconSignal },
       { id: "operators", label: "Operators", icon: IconOperator },
+      { id: "benchmark", label: "Benchmark", icon: IconBenchmark },
       { id: "docs", label: "Docs", icon: IconBook },
     ],
     [],
@@ -76,7 +85,9 @@ export default function App() {
           ? "Short (PS)"
           : tab === "operators"
             ? "Operator agents"
-            : "Docs";
+            : tab === "benchmark"
+              ? "oai-benchmark"
+              : "Docs";
 
   let body: ReactNode = null;
   if (tab === "planning") {
@@ -87,6 +98,8 @@ export default function App() {
     body = <ShortPage />;
   } else if (tab === "operators") {
     body = <OperatorsPage />;
+  } else if (tab === "benchmark") {
+    body = <BenchmarkPage />;
   } else {
     body = <DocsPage />;
   }

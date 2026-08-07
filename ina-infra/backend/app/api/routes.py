@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.schemas import (
+    BenchmarkDeployRequest,
+    BenchmarkUndeployRequest,
     OperatorApplyReport,
     OperatorCpuSetRequest,
     OperatorResourceSetRequest,
@@ -48,6 +50,7 @@ from app.schemas import (
     SliceIn,
 )
 from app.services import (
+    benchmark,
     cluster_status,
     operators,
     gitea_apply,
@@ -545,6 +548,51 @@ def pl_undeploy_stream(body: PlUndeployRequest):
     return _sse_response(gitea_apply.iter_undeploy_sse(body))
 
 
+# ── Benchmark (oai-benchmark) ─────────────────────────────────────────────────
+
+
+@router.post(
+    "/benchmark/deploy/stream",
+    tags=["Benchmark"],
+    summary="Deploy oai-benchmark GitOps (SSE)",
+    description=(
+        "Runs `scripts/render_oai_benchmark_gitops.sh` (5GC CP on **central**; "
+        "on **edge**, GitOps deploys `oai-ran-operator` + NFDeployments so the "
+        "operator create-once CU-CP/CU-UP/DU; UPF+UE stay static). Then pushes "
+        "to Gitea and best-effort pins Multus/nodeSelectors. "
+        "`dry_run` renders without push."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from render + git push",
+        }
+    },
+)
+def benchmark_deploy_stream(body: BenchmarkDeployRequest):
+    return _sse_response(benchmark.iter_deploy_sse(body))
+
+
+@router.post(
+    "/benchmark/undeploy/stream",
+    tags=["Benchmark"],
+    summary="Undeploy oai-benchmark GitOps (SSE)",
+    description=(
+        "`dry_run=true` (Clear): remove local `namespaces/oai-benchmark/`; "
+        "skip push. `dry_run=false` (Undeploy): clear + push + force-delete "
+        "namespaces on central/edge."
+    ),
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE log stream from undeploy",
+        }
+    },
+)
+def benchmark_undeploy_stream(body: BenchmarkUndeployRequest):
+    return _sse_response(benchmark.iter_undeploy_sse(body))
+
+
 # ── Medium (PM) ──────────────────────────────────────────────────────────────
 
 
@@ -714,11 +762,16 @@ async def operators_ws(websocket: WebSocket):
                         }
                     )
                     continue
-                if operator_id is None:
+                first_declare = operator_id is None
+                if first_declare:
                     operator_id = body.id
                     operators.attach_ws(operator_id, loop, out_q)
                     await out_q.put({"type": "welcome", "id": operator_id})
-                operators.register(body)
+                # First declare of the session: seed desired from live reported
+                # values so reconnect does not replay stale UI targets.
+                operators.register(
+                    body, seed_desired_from_reported=first_declare
+                )
                 continue
 
             if msg_type == "apply_report":

@@ -179,6 +179,28 @@ export type PlUndeployResponse = {
   profile?: ProfileRecord | null;
 };
 
+export type BenchmarkDeployResponse = {
+  ok: boolean;
+  dry_run: boolean;
+  message: string;
+  written_files: string[];
+  push_stdout: string;
+  push_stderr: string;
+  exit_code: number | null;
+  deployed?: boolean;
+};
+
+export type BenchmarkUndeployResponse = {
+  ok: boolean;
+  dry_run: boolean;
+  message: string;
+  removed_paths: string[];
+  push_stdout: string;
+  push_stderr: string;
+  exit_code: number | null;
+  deployed?: boolean;
+};
+
 export type PlPushResponse = {
   ok: boolean;
   message: string;
@@ -854,5 +876,50 @@ export const api = {
     request<OperatorOut>(
       `/api/v1/operators/${encodeURIComponent(id)}/nfs/${encodeURIComponent(nf)}/resources`,
       { method: "PUT", body: JSON.stringify(body) },
+    ),
+
+  benchmarkDeployStream: (
+    body: {
+      commit_message?: string;
+      dry_run?: boolean;
+      clusters?: string[];
+      du_node?: string;
+      ue_node?: string;
+    } = {},
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<BenchmarkDeployResponse>(
+      "/api/v1/benchmark/deploy/stream",
+      {
+        commit_message: body.commit_message ?? "ina-benchmark: deploy oai-benchmark",
+        dry_run: body.dry_run ?? false,
+        clusters: body.clusters ?? ["central", "edge"],
+        du_node: body.du_node ?? "usrp",
+        ue_node: body.ue_node ?? body.du_node ?? "usrp",
+      },
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
+    ),
+
+  benchmarkUndeployStream: (
+    body: {
+      commit_message?: string;
+      dry_run?: boolean;
+      clusters?: string[];
+    } = {},
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<BenchmarkUndeployResponse>(
+      "/api/v1/benchmark/undeploy/stream",
+      {
+        commit_message:
+          body.commit_message ?? "ina-benchmark: undeploy oai-benchmark",
+        dry_run: body.dry_run ?? false,
+        clusters: body.clusters ?? ["central", "edge"],
+      },
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
     ),
 };
