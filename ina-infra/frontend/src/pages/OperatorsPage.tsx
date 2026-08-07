@@ -331,7 +331,7 @@ export default function OperatorsPage() {
               <SectionLabel kicker="compute">Operator agents</SectionLabel>
               <span
                 className="help-q"
-                title={`Partial row updates. CPU applies in place; RAM/GPU/VRAM are logged hooks for now. Offline after ${list?.stale_after_sec ?? 30}s without a beat.`}
+                title={`Partial row updates. CPU applies in place; RAM/GPU/VRAM are logged hooks for now. Pane removed after ${list?.stale_after_sec ?? 30}s without a beat; reconnect brings it back.`}
                 role="img"
                 aria-label="About operator agents"
               >
@@ -341,10 +341,17 @@ export default function OperatorsPage() {
           </div>
           {error && <p className="hint error">{error}</p>}
           {operators.length === 0 && !error ? (
-            <p className="muted" style={{ marginBottom: 0 }}>
-              Waiting for an agent — set <code>INA_INFRA_API_URL</code> on{" "}
-              <code>oai-ran-operator</code> and restart.
-            </p>
+            <div className="op-empty-hint" role="status">
+              <span className="op-empty-hint-label">Hint</span>
+              <p>
+                Waiting for an agent. A new one will appear here when it
+                connects.
+              </p>
+              <p>
+                Set <code>INA_INFRA_API_URL</code> on{" "}
+                <code>oai-ran-operator</code> and restart if nothing shows up.
+              </p>
+            </div>
           ) : (
             <div className="op-list">
               {operators.map((c) => (
@@ -434,7 +441,7 @@ function OperatorsStatusRail({
             </span>
           </li>
           <li>
-            <span className="status-label">Stale after</span>
+            <span className="status-label">Drop after</span>
             <span className="status-pill muted">{staleAfterSec}s</span>
           </li>
         </ul>

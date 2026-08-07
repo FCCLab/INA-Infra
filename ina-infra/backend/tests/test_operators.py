@@ -162,3 +162,55 @@ def test_register_seeds_desired_from_reported_on_connect():
     assert operators.desired(oid).targets["oai-cu-up"].generation == 1
 
     assert operators.delete_operator(oid)
+
+
+def test_list_operators_prunes_stale_and_reconnect_restores():
+    oid = "test-stale-prune-edge-oai-benchmark"
+    operators.delete_operator(oid)
+
+    operators.register(
+        OperatorRegisterRequest(
+            id=oid,
+            cluster="edge",
+            namespace="oai-benchmark",
+            nfs=[
+                OperatorNfReported(
+                    name="oai-cu-up",
+                    kind="cuup",
+                    cpu_limit="200m",
+                    cpu_request="50m",
+                )
+            ],
+        )
+    )
+    assert any(c.id == oid for c in operators.list_operators().operators)
+
+    with operators._lock:
+        cur = operators._operators[oid]
+        cur["ws_connected"] = False
+        cur["last_seen"] = "2000-01-01T00:00:00+00:00"
+
+    listed = operators.list_operators()
+    assert not any(c.id == oid for c in listed.operators)
+    assert oid not in operators._operators
+
+    # Reconnect / declare restores the pane.
+    operators.register(
+        OperatorRegisterRequest(
+            id=oid,
+            cluster="edge",
+            namespace="oai-benchmark",
+            nfs=[
+                OperatorNfReported(
+                    name="oai-cu-up",
+                    kind="cuup",
+                    cpu_limit="200m",
+                    cpu_request="50m",
+                )
+            ],
+        ),
+        seed_desired_from_reported=True,
+    )
+    assert any(c.id == oid for c in operators.list_operators().operators)
+
+    assert operators.delete_operator(oid)

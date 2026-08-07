@@ -146,7 +146,7 @@ Per NF the API stores limit/request for controllable kinds (CPU, RAM today), plu
 
 Setting a non-controllable kind (e.g. `gpu_limit` while `controllable` is only cpu/memory) returns **400**.
 
-Agents are **online** while the WebSocket is connected (also briefly via `last_seen` after declare if the socket just dropped).
+Agents are **online** while the WebSocket is connected (also briefly via `last_seen` after declare if the socket just dropped). After that grace (`stale_after_sec`, default 30s) the registry **drops** the entry so the Operators pane disappears; a later reconnect/`declare` registers again and the pane reappears.
 
 ### Partial update
 

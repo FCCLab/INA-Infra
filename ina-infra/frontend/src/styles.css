@@ -1459,6 +1459,43 @@ code {
 }
 .op-intro-title .section-label { margin-bottom: 0; }
 
+.op-empty-hint {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-2);
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.op-empty-hint-label {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+.op-empty-hint p {
+  margin: 0;
+}
+.op-empty-hint p + p {
+  margin-top: 6px;
+  opacity: 0.9;
+}
+.op-empty-hint code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 .op-card {
   display: flex; flex-direction: column; gap: 14px;
   border: 1px solid var(--border);

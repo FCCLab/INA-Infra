@@ -57,6 +57,17 @@ def _is_online(cur: dict, now: Optional[datetime] = None) -> bool:
     return (now - t).total_seconds() <= STALE_AFTER_SEC
 
 
+def _prune_stale_locked(now: Optional[datetime] = None) -> None:
+    """Drop operators past the offline grace window (caller must hold ``_lock``).
+
+    Reconnect re-registers via WebSocket ``declare`` and the pane reappears.
+    """
+    now = now or datetime.now(timezone.utc)
+    for oid in [oid for oid, cur in _operators.items() if not _is_online(cur, now)]:
+        _ws.pop(oid, None)
+        _operators.pop(oid, None)
+
+
 def attach_ws(
     operator_id: str, loop: asyncio.AbstractEventLoop, queue: "asyncio.Queue[dict]"
 ) -> None:
@@ -163,12 +174,14 @@ def register(
 
 def list_operators() -> OperatorListOut:
     with _lock:
+        _prune_stale_locked()
         items = [_to_out(c) for c in sorted(_operators.values(), key=lambda x: x["id"])]
     return OperatorListOut(operators=items, stale_after_sec=STALE_AFTER_SEC)
 
 
 def get_operator(operator_id: str) -> OperatorOut:
     with _lock:
+        _prune_stale_locked()
         cur = _operators.get(operator_id)
         if not cur:
             raise KeyError(operator_id)
