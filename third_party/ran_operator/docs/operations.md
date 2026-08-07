@@ -8,7 +8,7 @@
 
 ```bash
 # Image must include rf Multus + usrp pin (see ina-infra-oai-ran-controller DuResources)
-./third_party/ran_controller/scripts/build_ran_controller_image.sh
+./third_party/ran_operator/scripts/build_ran_operator_image.sh
 export OAI_RAN_OPERATOR_IMAGE=10.1.132.30:5000/oai-ran-controller:latest
 ./scripts/render_oai_benchmark_gitops.sh
 ./bringup/03_push_to_git_repos/push_git_repos.sh central edge
@@ -66,3 +66,23 @@ kubectl logs -n oai-ran-operators deploy/oai-ran-operator -f
 2. **Create-once semantics** — finalizer path creates resources once; failed mid-create may need manual cleanup of partial SA/CM/Deploy/Svc.
 3. **Config Sync pruning** — do not assume operator-owned pods survive RootSync without matching objects in git (executor pattern).
 4. Upstream README still references specialized Nephio packages; lab IPs and namespaces follow INA-Infra render scripts, not catalog defaults alone.
+
+## ina-infra operator agent
+
+| Link | Transport |
+|------|-----------|
+| Agent ↔ backend | **WebSocket** — connect, declare, receive desired, apply-report |
+| UI / planner ↔ backend | **REST** — **control** connected operators (list, set resources, forget) |
+
+Controller **declares** NFs + `controllable` kinds; backend/UI control those kinds (CPU in-place; RAM stub for now). Frontend follows what the agent advertised.
+
+Full reference: **[operator-agent.md](operator-agent.md)** (see **Control model** / **Transport** / **WebSocket protocol**).
+
+```bash
+# Quick check
+curl -sS http://10.1.132.200:8082/api/v1/operators | jq .
+kubectl --context edge@edge -n oai-benchmark logs -l app.kubernetes.io/name=oai-ran-operator --tail=30 \
+  | grep operator-agent
+```
+
+Disable: `INA_INFRA_API_URL=-` on `oai-ran-operator`.

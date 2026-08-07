@@ -3,10 +3,11 @@ import PlanningPage from "./pages/PlanningPage";
 import MediumPage from "./pages/MediumPage";
 import ShortPage from "./pages/ShortPage";
 import DocsPage from "./pages/DocsPage";
+import OperatorsPage from "./pages/OperatorsPage";
 import AppShell, { type NavTab } from "./components/ui/AppShell";
 import { DialogProvider } from "./components/ui/Dialog";
 
-type Tab = "planning" | "medium" | "short" | "docs";
+type Tab = "planning" | "medium" | "short" | "operators" | "docs";
 
 const IconOverview = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -37,6 +38,13 @@ const IconBook = (
   </svg>
 );
 
+const IconOperator = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="3" />
+    <path d="M8 12h2M7 10v4M15 11h.01M18 13h.01" strokeLinecap="round" />
+  </svg>
+);
+
 const BRAND = {
   product: "NeuroRAN",
   title: "INA-Infra · NeuroRAN",
@@ -53,6 +61,7 @@ export default function App() {
       { id: "planning", label: "Planning", icon: IconOverview },
       { id: "medium", label: "Medium", icon: IconClock },
       { id: "short", label: "Short", icon: IconSignal },
+      { id: "operators", label: "Operators", icon: IconOperator },
       { id: "docs", label: "Docs", icon: IconBook },
     ],
     [],
@@ -65,7 +74,9 @@ export default function App() {
         ? "Medium (PM)"
         : tab === "short"
           ? "Short (PS)"
-          : "Docs";
+          : tab === "operators"
+            ? "Operator agents"
+            : "Docs";
 
   let body: ReactNode = null;
   if (tab === "planning") {
@@ -74,6 +85,8 @@ export default function App() {
     body = <MediumPage />;
   } else if (tab === "short") {
     body = <ShortPage />;
+  } else if (tab === "operators") {
+    body = <OperatorsPage />;
   } else {
     body = <DocsPage />;
   }
@@ -94,7 +107,6 @@ export default function App() {
         </>
       }
     >
-      {/* Inside .app so dialogs inherit theme tokens (opaque --bg1, etc.) */}
       <DialogProvider>{body}</DialogProvider>
     </AppShell>
   );

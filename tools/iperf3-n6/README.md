@@ -6,24 +6,25 @@ Python wrappers around `iperf3` for the oai-benchmark lab.
 
 - Binds to UPF **N3** Multus address (`n3` iface)
 - Listens on **126 ports** (`5201`–`5326` by default)
-- One-off per connection (`iperf3 -1`) + idle timeout (30s)
+- One-off per connection (`iperf3 -1`) + idle/`--rcv-timeout` (30s) and a
+  post-accept watchdog that kills silent ESTAB control sockets (common after UE path loss)
 - Writes aggregate `server_agg` to InfluxDB every 1s
 
 ## Client (UE)
 
-5 processes, DL UDP (`-u -R`), **50M** each → N3 server ports `5201`–`5205`.
+One iperf3 process: DL UDP (`-u -R`), **`-P 5`** parallel streams on a **single**
+N3 port (`PORT_START`, default `5210`), **50M** per stream.
 
-Influx reports **aggregate** DL only (`client_agg` + `server_agg`), not per-stream.
+Influx reports **aggregate** DL only (`client_agg` + `server_agg`).
 
 ```bash
-# Publish N3 → UE (or discover below)
 ./scripts/sync_iperf3_n6_server_ip.sh
 
 N3=$(kubectl --context edge@edge -n oai-benchmark exec deploy/upf-benchmark \
   -c upf-benchmark -- ip -4 -o addr show n3 | awk '{print $4}' | cut -d/ -f1)
 
 kubectl --context edge@edge -n oai-benchmark exec -it deploy/oai-ue -c iperf3-client -- \
-  python3 client.py --server "$N3" --processes 5 --bandwidth 50M --bind-dev oaitun_ue1
+  python3 client.py --server "$N3" --port 5210 -P 5 --bandwidth 50M --bind-dev oaitun_ue1
 ```
 
 ## InfluxDB

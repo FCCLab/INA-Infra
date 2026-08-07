@@ -56,3 +56,5 @@ OAI conf templates are the telnet-capable variants in `internal/controller/templ
 - `ref.nephio.org/v1alpha1` — `Config`
 
 Metrics `:9443`, health `:8081`, leader election ID `27226901.workload.nephio.org`.
+
+Optional **ina-infra operator agent** (same process): WebSocket to the ina-infra API — declares NFs + controllable resources, applies pushed compute intent — see [operator-agent.md](operator-agent.md).

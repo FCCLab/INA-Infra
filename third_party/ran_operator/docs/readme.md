@@ -8,5 +8,6 @@ Kubernetes operator for OpenAirInterface RAN NFs (**CU-CP**, **CU-UP**, **DU**).
 | [api.md](api.md) | `NFDeployment` + config CRs (`PLMN`, `RANConfig`, `OAIConfig`) |
 | [build.md](build.md) | Image build / push to lab registry |
 | [operations.md](operations.md) | Telnet O1, bandwidth reconfig, INA-Infra GitOps notes |
+| [operator-agent.md](operator-agent.md) | Operator ↔ backend **WebSocket**; UI HTTP; CPU/API |
 
 Upstream Nephio catalog packages: [nephio-project/catalog/workloads/oai](https://github.com/nephio-project/catalog/tree/main/workloads/oai). Lab OAI topology: [`docs/oai.md`](../../../docs/oai.md).

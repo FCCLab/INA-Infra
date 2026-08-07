@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-iperf3 DL UDP client farm → N6 server.
+iperf3 DL UDP client → N3 server (single port, -P parallel streams).
 
-Starts N processes (default 5), each:
-  iperf3 -c <server> -p <port> -u -R -b 50M -t <duration> -i 1
+Default:
+  iperf3 -c <server> -p <port> -u -R -P 5 -b 50M -t <duration> -i 1
 
 -R = reverse (server→client) = downlink toward UE.
-Writes aggregate (total) receive throughput to InfluxDB every
-REPORT_INTERVAL (default 1s) as role=client_agg. Stdout logging is
-throttled to LOG_INTERVAL (default 5s).
+-P = parallel streams on the same server port (one test, not N one-off ports).
+
+Writes aggregate receive throughput to InfluxDB every REPORT_INTERVAL as
+role=client_agg (prefers iperf3 [SUM] lines). Stdout throttled to LOG_INTERVAL.
 """
 
 from __future__ import annotations
@@ -20,62 +21,64 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import List, Optional, Tuple
 
 from influx_writer import InfluxWriter, env, mbps_from_bits
 
+# Per-stream or SUM interval lines, e.g.:
+# [  5]   0.00-1.00   sec  5.96 MBytes  50.0 Mbits/sec
+# [SUM]   0.00-1.00   sec  29.8 MBytes   250 Mbits/sec
 INTERVAL_RE = re.compile(
-    r"\[\s*\d+\]\s+"
+    r"\[(?:\s*\d+|SUM)\]\s+"
     r"([\d.]+)-([\d.]+)\s+sec\s+"
     r".*?\s+"
     r"([\d.]+)\s+([KMG])?bits/sec",
     re.IGNORECASE,
 )
+SUM_RE = re.compile(r"\[SUM\]", re.IGNORECASE)
 
 
-def parse_bits_per_sec(line: str) -> Optional[float]:
+def parse_interval_line(line: str) -> Optional[Tuple[float, bool]]:
+    """Return (bits_per_sec, is_sum) or None."""
     m = INTERVAL_RE.search(line)
     if not m:
         return None
     value = float(m.group(3))
     unit = (m.group(4) or "").upper()
     mult = {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9}.get(unit, 1.0)
-    return value * mult
+    return value * mult, bool(SUM_RE.search(line))
 
 
-class ClientWorker(threading.Thread):
+class ClientRunner:
     def __init__(
         self,
-        index: int,
         server: str,
         port: int,
+        parallel: int,
         bandwidth: str,
         duration: int,
         sample_interval_s: float,
         log_interval_s: float,
         bind_dev: str,
-        influx: InfluxWriter,
+        port_min: int,
+        port_max: int,
         stop: threading.Event,
-        extra_tags: Dict[str, str],
-        latest: Dict[int, float],
-        lock: threading.Lock,
     ) -> None:
-        super().__init__(daemon=True, name=f"iperf3-c{index}")
-        self.index = index
         self.server = server
         self.port = port
+        self.parallel = parallel
         self.bandwidth = bandwidth
         self.duration = duration
         self.sample_interval_s = sample_interval_s
         self.log_interval_s = max(log_interval_s, 0.0)
         self.bind_dev = bind_dev
-        self.influx = influx
+        self.port_min = port_min
+        self.port_max = port_max
         self.stop = stop
-        self.extra_tags = extra_tags
-        self.latest = latest
-        self.lock = lock
         self._proc: Optional[subprocess.Popen[str]] = None
         self._last_log = 0.0
+        self.latest_bps: Optional[float] = None
+        self.lock = threading.Lock()
 
     def _cmd(self) -> List[str]:
         cmd = [
@@ -86,6 +89,8 @@ class ClientWorker(threading.Thread):
             str(self.port),
             "-u",
             "-R",
+            "-P",
+            str(self.parallel),
             "-b",
             self.bandwidth,
             "-i",
@@ -117,8 +122,38 @@ class ClientWorker(threading.Thread):
             return True
         return False
 
-    def run(self) -> None:
+    def _advance_port(self, reason: str) -> None:
+        nxt = self.port + 1
+        if nxt > self.port_max:
+            nxt = self.port_min
+        print(f"[client] {reason} on {self.port}, trying {nxt}", flush=True)
+        self.port = nxt
+
+    def _wait_bind_dev(self) -> None:
+        if not self.bind_dev:
+            return
         while not self.stop.is_set():
+            try:
+                out = subprocess.check_output(
+                    ["ip", "-4", "addr", "show", "dev", self.bind_dev],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                if "inet " in out:
+                    return
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+            print(f"[client] waiting for {self.bind_dev} ...", flush=True)
+            if self.stop.wait(2):
+                return
+
+    def run_forever(self) -> None:
+        while not self.stop.is_set():
+            if self.bind_dev:
+                self._wait_bind_dev()
+                if self.stop.is_set():
+                    break
+
             cmd = self._cmd()
             try:
                 self._proc = subprocess.Popen(
@@ -134,7 +169,7 @@ class ClientWorker(threading.Thread):
                 continue
             except Exception as exc:
                 if self.bind_dev and "--bind-dev" in cmd:
-                    print(f"[c{self.index}] retry without --bind-dev ({exc})", flush=True)
+                    print(f"[client] retry without --bind-dev ({exc})", flush=True)
                     cmd = [
                         c
                         for i, c in enumerate(cmd)
@@ -151,27 +186,71 @@ class ClientWorker(threading.Thread):
                     raise
 
             assert self._proc.stdout is not None
-            print(f"[c{self.index}] start {' '.join(cmd)}", flush=True)
+            print(f"[client] start {' '.join(cmd)}", flush=True)
             self._last_log = 0.0
+            fail_reason: Optional[str] = None
+            zero_sum_streak = 0
+            interval_sum = 0.0
+            interval_n = 0
             try:
                 for line in self._proc.stdout:
                     if self.stop.is_set():
                         break
                     line = line.rstrip()
-                    bps = parse_bits_per_sec(line)
-                    # Always log non-interval chatter (errors / summaries) sparsely:
-                    # interval samples only print on LOG_INTERVAL.
-                    is_sample = bps is not None
+                    low = line.lower()
+                    if "server is busy" in low:
+                        fail_reason = "server busy"
+                    elif "unable to connect" in low or "connection refused" in low:
+                        fail_reason = "connect failed"
+                    elif "no such device" in low:
+                        fail_reason = "no such device"
+                    elif "idle timeout" in low:
+                        fail_reason = "idle timeout"
+
+                    parsed = parse_interval_line(line)
+                    is_sample = parsed is not None
                     if line and (not is_sample or self._should_log()):
-                        print(f"[c{self.index}] {line}", flush=True)
-                    if bps is None:
+                        print(f"[client] {line}", flush=True)
+                    if parsed is None:
+                        if fail_reason:
+                            break
                         continue
-                    # Per-stream samples stay local; Influx only gets client_agg totals.
-                    with self.lock:
-                        self.latest[self.index] = bps
+                    bps, is_sum = parsed
+                    if is_sum:
+                        with self.lock:
+                            self.latest_bps = bps
+                        interval_sum = 0.0
+                        interval_n = 0
+                        if bps <= 0:
+                            zero_sum_streak += 1
+                            if zero_sum_streak >= 5:
+                                fail_reason = "zero throughput"
+                                break
+                        else:
+                            zero_sum_streak = 0
+                    else:
+                        interval_sum += bps
+                        interval_n += 1
+                        if interval_n >= self.parallel:
+                            with self.lock:
+                                self.latest_bps = interval_sum
+                            interval_sum = 0.0
+                            interval_n = 0
             finally:
                 self._kill()
                 self._proc = None
+
+            if fail_reason == "no such device":
+                # PDU iface gone (e.g. CU-UP restart) — wait, do not burn ports.
+                print(f"[client] {fail_reason}; waiting for {self.bind_dev or 'network'}", flush=True)
+                if not self.stop.wait(2):
+                    continue
+                break
+
+            if fail_reason in ("server busy", "connect failed", "idle timeout", "zero throughput"):
+                self._advance_port(fail_reason)
+                if not self.stop.wait(0.5):
+                    continue
 
             if self.duration > 0:
                 break
@@ -180,11 +259,21 @@ class ClientWorker(threading.Thread):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="iperf3 DL UDP multi-process client")
+    ap = argparse.ArgumentParser(description="iperf3 DL UDP client (-P parallel on one port)")
     ap.add_argument("--server", default=env("IPERF_SERVER", ""), help="UPF N3 iperf3 server IP")
-    ap.add_argument("--port-start", type=int, default=int(env("PORT_START", "5201")))
-    ap.add_argument("--processes", type=int, default=int(env("PROCESSES", "5")))
-    ap.add_argument("--bandwidth", default=env("BANDWIDTH", "50M"), help="Per-process UDP -b")
+    ap.add_argument("--port", type=int, default=int(env("PORT_START", env("PORT", "5210"))))
+    ap.add_argument(
+        "--parallel",
+        "-P",
+        type=int,
+        default=int(env("PARALLEL", env("PROCESSES", "5"))),
+        help="iperf3 -P streams on one port (env PARALLEL or PROCESSES)",
+    )
+    ap.add_argument(
+        "--bandwidth",
+        default=env("BANDWIDTH", "50M"),
+        help="Per-stream UDP -b (total ≈ bandwidth × parallel)",
+    )
     ap.add_argument("--duration", type=int, default=int(env("DURATION", "0")), help="0 = forever")
     ap.add_argument(
         "--interval",
@@ -200,23 +289,28 @@ def main() -> int:
     )
     ap.add_argument("--bind-dev", default=env("BIND_DEV", ""), help="e.g. oaitun_ue1")
     ap.add_argument("--testbed", default=env("TESTBED", "oai-benchmark"))
+    ap.add_argument(
+        "--port-max",
+        type=int,
+        default=int(env("PORT_MAX", "5326")),
+        help="Upper bound when skipping a busy server port",
+    )
     args = ap.parse_args()
 
     if not args.server:
         raise SystemExit("IPERF_SERVER / --server is required (UPF N3 address)")
+    if args.parallel < 1:
+        raise SystemExit("--parallel must be >= 1")
 
-    ports = [args.port_start + i for i in range(args.processes)]
     print(
-        f"iperf3-n6 client → {args.server} ports={ports} "
-        f"bw={args.bandwidth}/stream processes={args.processes} (DL UDP -R) "
+        f"iperf3-n6 client → {args.server}:{args.port} "
+        f"-P {args.parallel} -b {args.bandwidth}/stream (DL UDP -R) "
         f"influx={args.interval}s log={args.log_interval}s",
         flush=True,
     )
 
     influx = InfluxWriter()
     stop = threading.Event()
-    latest: Dict[int, float] = {}
-    lock = threading.Lock()
     last_agg_log = 0.0
 
     def _stop(*_a: object) -> None:
@@ -225,43 +319,41 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
-    tags = {"testbed": args.testbed}
-    workers = [
-        ClientWorker(
-            i,
-            args.server,
-            ports[i],
-            args.bandwidth,
-            args.duration,
-            args.interval,
-            args.log_interval,
-            args.bind_dev,
-            influx,
-            stop,
-            tags,
-            latest,
-            lock,
-        )
-        for i in range(args.processes)
-    ]
-    for w in workers:
-        w.start()
+    runner = ClientRunner(
+        args.server,
+        args.port,
+        args.parallel,
+        args.bandwidth,
+        args.duration,
+        args.interval,
+        args.log_interval,
+        args.bind_dev,
+        args.port,
+        args.port_max,
+        stop,
+    )
+    thread = threading.Thread(target=runner.run_forever, daemon=True, name="iperf3-client")
+    thread.start()
 
-    # aggregate Influx every sample interval; log on LOG_INTERVAL
+    tags = {"testbed": args.testbed}
     while not stop.wait(args.interval):
-        with lock:
-            vals = dict(latest)
-        if not vals:
+        with runner.lock:
+            bps = runner.latest_bps
+        if bps is None:
             continue
-        total = float(sum(vals.values()))
         try:
             influx.write(
                 {
-                    "bits_per_second": total,
-                    "mbits_per_second": mbps_from_bits(total),
-                    "streams": float(len(vals)),
+                    "bits_per_second": float(bps),
+                    "mbits_per_second": mbps_from_bits(bps),
+                    "streams": float(args.parallel),
                 },
-                tags={"role": "client_agg", "server": args.server, **tags},
+                tags={
+                    "role": "client_agg",
+                    "server": args.server,
+                    "port": str(runner.port),
+                    **tags,
+                },
             )
         except Exception as exc:  # noqa: BLE001
             now = time.monotonic()
@@ -272,18 +364,18 @@ def main() -> int:
         now = time.monotonic()
         if args.log_interval <= 0 or now - last_agg_log >= args.log_interval:
             print(
-                f"[agg] total={mbps_from_bits(total):.1f} Mbit/s "
-                f"({len(vals)}/{args.processes} streams)",
+                f"[agg] total={mbps_from_bits(bps):.1f} Mbit/s "
+                f"(-P {args.parallel} port={runner.port})",
                 flush=True,
             )
             last_agg_log = now
 
-        if args.duration > 0 and all(not w.is_alive() for w in workers):
+        if args.duration > 0 and not thread.is_alive():
             break
 
     stop.set()
-    for w in workers:
-        w.join(timeout=5)
+    runner._kill()
+    thread.join(timeout=5)
     return 0
 
 

@@ -7,6 +7,7 @@ Gurobi **Named-User** academic licenses cannot run in pods. Workaround:
 | API + Gurobi | Host process on mgmt-0 (`./run-backend.sh` or systemd) |
 | UI | Kubernetes Deployment, NodePort **30518** |
 | UI → API | Service `ina-infra-backend` + Endpoints → `10.1.132.200:8082` |
+| RAN operator agent → API | **WebSocket** from edge `oai-ran-operator` to host `:8082` (`/api/v1/operators/ws`) |
 
 ## Setup
 

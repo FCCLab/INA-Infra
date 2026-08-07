@@ -12,7 +12,7 @@ git submodule update --init third_party/ina-infra-oai-ran-controller
 ## Lab helper (preferred)
 
 ```bash
-./third_party/ran_controller/scripts/build_ran_controller_image.sh
+./third_party/ran_operator/scripts/build_ran_operator_image.sh
 ```
 
 Defaults:

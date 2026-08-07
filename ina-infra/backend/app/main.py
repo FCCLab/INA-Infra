@@ -65,6 +65,15 @@ OPENAPI_TAGS = [
         "name": "Short (PS)",
         "description": "Short-term PRB layer (stub — not implemented yet).",
     },
+    {
+        "name": "Operator agents",
+        "description": (
+            "Connected RAN operator agents (inside oai-ran-operator). "
+            "Agents open WebSocket `/api/v1/operators/ws` to declare NFs + controllable "
+            "kinds and receive pushed desired compute targets. UI uses HTTP to list "
+            "agents and set resources."
+        ),
+    },
 ]
 
 app = FastAPI(

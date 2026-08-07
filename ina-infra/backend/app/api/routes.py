@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import asyncio
+import json
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 from app.schemas import (
+    OperatorApplyReport,
+    OperatorCpuSetRequest,
+    OperatorResourceSetRequest,
+    OperatorDesiredOut,
+    OperatorListOut,
+    OperatorOut,
+    OperatorRegisterRequest,
     EdgeNodesOut,
     NetworkIn,
     NetworkOut,
@@ -37,6 +49,7 @@ from app.schemas import (
 )
 from app.services import (
     cluster_status,
+    operators,
     gitea_apply,
     pl_solver,
     pm_loop,
@@ -652,3 +665,210 @@ def ps_loop_stop(body: PsLoopRequest):
 )
 def ps_loop_status(profile: str):
     return ps_loop.ps_loop_status(profile)
+
+
+# ── Operator agents ───────────────────────────────────────────────────────────
+
+
+@router.websocket("/operators/ws")
+async def operators_ws(websocket: WebSocket):
+    """Persistent agent channel: declare NFs, receive desired pushes, apply-report."""
+    await websocket.accept()
+    operator_id: Optional[str] = None
+    out_q: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    writer_task: Optional[asyncio.Task] = None
+
+    async def writer() -> None:
+        while True:
+            msg = await out_q.get()
+            await websocket.send_json(msg)
+
+    try:
+        writer_task = asyncio.create_task(writer())
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                await out_q.put({"type": "error", "message": "invalid JSON"})
+                continue
+            if not isinstance(data, dict):
+                await out_q.put({"type": "error", "message": "message must be a JSON object"})
+                continue
+            msg_type = str(data.get("type") or "").strip().lower()
+
+            if msg_type in ("hello", "declare"):
+                try:
+                    body = OperatorRegisterRequest.model_validate(
+                        {k: v for k, v in data.items() if k != "type"}
+                    )
+                except ValidationError as exc:
+                    await out_q.put({"type": "error", "message": str(exc)})
+                    continue
+                if operator_id and operator_id != body.id:
+                    await out_q.put(
+                        {
+                            "type": "error",
+                            "message": f"operator id changed mid-session ({operator_id} → {body.id})",
+                        }
+                    )
+                    continue
+                if operator_id is None:
+                    operator_id = body.id
+                    operators.attach_ws(operator_id, loop, out_q)
+                    await out_q.put({"type": "welcome", "id": operator_id})
+                operators.register(body)
+                continue
+
+            if msg_type == "apply_report":
+                if not operator_id:
+                    await out_q.put({"type": "error", "message": "declare before apply_report"})
+                    continue
+                try:
+                    report = OperatorApplyReport.model_validate(
+                        {k: v for k, v in data.items() if k != "type"}
+                    )
+                except ValidationError as exc:
+                    await out_q.put({"type": "error", "message": str(exc)})
+                    continue
+                try:
+                    operators.report_apply(operator_id, report)
+                except KeyError:
+                    await out_q.put(
+                        {"type": "error", "message": f"operator agent not found: {operator_id}"}
+                    )
+                continue
+
+            if msg_type == "ping":
+                await out_q.put({"type": "pong"})
+                continue
+
+            await out_q.put({"type": "error", "message": f"unknown type: {msg_type or '(empty)'}"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if operator_id is not None:
+            operators.detach_ws(operator_id, out_q)
+        if writer_task is not None:
+            writer_task.cancel()
+            try:
+                await writer_task
+            except asyncio.CancelledError:
+                pass
+
+
+@router.post(
+    "/operators/register",
+    response_model=OperatorOut,
+    tags=["Operator agents"],
+    summary="Register / declare NFs (HTTP back-compat)",
+    deprecated=True,
+    description=(
+        "Prefer WebSocket `/operators/ws` with `type=declare`. "
+        "HTTP remains for tests and tooling."
+    ),
+)
+def operators_register(body: OperatorRegisterRequest):
+    return operators.register(body)
+
+
+@router.get(
+    "/operators",
+    response_model=OperatorListOut,
+    tags=["Operator agents"],
+    summary="List connected operator agents",
+)
+def operators_list():
+    return operators.list_operators()
+
+
+@router.get(
+    "/operators/{operator_id}",
+    response_model=OperatorOut,
+    tags=["Operator agents"],
+    summary="Get one operator agent",
+)
+def operators_get(operator_id: str):
+    try:
+        return operators.get_operator(operator_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")
+
+
+@router.delete(
+    "/operators/{operator_id}",
+    tags=["Operator agents"],
+    summary="Forget an operator agent registration",
+)
+def operators_delete(operator_id: str):
+    if not operators.delete_operator(operator_id):
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")
+    return {"ok": True, "id": operator_id}
+
+
+@router.get(
+    "/operators/{operator_id}/desired",
+    response_model=OperatorDesiredOut,
+    tags=["Operator agents"],
+    summary="Desired compute resource targets (HTTP back-compat)",
+    deprecated=True,
+    description="Prefer WebSocket `desired` pushes on `/operators/ws`.",
+)
+def operators_desired(operator_id: str):
+    try:
+        return operators.desired(operator_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")
+
+
+@router.put(
+    "/operators/{operator_id}/nfs/{nf}/resources",
+    response_model=OperatorOut,
+    tags=["Operator agents"],
+    summary="Set desired compute resources for an NF",
+    description=(
+        "UI / planner sets desired compute for an NF. Only kinds listed in that NF's "
+        "`controllable` (from the agent declare payload) are accepted. "
+        "Pushes an updated `desired` frame to the agent's WebSocket when connected."
+    ),
+)
+def operators_set_resources(operator_id: str, nf: str, body: OperatorResourceSetRequest):
+    try:
+        return operators.set_resources(operator_id, nf, body)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put(
+    "/operators/{operator_id}/nfs/{nf}/cpu",
+    response_model=OperatorOut,
+    tags=["Operator agents"],
+    summary="Set desired compute resources for an NF (alias)",
+    description="Back-compat alias for PUT .../resources.",
+    deprecated=True,
+)
+def operators_set_cpu(operator_id: str, nf: str, body: OperatorCpuSetRequest):
+    try:
+        return operators.set_resources(operator_id, nf, body)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/operators/{operator_id}/apply-report",
+    response_model=OperatorOut,
+    tags=["Operator agents"],
+    summary="Operator agent reports resource apply result (HTTP back-compat)",
+    deprecated=True,
+    description="Prefer WebSocket `type=apply_report` on `/operators/ws`.",
+)
+def operators_apply_report(operator_id: str, body: OperatorApplyReport):
+    try:
+        return operators.report_apply(operator_id, body)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"operator agent not found: {operator_id}")

@@ -22,8 +22,8 @@ OAI_CUCP_IMAGE="${OAI_CUCP_IMAGE:-${OAI_REGISTRY}/oai-cucp:${OAI_IMAGE_TAG}}"
 OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
-OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:latest}"
-IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:n3}"
+OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:nosysnice}"
+IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:stalefix}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 N6_DHCP_GW="${OAI_N6_DHCP_GW:-10.1.137.1}"
 
@@ -121,6 +121,7 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   <<'PY'
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -772,7 +773,8 @@ dump(
             {"apiGroups": [""], "resources": ["configmaps", "services", "serviceaccounts"],
              "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
             {"apiGroups": [""], "resources": ["events"], "verbs": ["create", "patch"]},
-            {"apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list", "watch"]},
+            {"apiGroups": [""], "resources": ["pods"],
+             "verbs": ["get", "list", "watch", "patch", "update"]},
             {"apiGroups": ["apps"], "resources": ["deployments"],
              "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
             {"apiGroups": ["apps"], "resources": ["deployments/status"], "verbs": ["get"]},
@@ -846,6 +848,16 @@ dump(
                         "name": "operator",
                         "image": ran_op_image,
                         "imagePullPolicy": "IfNotPresent",
+                        "env": [
+                            {"name": "INA_INFRA_API_URL",
+                             "value": os.environ.get("INA_INFRA_API_URL", "http://10.1.132.200:8082")},
+                            {"name": "INA_OPERATOR_CLUSTER", "value": "edge"},
+                            {"name": "INA_OPERATOR_NAMESPACE", "value": bench_ns},
+                            {"name": "INA_OPERATOR_ID",
+                             "value": os.environ.get("INA_OPERATOR_ID", f"edge-{bench_ns}")},
+                            {"name": "INA_OPERATOR_POLL_SEC",
+                             "value": os.environ.get("INA_OPERATOR_POLL_SEC", "5")},
+                        ],
                         "resources": {
                             "limits": {"cpu": "500m", "memory": "128Mi"},
                             "requests": {"cpu": "10m", "memory": "64Mi"},
@@ -1316,7 +1328,7 @@ dump(
                             "imagePullPolicy": "Always",
                             "command": ["/bin/sh", "client_entrypoint.sh"],
                             "env": [
-                                {"name": "PORT_START", "value": "5201"},
+                                {"name": "PORT_START", "value": "5210"},
                                 {"name": "PROCESSES", "value": "5"},
                                 {"name": "BANDWIDTH", "value": "50M"},
                                 {"name": "REPORT_INTERVAL", "value": "1"},

@@ -635,3 +635,275 @@ class PsLoopStopResponse(BaseModel):
     profile: str
     stopped: bool = False
     message: str = ""
+
+
+# ── Operator agents (RAN operator clients) ───────────────────────────────────
+
+_CPU_QTY_RE = re.compile(r"^([0-9]+(\.[0-9]+)?)(m)?$")
+_MEM_QTY_RE = re.compile(
+    r"^([0-9]+(\.[0-9]+)?)(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$",
+    re.IGNORECASE,
+)
+_GPU_QTY_RE = re.compile(r"^([0-9]+(\.[0-9]+)?)$")
+
+
+def _validate_cpu_qty(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if not _CPU_QTY_RE.match(s):
+        raise ValueError(f"invalid CPU quantity: {v!r} (use e.g. 200m or 1)")
+    return s
+
+
+def _validate_mem_qty(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if not _MEM_QTY_RE.match(s):
+        raise ValueError(f"invalid memory quantity: {v!r} (use e.g. 128Mi or 1Gi)")
+    return s
+
+
+def _validate_gpu_qty(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if not _GPU_QTY_RE.match(s):
+        raise ValueError(f"invalid GPU quantity: {v!r} (use e.g. 1 or 0.5)")
+    return s
+
+
+def _empty_to_none_cpu(v):
+    if v is None or v == "":
+        return None
+    return _validate_cpu_qty(str(v))
+
+
+def _empty_to_none_mem(v):
+    if v is None or v == "":
+        return None
+    return _validate_mem_qty(str(v))
+
+
+def _empty_to_none_gpu(v):
+    if v is None or v == "":
+        return None
+    return _validate_gpu_qty(str(v))
+
+
+class OperatorNfReported(BaseModel):
+    """NF workload reported by a connected operator agent."""
+
+    name: str = Field(..., description="Deployment / logical NF name (e.g. oai-cu-up)")
+    kind: str = Field("", description="cuup | cucp | du | other")
+    namespace: str = ""
+    controllable: List[str] = Field(
+        default_factory=lambda: ["cpu", "memory"],
+        description="Compute kinds this agent can control for the NF (cpu|memory|gpu|vram)",
+    )
+    cpu_limit: Optional[str] = None
+    cpu_request: Optional[str] = None
+    memory_limit: Optional[str] = None
+    memory_request: Optional[str] = None
+    gpu_limit: Optional[str] = None
+    gpu_request: Optional[str] = None
+    vram_limit: Optional[str] = None
+    vram_request: Optional[str] = None
+    ready_replicas: int = 0
+    replicas: int = 0
+
+    @field_validator("controllable", mode="before")
+    @classmethod
+    def _ctrl(cls, v):
+        if v is None or v == "":
+            return ["cpu", "memory"]
+        if isinstance(v, str):
+            v = [v]
+        out = []
+        for item in v:
+            s = str(item).strip().lower()
+            if s in ("cpu", "memory", "ram"):
+                out.append("memory" if s == "ram" else s)
+            elif s in ("gpu", "vram"):
+                out.append(s)
+        return out or ["cpu", "memory"]
+
+    @field_validator("cpu_limit", "cpu_request", mode="before")
+    @classmethod
+    def _cpu(cls, v):
+        return _empty_to_none_cpu(v)
+
+    @field_validator("memory_limit", "memory_request", "vram_limit", "vram_request", mode="before")
+    @classmethod
+    def _mem(cls, v):
+        return _empty_to_none_mem(v)
+
+    @field_validator("gpu_limit", "gpu_request", mode="before")
+    @classmethod
+    def _gpu(cls, v):
+        return _empty_to_none_gpu(v)
+
+
+class OperatorRegisterRequest(BaseModel):
+    """Heartbeat / register payload from operator agent → ina-infra."""
+
+    id: str = Field(..., min_length=1, max_length=128, description="Stable agent id")
+    cluster: str = Field("edge", description="Cluster name (edge/regional/central)")
+    namespace: str = Field("oai-benchmark", description="Watched namespace")
+    version: str = ""
+    nfs: List[OperatorNfReported] = Field(default_factory=list)
+    message: str = ""
+
+
+class OperatorResourceTarget(BaseModel):
+    """Desired compute resources for one NF: CPU, RAM, GPU, VRAM."""
+
+    cpu_limit: Optional[str] = None
+    cpu_request: Optional[str] = None
+    memory_limit: Optional[str] = None
+    memory_request: Optional[str] = None
+    gpu_limit: Optional[str] = None
+    gpu_request: Optional[str] = None
+    vram_limit: Optional[str] = None
+    vram_request: Optional[str] = None
+    # Fields provided in the last set_resources call (partial apply).
+    changed_fields: List[str] = Field(default_factory=list)
+    generation: int = 0
+    updated_at: str = ""
+
+    @field_validator("cpu_limit", "cpu_request", mode="before")
+    @classmethod
+    def _cpu(cls, v):
+        return _empty_to_none_cpu(v)
+
+    @field_validator("memory_limit", "memory_request", "vram_limit", "vram_request", mode="before")
+    @classmethod
+    def _mem(cls, v):
+        return _empty_to_none_mem(v)
+
+    @field_validator("gpu_limit", "gpu_request", mode="before")
+    @classmethod
+    def _gpu(cls, v):
+        return _empty_to_none_gpu(v)
+
+
+# Back-compat alias
+OperatorCpuTarget = OperatorResourceTarget
+
+OPERATOR_RESOURCE_KEYS = (
+    "cpu_limit",
+    "cpu_request",
+    "memory_limit",
+    "memory_request",
+    "gpu_limit",
+    "gpu_request",
+    "vram_limit",
+    "vram_request",
+)
+
+
+class OperatorResourceSetRequest(BaseModel):
+    cpu_limit: Optional[str] = Field(None, description="e.g. 300m")
+    cpu_request: Optional[str] = Field(None, description="e.g. 50m")
+    memory_limit: Optional[str] = Field(None, description="RAM e.g. 512Mi")
+    memory_request: Optional[str] = Field(None, description="RAM e.g. 128Mi")
+    gpu_limit: Optional[str] = Field(None, description="e.g. 1")
+    gpu_request: Optional[str] = Field(None, description="e.g. 1")
+    vram_limit: Optional[str] = Field(None, description="e.g. 8Gi")
+    vram_request: Optional[str] = Field(None, description="e.g. 8Gi")
+
+    @field_validator("cpu_limit", "cpu_request", mode="before")
+    @classmethod
+    def _cpu(cls, v):
+        return _empty_to_none_cpu(v)
+
+    @field_validator("memory_limit", "memory_request", "vram_limit", "vram_request", mode="before")
+    @classmethod
+    def _mem(cls, v):
+        return _empty_to_none_mem(v)
+
+    @field_validator("gpu_limit", "gpu_request", mode="before")
+    @classmethod
+    def _gpu(cls, v):
+        return _empty_to_none_gpu(v)
+
+    @model_validator(mode="after")
+    def _at_least_one(self):
+        if all(getattr(self, k) is None for k in OPERATOR_RESOURCE_KEYS):
+            raise ValueError("set at least one of cpu_*/memory_*/gpu_*/vram_*")
+        return self
+
+
+# Back-compat alias
+OperatorCpuSetRequest = OperatorResourceSetRequest
+
+
+class OperatorNfOut(BaseModel):
+    name: str
+    kind: str = ""
+    namespace: str = ""
+    controllable: List[str] = Field(
+        default_factory=lambda: ["cpu", "memory"],
+        description="Compute kinds controllable for this NF",
+    )
+    reported_cpu_limit: Optional[str] = None
+    reported_cpu_request: Optional[str] = None
+    reported_memory_limit: Optional[str] = None
+    reported_memory_request: Optional[str] = None
+    reported_gpu_limit: Optional[str] = None
+    reported_gpu_request: Optional[str] = None
+    reported_vram_limit: Optional[str] = None
+    reported_vram_request: Optional[str] = None
+    ready_replicas: int = 0
+    replicas: int = 0
+    desired: Optional[OperatorResourceTarget] = None
+    applied_generation: int = 0
+    apply_status: str = ""
+    apply_message: str = ""
+
+
+class OperatorOut(BaseModel):
+    id: str
+    cluster: str
+    namespace: str
+    version: str = ""
+    online: bool = False
+    last_seen: str = ""
+    message: str = ""
+    nfs: List[OperatorNfOut] = Field(default_factory=list)
+
+
+class OperatorListOut(BaseModel):
+    operators: List[OperatorOut] = Field(default_factory=list)
+    stale_after_sec: int = 30
+
+
+class OperatorDesiredOut(BaseModel):
+    """Polled by the operator agent."""
+
+    id: str
+    targets: Dict[str, OperatorResourceTarget] = Field(default_factory=dict)
+
+
+class OperatorApplyReport(BaseModel):
+    """Operator agent reports apply result for a target generation."""
+
+    nf: str
+    generation: int
+    ok: bool
+    cpu_limit: Optional[str] = None
+    cpu_request: Optional[str] = None
+    memory_limit: Optional[str] = None
+    memory_request: Optional[str] = None
+    gpu_limit: Optional[str] = None
+    gpu_request: Optional[str] = None
+    vram_limit: Optional[str] = None
+    vram_request: Optional[str] = None
+    message: str = ""

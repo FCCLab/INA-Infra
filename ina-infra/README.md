@@ -47,6 +47,17 @@ kubectl --context mgmt@mgmt -n ina-infra rollout restart deploy/ina-infra-fronte
 
 Layer docs: [docs/pl-pm-ps.md](docs/pl-pm-ps.md) (also **Docs** tab in the UI).
 
+## Operators (RAN agent)
+
+Live compute control of OAI CU-CP / CU-UP / DU via the **Operators** tab.
+
+| Link | Transport |
+|------|-----------|
+| `oai-ran-operator` agent ↔ this API | **WebSocket** `WS /api/v1/operators/ws` (connect + declare) |
+| UI / planner / scripts ↔ this API | **REST** `/api/v1/operators…` (**control** connected operators) |
+
+Agent declares NFs + `controllable` over WS; clients set desired targets with REST (`PUT …/resources`); backend pushes `desired` on the socket. Full protocol: [`third_party/ran_operator/docs/operator-agent.md`](../third_party/ran_operator/docs/operator-agent.md).
+
 ## API
 
 | Method | Path | Description |
@@ -61,6 +72,8 @@ Layer docs: [docs/pl-pm-ps.md](docs/pl-pm-ps.md) (also **Docs** tab in the UI).
 | GET | `/api/v1/slices/defaults` | Default 4-slice SLAs (CCTV / Physical AI / OTT / IoT) |
 | GET | `/api/v1/network` | Substrate settings |
 | POST | `/api/v1/pl/solve` | PL + IP plan; persists on profile + JSON in `backend/results/` |
-| POST | `/api/v1/pl/apply` | Render templates → repos/ (+ push) |
+| GET | `/api/v1/operators` | List connected operator agents (UI) |
+| WS | `/api/v1/operators/ws` | Operator agent channel (declare / desired / apply-report) |
+| PUT | `/api/v1/operators/{id}/nfs/{nf}/resources` | Set desired compute (UI; pushes WS desired) |
 
 SQLite DB: `ina-infra/data/profiles.db` (`INA_DB_PATH`). PL run dumps: `ina-infra/backend/results/` (`INA_PL_RESULTS_DIR`). Gitea defaults: `http://10.1.132.200:3000` user `nephio` / `secret`.

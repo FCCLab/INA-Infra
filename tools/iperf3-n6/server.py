@@ -4,8 +4,10 @@ iperf3 multi-port server bound to UPF N3 (RAN-facing Multus).
 
 Spawns PORT_COUNT iperf3 servers (default 126) starting at PORT_START (5201).
 Each server is one-off (-1): after a client finishes (or times out) the listener
-restarts. Idle timeout is enforced via iperf3 --idle-timeout when available,
-else a watchdog kills hung one-off processes.
+restarts. iperf3 --idle-timeout / --rcv-timeout are set when available, and a
+Python watchdog kills the process after IDLE_TIMEOUT seconds with no interval
+output once a client has been accepted (half-open UE paths often leave ESTAB
+control sockets that iperf3 alone will not drop).
 
 Writes aggregate (sum of active ports) send throughput to InfluxDB every
 REPORT_INTERVAL as role=server_agg. Per-port samples stay local.
@@ -24,25 +26,28 @@ from typing import Dict, List, Optional
 
 from influx_writer import InfluxWriter, env, mbps_from_bits
 
-# iperf3 human interval, e.g.:
-# [  5]   0.00-1.00   sec  3.58 MBytes  30.0 Mbits/sec
+# Per-stream or SUM interval lines ( -P parallel reports both):
+# [  5]   0.00-1.00   sec  5.96 MBytes  50.0 Mbits/sec
+# [SUM]   0.00-1.00   sec  29.8 MBytes   250 Mbits/sec
 INTERVAL_RE = re.compile(
-    r"\[\s*\d+\]\s+"
+    r"\[(?:\s*\d+|SUM)\]\s+"
     r"([\d.]+)-([\d.]+)\s+sec\s+"
     r".*?\s+"
     r"([\d.]+)\s+([KMG])?bits/sec",
     re.IGNORECASE,
 )
+SUM_RE = re.compile(r"\[SUM\]", re.IGNORECASE)
 
 
-def parse_bits_per_sec(line: str) -> Optional[float]:
+def parse_interval_line(line: str) -> Optional[tuple]:
+    """Return (bits_per_sec, is_sum) or None."""
     m = INTERVAL_RE.search(line)
     if not m:
         return None
     value = float(m.group(3))
     unit = (m.group(4) or "").upper()
     mult = {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9}.get(unit, 1.0)
-    return value * mult
+    return value * mult, bool(SUM_RE.search(line))
 
 
 def iface_ipv4(iface: str) -> Optional[str]:
@@ -99,6 +104,7 @@ class PortServer(threading.Thread):
         self.lock = lock
         self._proc: Optional[subprocess.Popen[str]] = None
         self._has_idle = iperf3_supports("--idle-timeout")
+        self._has_rcv = iperf3_supports("--rcv-timeout")
 
     def _cmd(self) -> List[str]:
         cmd = [
@@ -115,6 +121,9 @@ class PortServer(threading.Thread):
         ]
         if self._has_idle and self.idle_timeout_s > 0:
             cmd.extend(["--idle-timeout", str(self.idle_timeout_s)])
+        # Milliseconds; helps drop stuck active tests when no data arrives.
+        if self._has_rcv and self.idle_timeout_s > 0:
+            cmd.extend(["--rcv-timeout", str(self.idle_timeout_s * 1000)])
         return cmd
 
     def _kill(self) -> None:
@@ -146,18 +155,30 @@ class PortServer(threading.Thread):
 
             assert self._proc.stdout is not None
             watchdog: Optional[threading.Timer] = None
+            accepted = False
 
-            def _arm_watchdog() -> None:
+            def _arm_watchdog(reason: str = "stale") -> None:
+                """Kill after silence once a client was accepted (not while listening)."""
                 nonlocal watchdog
-                if self._has_idle or self.idle_timeout_s <= 0:
+                if self.idle_timeout_s <= 0 or not accepted:
                     return
                 if watchdog:
                     watchdog.cancel()
-                watchdog = threading.Timer(self.idle_timeout_s, self._kill)
+
+                def _fire() -> None:
+                    print(
+                        f"[p{self.port}] watchdog: no output for "
+                        f"{self.idle_timeout_s}s ({reason}), killing",
+                        flush=True,
+                    )
+                    self._kill()
+
+                watchdog = threading.Timer(self.idle_timeout_s, _fire)
                 watchdog.daemon = True
                 watchdog.start()
 
-            _arm_watchdog()
+            # With -P N, iperf3 prints per-stream then [SUM]. Prefer [SUM] for totals.
+            seen_sum = False
             try:
                 for line in self._proc.stdout:
                     if self.stop.is_set():
@@ -165,12 +186,26 @@ class PortServer(threading.Thread):
                     line = line.rstrip()
                     if line:
                         print(f"[p{self.port}] {line}", flush=True)
-                    bps = parse_bits_per_sec(line)
-                    if bps is None:
+                    low = line.lower()
+                    if (not accepted) and (
+                        "accepted connection" in low or "connected to" in low
+                    ):
+                        accepted = True
+                        _arm_watchdog("post-accept")
+                    parsed = parse_interval_line(line)
+                    if parsed is None:
                         continue
-                    _arm_watchdog()
-                    with self.lock:
-                        self.latest[self.port] = bps
+                    bps, is_sum = parsed
+                    accepted = True
+                    _arm_watchdog("interval")
+                    if is_sum:
+                        seen_sum = True
+                        with self.lock:
+                            self.latest[self.port] = bps
+                    elif not seen_sum:
+                        # Single-stream tests never emit SUM.
+                        with self.lock:
+                            self.latest[self.port] = bps
             finally:
                 if watchdog:
                     watchdog.cancel()

@@ -371,6 +371,61 @@ export type PsLoopStopResponse = {
   message: string;
 };
 
+export type OperatorResourceTarget = {
+  cpu_limit?: string | null;
+  cpu_request?: string | null;
+  memory_limit?: string | null;
+  memory_request?: string | null;
+  gpu_limit?: string | null;
+  gpu_request?: string | null;
+  vram_limit?: string | null;
+  vram_request?: string | null;
+  changed_fields?: string[];
+  generation: number;
+  updated_at: string;
+};
+
+/** @deprecated Prefer OperatorResourceTarget */
+export type OperatorCpuTarget = OperatorResourceTarget;
+
+export type OperatorNfOut = {
+  name: string;
+  kind: string;
+  namespace: string;
+  /** Compute kinds the agent can control for this NF (cpu|memory|gpu|vram). */
+  controllable?: string[];
+  reported_cpu_limit?: string | null;
+  reported_cpu_request?: string | null;
+  reported_memory_limit?: string | null;
+  reported_memory_request?: string | null;
+  reported_gpu_limit?: string | null;
+  reported_gpu_request?: string | null;
+  reported_vram_limit?: string | null;
+  reported_vram_request?: string | null;
+  ready_replicas: number;
+  replicas: number;
+  desired?: OperatorResourceTarget | null;
+  applied_generation: number;
+  apply_status: string;
+  apply_message: string;
+};
+
+export type OperatorOut = {
+  id: string;
+  cluster: string;
+  namespace: string;
+  version: string;
+  online: boolean;
+  last_seen: string;
+  message: string;
+  nfs: OperatorNfOut[];
+};
+
+export type OperatorListOut = {
+  operators: OperatorOut[];
+  stale_after_sec: number;
+};
+
 export const DEFAULT_PROFILE: Profile = {
   name: "ina-infra",
   subnet: "10.1.140.0/24",
@@ -753,5 +808,51 @@ export const api = {
   psLoopStatus: (profileName: string) =>
     request<PsLoopStatusOut>(
       `/api/v1/ps/loop/status?profile=${encodeURIComponent(profileName)}`,
+    ),
+
+  listOperators: () => request<OperatorListOut>("/api/v1/operators"),
+  getOperator: (id: string) =>
+    request<OperatorOut>(`/api/v1/operators/${encodeURIComponent(id)}`),
+  deleteOperator: (id: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/v1/operators/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
+  setOperatorResources: (
+    id: string,
+    nf: string,
+    body: {
+      cpu_limit?: string | null;
+      cpu_request?: string | null;
+      memory_limit?: string | null;
+      memory_request?: string | null;
+      gpu_limit?: string | null;
+      gpu_request?: string | null;
+      vram_limit?: string | null;
+      vram_request?: string | null;
+    },
+  ) =>
+    request<OperatorOut>(
+      `/api/v1/operators/${encodeURIComponent(id)}/nfs/${encodeURIComponent(nf)}/resources`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  /** @deprecated Prefer setOperatorResources */
+  setOperatorCpu: (
+    id: string,
+    nf: string,
+    body: {
+      cpu_limit?: string | null;
+      cpu_request?: string | null;
+      memory_limit?: string | null;
+      memory_request?: string | null;
+      gpu_limit?: string | null;
+      gpu_request?: string | null;
+      vram_limit?: string | null;
+      vram_request?: string | null;
+    },
+  ) =>
+    request<OperatorOut>(
+      `/api/v1/operators/${encodeURIComponent(id)}/nfs/${encodeURIComponent(nf)}/resources`,
+      { method: "PUT", body: JSON.stringify(body) },
     ),
 };
