@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  BenchmarkRunStatusOut,
   ClusterDeployStatus,
   EDGE_RF_NODES,
   EdgeNodeOut,
@@ -42,6 +43,21 @@ function overallTone(
   if (overall === "degraded" || overall === "error" || overall === "missing")
     return "err";
   if (overall === "partial" || overall === "empty" || overall === "syncing")
+    return "warn";
+  return "muted";
+}
+
+function fmtTs(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+function phaseTone(phase: string): "ok" | "warn" | "err" | "muted" {
+  if (phase === "done") return "ok";
+  if (phase === "error") return "err";
+  if (phase === "measuring" || phase === "warmup" || phase === "applying")
     return "warn";
   return "muted";
 }
@@ -145,7 +161,17 @@ export default function BenchmarkPage() {
   const [clusterError, setClusterError] = useState<string | null>(null);
   const [clusterBusy, setClusterBusy] = useState(false);
 
+  const [minCpu, setMinCpu] = useState("50m");
+  const [maxCpu, setMaxCpu] = useState("1000m");
+  const [cpuStep, setCpuStep] = useState("50m");
+  const [stepSec, setStepSec] = useState(120);
+  const [warmupSec, setWarmupSec] = useState(60);
+  const [sweep, setSweep] = useState<BenchmarkRunStatusOut | null>(null);
+  const [sweepBusy, setSweepBusy] = useState(false);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+
   const busy = running !== null;
+  const sweepRunning = Boolean(sweep?.running);
 
   const appendConsole = useCallback((line: string) => {
     setConsoleText((prev) => (prev ? `${prev}\n${line}` : line));
@@ -273,12 +299,26 @@ export default function BenchmarkPage() {
     [edgeNodes],
   );
 
+  const refreshSweep = useCallback(async () => {
+    try {
+      const st = await api.benchmarkRunStatus();
+      setSweep(st);
+    } catch {
+      /* keep last */
+    }
+  }, []);
+
   useEffect(() => {
     void refreshCluster();
     void refreshEdgeNodes();
-    const id = window.setInterval(() => void refreshCluster(), 10000);
-    return () => window.clearInterval(id);
-  }, [refreshCluster, refreshEdgeNodes]);
+    void refreshSweep();
+    const sweepId = window.setInterval(() => void refreshSweep(), 1000);
+    const clusterId = window.setInterval(() => void refreshCluster(), 10000);
+    return () => {
+      window.clearInterval(sweepId);
+      window.clearInterval(clusterId);
+    };
+  }, [refreshCluster, refreshEdgeNodes, refreshSweep]);
 
   async function onDeploy() {
     if (
@@ -387,6 +427,54 @@ export default function BenchmarkPage() {
     }
   }
 
+  async function onSweepStart() {
+    setSweepBusy(true);
+    setSweepError(null);
+    try {
+      const listed = await api.listOperators();
+      const op = (listed.operators || []).find(
+        (o) => o.id === "edge-oai-benchmark" || o.namespace === BENCH_NS,
+      );
+      if (!op?.online || !op.ws_connected) {
+        throw new Error(
+          "No WebSocket-connected RAN operator. Open Operators — wait until edge-oai-benchmark is online (agent reconnects after API reload).",
+        );
+      }
+      if (!op.nfs?.some((n) => n.name === "oai-cu-up")) {
+        throw new Error(
+          `Operator ${op.id} is online but has no oai-cu-up. Deploy oai-benchmark first.`,
+        );
+      }
+      const st = await api.benchmarkRunStart({
+        min_cpu: minCpu.trim(),
+        max_cpu: maxCpu.trim(),
+        cpu_step: cpuStep.trim() || "50m",
+        step_sec: Number(stepSec) || 1,
+        warmup_sec: Number(warmupSec) || 0,
+        operator_id: op.id,
+        nf: "oai-cu-up",
+      });
+      setSweep(st);
+    } catch (e) {
+      setSweepError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSweepBusy(false);
+    }
+  }
+
+  async function onSweepStop() {
+    setSweepBusy(true);
+    try {
+      const res = await api.benchmarkRunStop();
+      if (res.status) setSweep(res.status);
+      else await refreshSweep();
+    } catch (e) {
+      setSweepError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSweepBusy(false);
+    }
+  }
+
   const benchClusters = (cluster?.clusters || []).filter((c) =>
     (BENCH_CLUSTERS as readonly string[]).includes(c.cluster),
   );
@@ -455,6 +543,160 @@ export default function BenchmarkPage() {
               <BtnProgress active={running === "undeploy"} />
               Undeploy
             </button>
+          </div>
+        </Card>
+
+        <Card className="tier" glow>
+          <SectionLabel kicker="cpu sweep">Run</SectionLabel>
+          <p className="hint" style={{ marginTop: 0 }}>
+            START walks CU-UP CPU from min→max in N steps (request=limit via
+            Operators). Each step: apply → warmup → measure. Throughput is
+            stored in the backend DB; this list shows start/stop only. Deploy
+            and sweep lines are also appended to{" "}
+            <code>logs/benchmark.log</code>.
+          </p>
+          <div className="profile-grid" style={{ marginTop: 12 }}>
+            <FieldHelp label="Min CPU" help="Lowest CPU for step 1 (default 50m).">
+              <input
+                value={minCpu}
+                disabled={sweepRunning || sweepBusy || busy}
+                onChange={(e) => setMinCpu(e.target.value)}
+              />
+            </FieldHelp>
+            <FieldHelp label="Max CPU" help="Highest CPU; always included (default 1000m).">
+              <input
+                value={maxCpu}
+                disabled={sweepRunning || sweepBusy || busy}
+                onChange={(e) => setMaxCpu(e.target.value)}
+              />
+            </FieldHelp>
+            <FieldHelp
+              label="CPU step"
+              help="Increment. Default 50m → 50m, 100m, 150m, … 1000m."
+            >
+              <input
+                value={cpuStep}
+                disabled={sweepRunning || sweepBusy || busy}
+                onChange={(e) => setCpuStep(e.target.value)}
+              />
+            </FieldHelp>
+            <FieldHelp
+              label="Time / step (s)"
+              help="Measure window after warmup — start/stop timestamps bound this interval."
+            >
+              <input
+                type="number"
+                min={0.1}
+                step={1}
+                value={stepSec}
+                disabled={sweepRunning || sweepBusy || busy}
+                onChange={(e) => setStepSec(Number(e.target.value))}
+              />
+            </FieldHelp>
+            <FieldHelp
+              label="Warmup (s)"
+              help="Seconds after CPU apply before the measure window starts."
+            >
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={warmupSec}
+                disabled={sweepRunning || sweepBusy || busy}
+                onChange={(e) => setWarmupSec(Number(e.target.value))}
+              />
+            </FieldHelp>
+          </div>
+          {sweepError && <p className="hint error">{sweepError}</p>}
+          {sweep && sweep.status && sweep.status !== "idle" && (
+            <p className="hint" style={{ marginTop: 8 }}>
+              Status:{" "}
+              <span
+                className={toneClass(
+                  sweep.running
+                    ? "warn"
+                    : sweep.status === "done"
+                      ? "ok"
+                      : sweep.status === "error"
+                        ? "err"
+                        : "muted",
+                )}
+              >
+                {sweep.status}
+                {sweep.current_index != null
+                  ? ` · step ${sweep.current_index + 1}/${sweep.steps}`
+                  : ""}
+              </span>
+              {sweep.message ? ` — ${sweep.message}` : ""}
+              {sweep.nf ? (
+                <>
+                  {" "}
+                  · NF <code>{sweep.nf}</code>
+                </>
+              ) : null}
+            </p>
+          )}
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className={"primary" + (sweepRunning ? " is-running" : "")}
+              disabled={busy || sweepBusy || sweepRunning}
+              onClick={() => void onSweepStart()}
+            >
+              <BtnProgress active={sweepRunning} />
+              Start
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={!sweepRunning && !sweepBusy}
+              onClick={() => void onSweepStop()}
+            >
+              Stop
+            </button>
+          </div>
+          <div className="table-wrap status-deploy-table" style={{ marginTop: 14 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>CPU</th>
+                  <th>Phase</th>
+                  <th>Start</th>
+                  <th>Stop</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(sweep?.step_list || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>
+                      <span className="hint">No run yet — Start to generate steps.</span>
+                    </td>
+                  </tr>
+                ) : (
+                  (sweep?.step_list || []).map((s) => (
+                    <tr key={s.index}>
+                      <td>{s.index + 1}</td>
+                      <td>
+                        <code>{s.cpu}</code>
+                      </td>
+                      <td>
+                        <span className={toneClass(phaseTone(s.phase))}>
+                          {s.phase}
+                        </span>
+                        {s.message ? (
+                          <span className="hint" style={{ marginLeft: 6 }}>
+                            {s.message}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td>{fmtTs(s.started_at)}</td>
+                      <td>{fmtTs(s.stopped_at)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </Card>
 

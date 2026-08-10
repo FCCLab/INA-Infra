@@ -12,6 +12,9 @@ from pydantic import ValidationError
 
 from app.schemas import (
     BenchmarkDeployRequest,
+    BenchmarkRunRequest,
+    BenchmarkRunStatusOut,
+    BenchmarkRunStopResponse,
     BenchmarkUndeployRequest,
     OperatorApplyReport,
     OperatorCpuSetRequest,
@@ -51,6 +54,8 @@ from app.schemas import (
 )
 from app.services import (
     benchmark,
+    benchmark_log,
+    benchmark_run,
     cluster_status,
     operators,
     gitea_apply,
@@ -570,7 +575,11 @@ def pl_undeploy_stream(body: PlUndeployRequest):
     },
 )
 def benchmark_deploy_stream(body: BenchmarkDeployRequest):
-    return _sse_response(benchmark.iter_deploy_sse(body))
+    benchmark_log.write(
+        f"deploy start dry_run={body.dry_run} log={benchmark_log.log_path()}",
+        source="deploy",
+    )
+    return _sse_response(benchmark_log.tee_sse("deploy", benchmark.iter_deploy_sse(body)))
 
 
 @router.post(
@@ -590,7 +599,55 @@ def benchmark_deploy_stream(body: BenchmarkDeployRequest):
     },
 )
 def benchmark_undeploy_stream(body: BenchmarkUndeployRequest):
-    return _sse_response(benchmark.iter_undeploy_sse(body))
+    benchmark_log.write(
+        f"undeploy start dry_run={body.dry_run} log={benchmark_log.log_path()}",
+        source="undeploy",
+    )
+    return _sse_response(
+        benchmark_log.tee_sse("undeploy", benchmark.iter_undeploy_sse(body))
+    )
+
+
+@router.post(
+    "/benchmark/run/start",
+    response_model=BenchmarkRunStatusOut,
+    tags=["Benchmark"],
+    summary="Start oai-benchmark CPU sweep",
+    description=(
+        "Linear CPU steps from min_cpu to max_cpu on the RAN operator NF "
+        "(default oai-cu-up). Each step: apply CPU → warmup → measure window. "
+        "Throughput is stored in SQLite; this API returns start/stop times."
+    ),
+)
+def benchmark_run_start(body: BenchmarkRunRequest):
+    try:
+        return benchmark_run.start_run(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/benchmark/run/stop",
+    response_model=BenchmarkRunStopResponse,
+    tags=["Benchmark"],
+    summary="Stop oai-benchmark CPU sweep",
+)
+def benchmark_run_stop():
+    return benchmark_run.stop_run()
+
+
+@router.get(
+    "/benchmark/run/status",
+    response_model=BenchmarkRunStatusOut,
+    tags=["Benchmark"],
+    summary="oai-benchmark CPU sweep status + step list",
+)
+def benchmark_run_status():
+    return benchmark_run.status()
 
 
 # ── Medium (PM) ──────────────────────────────────────────────────────────────

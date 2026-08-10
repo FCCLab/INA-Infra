@@ -9,13 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app.api.routes import router
-from app.services import profile_store
+from app.services import benchmark_log, benchmark_store, profile_store
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     path = profile_store.init_db()
+    bench = benchmark_store.init_db()
     print(f"ina-infra: profile DB at {path}", flush=True)
+    print(f"ina-infra: benchmark tables at {bench}", flush=True)
+    print(f"ina-infra: benchmark log at {benchmark_log.log_path()}", flush=True)
     yield
 
 
@@ -72,6 +75,13 @@ OPENAPI_TAGS = [
             "Agents open WebSocket `/api/v1/operators/ws` to declare NFs + controllable "
             "kinds and receive pushed desired compute targets. UI uses HTTP to list "
             "agents and set resources."
+        ),
+    },
+    {
+        "name": "Benchmark",
+        "description": (
+            "oai-benchmark GitOps deploy/undeploy and CPU-sweep run "
+            "(START/STOP; step start/stop times; throughput stored in SQLite)."
         ),
     },
 ]

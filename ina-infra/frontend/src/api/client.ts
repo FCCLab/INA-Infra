@@ -201,6 +201,49 @@ export type BenchmarkUndeployResponse = {
   deployed?: boolean;
 };
 
+export type BenchmarkStepOut = {
+  index: number;
+  cpu: string;
+  phase: string;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  message?: string;
+};
+
+export type BenchmarkRunStatusOut = {
+  id?: number | null;
+  running: boolean;
+  status: string;
+  message: string;
+  operator_id: string;
+  nf: string;
+  min_cpu: string;
+  max_cpu: string;
+  steps: number;
+  step_sec: number;
+  warmup_sec: number;
+  current_index?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  step_list: BenchmarkStepOut[];
+};
+
+export type BenchmarkRunStopResponse = {
+  ok: boolean;
+  message: string;
+  status?: BenchmarkRunStatusOut | null;
+};
+
+export type BenchmarkRunRequest = {
+  min_cpu: string;
+  max_cpu: string;
+  cpu_step: string;
+  step_sec: number;
+  warmup_sec: number;
+  operator_id?: string;
+  nf?: string;
+};
+
 export type PlPushResponse = {
   ok: boolean;
   message: string;
@@ -438,6 +481,7 @@ export type OperatorOut = {
   namespace: string;
   version: string;
   online: boolean;
+  ws_connected: boolean;
   last_seen: string;
   message: string;
   nfs: OperatorNfOut[];
@@ -922,4 +966,17 @@ export const api = {
       handlers,
       { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
     ),
+
+  benchmarkRunStart: (body: BenchmarkRunRequest) =>
+    request<BenchmarkRunStatusOut>("/api/v1/benchmark/run/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  benchmarkRunStop: () =>
+    request<BenchmarkRunStopResponse>("/api/v1/benchmark/run/stop", {
+      method: "POST",
+      body: "{}",
+    }),
+  benchmarkRunStatus: () =>
+    request<BenchmarkRunStatusOut>("/api/v1/benchmark/run/status"),
 };

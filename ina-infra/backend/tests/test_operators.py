@@ -112,7 +112,40 @@ def test_register_seeds_desired_from_reported_on_connect():
     assert operators.desired(oid).targets["oai-cu-up"].cpu_limit == "10m"
     assert operators.desired(oid).targets["oai-cu-up"].generation == 1
 
-    # Connect/declare with live values seeds desired (gen 0) from reported.
+    # In-flight (pending) desired survives first WS declare.
+    out = operators.register(
+        OperatorRegisterRequest(
+            id=oid,
+            cluster="edge",
+            namespace="oai-benchmark",
+            nfs=[
+                OperatorNfReported(
+                    name="oai-cu-up",
+                    kind="cuup",
+                    cpu_limit="200m",
+                    cpu_request="50m",
+                )
+            ],
+        ),
+        seed_desired_from_reported=True,
+    )
+    assert out.nfs[0].desired is not None
+    assert out.nfs[0].desired.cpu_limit == "10m"
+    assert out.nfs[0].desired.generation == 1
+    assert out.nfs[0].apply_status == "pending"
+
+    operators.report_apply(
+        oid,
+        OperatorApplyReport(
+            nf="oai-cu-up",
+            generation=1,
+            ok=True,
+            cpu_limit="10m",
+            cpu_request="10m",
+            message="applied",
+        ),
+    )
+    # After ack, reconnect seeds desired (gen 0) from live reported.
     out = operators.register(
         OperatorRegisterRequest(
             id=oid,

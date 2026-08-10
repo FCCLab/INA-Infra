@@ -96,6 +96,12 @@ def detach_ws(operator_id: str, queue: "asyncio.Queue[dict]") -> None:
                 cur["last_seen"] = _now()
 
 
+def has_ws(operator_id: str) -> bool:
+    """True when a live agent WebSocket can receive ``desired`` pushes."""
+    with _lock:
+        return operator_id in _ws
+
+
 def push_desired(operator_id: str) -> None:
     """Push current desired targets to the connected agent (no-op if offline)."""
     try:
@@ -119,9 +125,10 @@ def register(
     """Declare / refresh NF inventory (HTTP back-compat and WS `declare` handler).
 
     When ``seed_desired_from_reported`` is true (first WS declare of a session),
-    replace desired targets with the live values from the agent so reconnect
-    does not re-apply stale UI generations. Seeded targets use generation 0
-    (agent skips apply).
+    replace already-acked desired targets with live agent values so reconnect
+    does not re-apply them (generation 0 — agent skips). In-flight targets
+    (desired generation > applied) are kept so a pending UI/benchmark apply
+    is not discarded.
     """
     with _lock:
         cur = _operators.get(body.id) or {
@@ -144,8 +151,20 @@ def register(
             }
         )
         if seed_desired_from_reported:
+            prev_targets: Dict[str, dict] = cur.get("targets") or {}
+            prev_apply: Dict[str, dict] = cur.get("apply") or {}
             seeded: Dict[str, dict] = {}
+            kept_apply: Dict[str, dict] = {}
             for name, nf in reported.items():
+                prev = prev_targets.get(name) or {}
+                app = prev_apply.get(name) or {}
+                prev_gen = int(prev.get("generation") or 0)
+                applied_gen = int(app.get("generation") or 0)
+                if prev_gen > applied_gen:
+                    seeded[name] = prev
+                    if app:
+                        kept_apply[name] = app
+                    continue
                 seeded[name] = OperatorResourceTarget(
                     cpu_limit=nf.cpu_limit,
                     cpu_request=nf.cpu_request,
@@ -160,7 +179,7 @@ def register(
                     updated_at=_now(),
                 ).model_dump(mode="json")
             cur["targets"] = seeded
-            cur["apply"] = {}
+            cur["apply"] = kept_apply
             cur["message"] = (
                 body.message or "websocket declare"
             ) + " (desired seeded from live)"
@@ -344,6 +363,7 @@ def _to_out(cur: dict) -> OperatorOut:
         namespace=cur.get("namespace") or "",
         version=cur.get("version") or "",
         online=_is_online(cur),
+        ws_connected=cur.get("id") in _ws,
         last_seen=last_seen,
         message=cur.get("message") or "",
         nfs=nfs,

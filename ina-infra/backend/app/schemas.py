@@ -875,6 +875,7 @@ class OperatorOut(BaseModel):
     namespace: str
     version: str = ""
     online: bool = False
+    ws_connected: bool = False
     last_seen: str = ""
     message: str = ""
     nfs: List[OperatorNfOut] = Field(default_factory=list)
@@ -973,3 +974,61 @@ class BenchmarkUndeployResponse(BaseModel):
     push_stderr: str = ""
     exit_code: Optional[int] = None
     deployed: bool = False
+
+
+class BenchmarkRunRequest(BaseModel):
+    """CPU sweep on oai-benchmark (Operators agent apply per step)."""
+
+    min_cpu: str = Field("50m", description="Lowest CPU (request=limit) for step 1")
+    max_cpu: str = Field("1000m", description="Highest CPU; always included as last step")
+    cpu_step: str = Field(
+        "50m",
+        description="CPU increment (default 50m, 100m, … 1000m)",
+    )
+    step_sec: float = Field(
+        120.0, ge=0.1, description="Measure window length per step (seconds)"
+    )
+    warmup_sec: float = Field(
+        60.0, ge=0.0, description="Warm-up after CPU apply, before measure start"
+    )
+    operator_id: str = Field(
+        "edge-oai-benchmark",
+        description="Operator agent id (default edge-oai-benchmark)",
+    )
+    nf: str = Field(
+        "oai-cu-up",
+        description="NF to resize (default oai-cu-up / U-plane)",
+    )
+
+
+class BenchmarkStepOut(BaseModel):
+    index: int
+    cpu: str
+    phase: str = "pending"
+    started_at: Optional[str] = None
+    stopped_at: Optional[str] = None
+    message: str = ""
+
+
+class BenchmarkRunStatusOut(BaseModel):
+    id: Optional[int] = None
+    running: bool = False
+    status: str = "idle"
+    message: str = ""
+    operator_id: str = ""
+    nf: str = ""
+    min_cpu: str = ""
+    max_cpu: str = ""
+    steps: int = 0
+    step_sec: float = 0.0
+    warmup_sec: float = 0.0
+    current_index: Optional[int] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    step_list: List[BenchmarkStepOut] = Field(default_factory=list)
+
+
+class BenchmarkRunStopResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    status: Optional[BenchmarkRunStatusOut] = None
