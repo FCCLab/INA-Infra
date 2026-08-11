@@ -7,6 +7,10 @@ Single run: ``--tag dl_tcp``.
 Writes under ``plots/`` (gitignored):
   plots/throughput_vs_cpu_dl_udp.png
   plots/throughput_vs_cpu_dl_udp.pdf
+
+Client (UE receive) and server (UPF send) are shown with distinct styles; a
+small panel plots server−client so the two reports stay distinguishable even
+when absolute Mbps nearly match.
 """
 
 from __future__ import annotations
@@ -21,6 +25,9 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 DEFAULT_TAG = "all"
 DEFAULT_OUT = HERE / "plots"
+
+CLIENT_COLOR = "#1f4e79"
+SERVER_COLOR = "#c45c26"
 
 
 def list_plot_tags(tag: str) -> list[str]:
@@ -61,36 +68,76 @@ def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -
     server = server[order]
 
     out.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8.0, 4.5), constrained_layout=True)
-    ax.plot(
+    if no_server:
+        fig, ax = plt.subplots(figsize=(8.0, 4.5), constrained_layout=True)
+        axes_main = ax
+        ax_delta = None
+    else:
+        fig, (ax, ax_delta) = plt.subplots(
+            2,
+            1,
+            figsize=(8.0, 5.6),
+            sharex=True,
+            gridspec_kw={"height_ratios": [3.2, 1.0], "hspace": 0.08},
+            constrained_layout=True,
+        )
+        axes_main = ax
+
+    if not no_server:
+        axes_main.plot(
+            cpu,
+            server,
+            marker="s",
+            markersize=5.0,
+            markerfacecolor="white",
+            markeredgewidth=1.4,
+            linewidth=1.5,
+            linestyle="--",
+            label="server (UPF send)",
+            color=SERVER_COLOR,
+            zorder=2,
+        )
+    axes_main.plot(
         cpu,
         client,
         marker="o",
         markersize=4.5,
-        linewidth=1.6,
-        label="client_agg (UE receive)",
-        color="#1f4e79",
+        linewidth=1.8,
+        label="client (UE receive)",
+        color=CLIENT_COLOR,
+        zorder=3,
     )
-    if not no_server:
-        ax.plot(
+
+    axes_main.set_ylabel(ylabel)
+    axes_main.set_title(title)
+    axes_main.set_xlim(left=0)
+    axes_main.set_ylim(bottom=0)
+    axes_main.grid(True, which="major", linestyle=":", linewidth=0.7, alpha=0.7)
+    axes_main.legend(loc="lower right", frameon=False)
+    axes_main.set_xticks(cpu[:: max(1, len(cpu) // 10)])
+
+    if ax_delta is not None:
+        delta = server - client
+        ax_delta.axhline(0.0, color="#888888", linewidth=0.8)
+        ax_delta.plot(
             cpu,
-            server,
-            marker="s",
+            delta,
+            marker="D",
             markersize=3.5,
             linewidth=1.2,
-            linestyle="--",
-            label="server_agg (UPF send)",
-            color="#8a8a8a",
+            color="#555555",
+            label="server − client",
         )
-
-    ax.set_xlabel("CU-UP CPU limit/request (millicores)")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="major", linestyle=":", linewidth=0.7, alpha=0.7)
-    ax.legend(loc="lower right", frameon=False)
-    ax.set_xticks(cpu[:: max(1, len(cpu) // 10)])
+        ax_delta.set_ylabel("Δ Mbps")
+        ax_delta.set_xlabel("CU-UP CPU limit/request (millicores)")
+        ax_delta.grid(True, which="major", linestyle=":", linewidth=0.7, alpha=0.7)
+        ax_delta.legend(loc="best", frameon=False, fontsize=9)
+        # Symmetric-ish y so small gaps are visible.
+        lim = float(np.nanmax(np.abs(delta))) if delta.size else 1.0
+        lim = max(lim * 1.25, 1.0)
+        ax_delta.set_ylim(-lim, lim)
+    else:
+        axes_main.set_xlabel("CU-UP CPU limit/request (millicores)")
 
     stem = f"throughput_vs_cpu_{tag}"
     png = out / f"{stem}.png"
@@ -126,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--no-server",
         action="store_true",
-        help="omit server_agg (offered) series",
+        help="omit server series and delta panel",
     )
     args = p.parse_args(argv)
 
