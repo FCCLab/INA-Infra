@@ -1,13 +1,9 @@
 #!/bin/sh
-# Wait for UE PDU, then run iperf3 DL client (logs every LOG_INTERVAL, Influx every REPORT_INTERVAL).
+# Resolve IPERF_SERVER, then start client (WS control connects immediately;
+# iperf data plane waits for BIND_DEV / PDU inside client.py).
 set -eu
 
 IFACE="${BIND_DEV:-oaitun_ue1}"
-echo "waiting for PDU iface ${IFACE} ..."
-while ! ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet '; do
-  sleep 2
-done
-echo "${IFACE} ready: $(ip -4 -br addr show "$IFACE")"
 
 # Prefer env; else ConfigMap-mounted file from sync_iperf3_n6_server_ip.sh (UPF N3 IP)
 SERVER="${IPERF_SERVER:-}"
@@ -29,5 +25,11 @@ while [ -z "$SERVER" ]; do
   sleep 5
 done
 
-echo "starting iperf3 client → ${SERVER} (influx=${REPORT_INTERVAL:-1}s log=${LOG_INTERVAL:-5}s)"
-exec python3 client.py --server "$SERVER"
+if ip -4 addr show "$IFACE" 2>/dev/null | grep -q 'inet '; then
+  echo "${IFACE} ready: $(ip -4 -br addr show "$IFACE")"
+else
+  echo "${IFACE} not up yet — WS will declare waiting_pdu; iperf starts after PDU"
+fi
+
+echo "starting iperf3 client → ${SERVER} proto=${PROTOCOL:-udp} api=${INA_INFRA_API_URL:-} (influx=${REPORT_INTERVAL:-1}s log=${LOG_INTERVAL:-5}s)"
+exec python3 client.py --server "$SERVER" --protocol "${PROTOCOL:-udp}"

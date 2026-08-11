@@ -5,7 +5,8 @@ RUN apt-get update \
         iperf3 \
         iproute2 \
         ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir "websockets>=12,<14"
 
 WORKDIR /app
 COPY influx_writer.py server.py client.py client_entrypoint.sh ./
@@ -24,7 +25,9 @@ ENV PYTHONUNBUFFERED=1 \
     INFLUX_ORG=ina-infra \
     INFLUX_BUCKET=default \
     PROCESSES=5 \
-    BANDWIDTH=50M
+    BANDWIDTH=50M \
+    PROTOCOL=udp \
+    INA_INFRA_API_URL=http://10.1.132.200:8082
 
 ENTRYPOINT ["python3"]
 CMD ["server.py"]

@@ -78,10 +78,18 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "UE agents",
+        "description": (
+            "Connected UE iperf3-clients. Agents open WebSocket `/api/v1/ues/ws` "
+            "to declare status and receive pushed desired protocol/start/stop. "
+            "Benchmark UI lists agents and broadcasts UDP/TCP."
+        ),
+    },
+    {
         "name": "Benchmark",
         "description": (
             "oai-benchmark GitOps deploy/undeploy; CU-UP CPU sweep; "
-            "PRB dedicated/min/max via near-RT RIC xApp."
+            "PRB dedicated/min/max via near-RT RIC xApp; UE iperf traffic type."
         ),
     },
 ]

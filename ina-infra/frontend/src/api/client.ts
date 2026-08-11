@@ -244,6 +244,73 @@ export type BenchmarkRunRequest = {
   nf?: string;
 };
 
+export type BenchmarkTrafficProtocol = "udp" | "tcp";
+
+export type BenchmarkTrafficOut = {
+  ok: boolean;
+  protocol: BenchmarkTrafficProtocol | string;
+  applied: boolean;
+  message: string;
+  generation?: number;
+  connected?: number;
+};
+
+export type UeDesiredOut = {
+  protocol: string;
+  action: string;
+  bandwidth: string;
+  parallel: number;
+  tcp_bandwidth: string;
+  server: string;
+  port: number;
+  reverse: boolean;
+  duration: number;
+  interval: number;
+  generation: number;
+  updated_at: string;
+};
+
+export type UeOut = {
+  id: string;
+  cluster: string;
+  namespace: string;
+  pod: string;
+  ue_name: string;
+  version: string;
+  online: boolean;
+  ws_connected: boolean;
+  protocol: string;
+  status: string;
+  server: string;
+  port: number;
+  mbits_per_second: number;
+  applied_generation: number;
+  apply_ok?: boolean | null;
+  apply_message: string;
+  last_seen: string;
+  message: string;
+  desired?: UeDesiredOut | null;
+};
+
+export type UeListOut = {
+  ues: UeOut[];
+  stale_after_sec: number;
+};
+
+export type UeDesiredRequest = {
+  id: string;
+  protocol?: string | null;
+  action?: string;
+  bandwidth?: string | null;
+  parallel?: number | null;
+  tcp_bandwidth?: string | null;
+  server?: string | null;
+  port?: number | null;
+  reverse?: boolean | null;
+  duration?: number | null;
+  interval?: number | null;
+};
+
 export type BenchmarkPrbSliceOut = {
   sst: number;
   sd: string;
@@ -999,6 +1066,7 @@ export const api = {
       clusters?: string[];
       du_node?: string;
       ue_node?: string;
+      iperf_protocol?: string;
     } = {},
     handlers?: StreamHandlers,
     opts?: { timeoutMs?: number; signal?: AbortSignal },
@@ -1011,6 +1079,7 @@ export const api = {
         clusters: body.clusters ?? ["central", "edge"],
         du_node: body.du_node ?? "usrp",
         ue_node: body.ue_node ?? body.du_node ?? "usrp",
+        iperf_protocol: body.iperf_protocol ?? "udp",
       },
       handlers,
       { timeoutMs: opts?.timeoutMs ?? 920_000, signal: opts?.signal },
@@ -1049,6 +1118,21 @@ export const api = {
     }),
   benchmarkRunStatus: () =>
     request<BenchmarkRunStatusOut>("/api/v1/benchmark/run/status"),
+
+  benchmarkTrafficGet: () =>
+    request<BenchmarkTrafficOut>("/api/v1/benchmark/traffic"),
+  benchmarkTrafficSet: (protocol: BenchmarkTrafficProtocol | string) =>
+    request<BenchmarkTrafficOut>("/api/v1/benchmark/traffic", {
+      method: "POST",
+      body: JSON.stringify({ protocol }),
+    }),
+
+  listUes: () => request<UeListOut>("/api/v1/ues"),
+  setUeDesired: (body: UeDesiredRequest) =>
+    request<UeDesiredOut>("/api/v1/ues/desired", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   benchmarkPrbSlices: () =>
     request<BenchmarkPrbSlicesOut>("/api/v1/benchmark/prb/slices"),

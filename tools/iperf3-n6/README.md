@@ -12,19 +12,31 @@ Python wrappers around `iperf3` for the oai-benchmark lab.
 
 ## Client (UE)
 
-One iperf3 process: DL UDP (`-u -R`), **`-P 5`** parallel streams on a **single**
-N3 port (`PORT_START`, default `5210`), **50M** per stream.
+One iperf3 process: DL (`-R`), **`-P 5`** parallel streams on a **single**
+N3 port (`PORT_START`, default `5210`).
+
+**Control plane:** connects to ina-infra WebSocket
+`ws://10.1.132.200:8082/api/v1/ues/ws` (`INA_INFRA_API_URL`).
+Benchmark UI lists UEs; **desired config is per UE** (`id` required).
+Changes hot-restart iperf only (no pod restart).
+
+`desired` fields: `protocol`, `action` (`start|stop|set`), `bandwidth`,
+`parallel`, `tcp_bandwidth`, `server`, `port`, `reverse` (DL `-R`),
+`duration`, `interval`, `generation`.
+
+Initial env (`PROTOCOL`, `BANDWIDTH`, …) is the fallback before the first
+`desired`. TCP is unlimited unless `tcp_bandwidth` / `TCP_BANDWIDTH` is set.
 
 Influx reports **aggregate** DL only (`client_agg` + `server_agg`).
 
 ```bash
 ./scripts/sync_iperf3_n6_server_ip.sh
 
-N3=$(kubectl --context edge@edge -n oai-benchmark exec deploy/upf-benchmark \
-  -c upf-benchmark -- ip -4 -o addr show n3 | awk '{print $4}' | cut -d/ -f1)
-
-kubectl --context edge@edge -n oai-benchmark exec -it deploy/oai-ue -c iperf3-client -- \
-  python3 client.py --server "$N3" --port 5210 -P 5 --bandwidth 50M --bind-dev oaitun_ue1
+# Per-UE config (id from GET /ues)
+curl -sS http://10.1.132.200:8082/api/v1/ues
+curl -sS -X POST http://10.1.132.200:8082/api/v1/ues/desired \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"edge-oai-benchmark-oai-ue-…","protocol":"udp","action":"start","bandwidth":"80M","parallel":4}'
 ```
 
 ## InfluxDB
@@ -39,7 +51,7 @@ kubectl --context edge@edge -n oai-benchmark exec -it deploy/oai-ue -c iperf3-cl
 ## Build
 
 ```bash
-./scripts/build_iperf3_n6_image.sh
+IPERF3_N6_TAG=ws-ctrl ./scripts/build_iperf3_n6_image.sh
 ./scripts/render_oai_benchmark_gitops.sh
 ./bringup/03_push_to_git_repos/push_git_repos.sh edge
 ```

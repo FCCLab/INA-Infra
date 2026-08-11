@@ -202,16 +202,31 @@ def iter_deploy_sse(req: BenchmarkDeployRequest) -> Iterator[str]:
         )
         return
 
+    proto = (req.iperf_protocol or "udp").strip().lower()
+    if proto not in ("udp", "tcp"):
+        yield result_event(
+            BenchmarkDeployResponse(
+                ok=False,
+                dry_run=req.dry_run,
+                message=f"iperf_protocol must be udp or tcp, got {req.iperf_protocol!r}",
+            )
+        )
+        return
+
     yield status_event(
         f"Rendering {BENCH_NS} via {script.name} "
-        f"(DU={du_node} UE={ue_node})…"
+        f"(DU={du_node} UE={ue_node} PROTOCOL={proto})…"
     )
     env = ina_paths.script_env()
     env.setdefault("OAI_BENCHMARK_NS", BENCH_NS)
     env["OAI_BENCH_DU_NODE"] = du_node
     env["OAI_BENCH_UE_NODE"] = ue_node
+    env["OAI_BENCH_IPERF_PROTOCOL"] = proto
     cmd = ["bash", str(script)]
-    yield status_event(f"$ OAI_BENCH_DU_NODE={du_node} OAI_BENCH_UE_NODE={ue_node} {' '.join(cmd)}")
+    yield status_event(
+        f"$ OAI_BENCH_DU_NODE={du_node} OAI_BENCH_UE_NODE={ue_node} "
+        f"OAI_BENCH_IPERF_PROTOCOL={proto} {' '.join(cmd)}"
+    )
 
     cmd_result: CmdResult | None = None
     for item in stream_cmd(cmd, cwd=str(ina_paths.repo_root()), env=env):

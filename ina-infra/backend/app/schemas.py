@@ -936,6 +936,10 @@ class BenchmarkDeployRequest(BaseModel):
         "usrp",
         description="Edge worker hostname for OAI nrUE (rfsim)",
     )
+    iperf_protocol: str = Field(
+        "udp",
+        description="UE iperf3 PROTOCOL: udp (default) or tcp",
+    )
 
 
 class BenchmarkDeployResponse(BaseModel):
@@ -1032,6 +1036,123 @@ class BenchmarkRunStopResponse(BaseModel):
     ok: bool
     message: str = ""
     status: Optional[BenchmarkRunStatusOut] = None
+
+
+class BenchmarkTrafficRequest(BaseModel):
+    """Broadcast UE iperf PROTOCOL via WebSocket desired (udp|tcp)."""
+
+    protocol: str = Field(
+        "udp",
+        description="iperf3 traffic type: udp (default) or tcp",
+    )
+
+
+class BenchmarkTrafficOut(BaseModel):
+    ok: bool = True
+    protocol: str = "udp"
+    applied: bool = False
+    message: str = ""
+    generation: int = 0
+    connected: int = 0
+
+
+# ── UE iperf agents (WebSocket) ───────────────────────────────────────────────
+
+
+class UeDeclare(BaseModel):
+    """WS ``declare`` / ``hello`` payload from iperf3-client."""
+
+    id: str = Field(..., min_length=1, description="Stable UE agent id")
+    cluster: str = "edge"
+    namespace: str = "oai-benchmark"
+    pod: str = ""
+    ue_name: str = "oai-ue"
+    version: str = ""
+    protocol: str = "udp"
+    status: str = "idle"
+    server: str = ""
+    port: int = 0
+    mbits_per_second: Optional[float] = None
+    message: str = ""
+
+
+class UeApplyReport(BaseModel):
+    generation: int = 0
+    ok: bool = True
+    message: str = ""
+    protocol: str = ""
+    status: str = ""
+
+
+class UeDesiredRequest(BaseModel):
+    """HTTP control → pushed as WS ``desired`` to one connected UE."""
+
+    id: str = Field(..., min_length=1, description="Target UE agent id (required)")
+    protocol: Optional[str] = Field(None, description="udp or tcp")
+    action: Optional[str] = Field(
+        "set",
+        description="start | stop | set (set = keep running, change params)",
+    )
+    bandwidth: Optional[str] = Field(None, description="UDP -b per stream")
+    parallel: Optional[int] = Field(None, ge=1, le=64)
+    tcp_bandwidth: Optional[str] = Field(
+        None, description="Optional TCP -b; empty = unlimited"
+    )
+    server: Optional[str] = Field(
+        None, description="iperf3 server IP (UPF N3); omit = keep current"
+    )
+    port: Optional[int] = Field(None, ge=1, le=65535, description="iperf3 -p")
+    reverse: Optional[bool] = Field(
+        None, description="True = DL (-R server→UE); False = UL"
+    )
+    duration: Optional[int] = Field(
+        None, ge=0, description="iperf3 -t seconds; 0 = forever"
+    )
+    interval: Optional[float] = Field(
+        None, gt=0, le=60, description="iperf3 -i / status sample seconds"
+    )
+
+
+class UeDesiredOut(BaseModel):
+    protocol: str = "udp"
+    action: str = "start"
+    bandwidth: str = "50M"
+    parallel: int = 5
+    tcp_bandwidth: str = ""
+    server: str = ""
+    port: int = 5210
+    reverse: bool = True
+    duration: int = 0
+    interval: float = 1.0
+    generation: int = 0
+    updated_at: str = ""
+
+
+class UeOut(BaseModel):
+    id: str
+    cluster: str = ""
+    namespace: str = ""
+    pod: str = ""
+    ue_name: str = ""
+    version: str = ""
+    online: bool = False
+    ws_connected: bool = False
+    protocol: str = "udp"
+    status: str = "idle"
+    server: str = ""
+    port: int = 0
+    mbits_per_second: float = 0.0
+    applied_generation: int = 0
+    apply_ok: Optional[bool] = None
+    apply_message: str = ""
+    last_seen: str = ""
+    message: str = ""
+    desired: Optional[UeDesiredOut] = None
+
+
+class UeListOut(BaseModel):
+    ues: List[UeOut] = Field(default_factory=list)
+    stale_after_sec: int = 30
 
 
 class BenchmarkPrbSliceOut(BaseModel):

@@ -28,7 +28,16 @@ OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
 OAI_FLEXRIC_IMAGE="${OAI_FLEXRIC_IMAGE:-${OAI_REGISTRY}/oai-flexric:${OAI_IMAGE_TAG}}"
 OAI_XAPP_IMAGE="${OAI_XAPP_IMAGE:-${OAI_REGISTRY}/nws-xapp:nws-v0.6-amd64}"
 OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:cpuagent-v8}"
-IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:stalefix}"
+IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:ws-ctrl}"
+# UE iperf3-client initial PROTOCOL (WS desired overrides without restart).
+IPERF_PROTOCOL="${OAI_BENCH_IPERF_PROTOCOL:-udp}"
+case "${IPERF_PROTOCOL}" in
+  udp|UDP) IPERF_PROTOCOL=udp ;;
+  tcp|TCP) IPERF_PROTOCOL=tcp ;;
+  *) echo "error: OAI_BENCH_IPERF_PROTOCOL must be udp or tcp (got ${IPERF_PROTOCOL})" >&2; exit 1 ;;
+esac
+INA_INFRA_API_URL="${INA_INFRA_API_URL:-http://10.1.132.200:8082}"
+export INA_INFRA_API_URL
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
 N6_DHCP_GW="${OAI_N6_DHCP_GW:-10.1.137.1}"
 
@@ -133,6 +142,7 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   "$DU_NODE" "$UE_NODE" \
   "$FLEXRIC_IP" "$XAPP_E2_IP" "$XAPP_SWAGGER_VIP" "$XAPP_API_PORT" \
   "$OAI_FLEXRIC_IMAGE" "$OAI_XAPP_IMAGE" \
+  "$IPERF_PROTOCOL" \
   <<'PY'
 import importlib.util
 import json
@@ -157,8 +167,12 @@ import yaml
     du_node, ue_node,
     flexric_ip, xapp_e2_ip, xapp_swagger_vip, xapp_api_port_s,
     flexric_image, xapp_image,
-) = sys.argv[1:46]
+    iperf_protocol,
+) = sys.argv[1:47]
 xapp_api_port = int(xapp_api_port_s)
+iperf_protocol = (iperf_protocol or "udp").strip().lower()
+if iperf_protocol not in ("udp", "tcp"):
+    raise SystemExit(f"iperf_protocol must be udp or tcp, got {iperf_protocol!r}")
 
 repos = Path(repos_dir)
 gw_default = gw
@@ -1387,11 +1401,17 @@ dump(
                                 {"name": "PORT_START", "value": "5210"},
                                 {"name": "PROCESSES", "value": "5"},
                                 {"name": "BANDWIDTH", "value": "50M"},
+                                {"name": "PROTOCOL", "value": iperf_protocol},
                                 {"name": "REPORT_INTERVAL", "value": "1"},
                                 {"name": "LOG_INTERVAL", "value": "5"},
                                 {"name": "BIND_DEV", "value": "oaitun_ue1"},
                                 {"name": "TESTBED", "value": bench_ns},
                                 {"name": "IPERF_SERVER", "value": upf_n3},
+                                {"name": "INA_INFRA_API_URL",
+                                 "value": os.environ.get("INA_INFRA_API_URL", "http://10.1.132.200:8082")},
+                                {"name": "INA_UE_CLUSTER", "value": "edge"},
+                                {"name": "INA_UE_NAMESPACE", "value": bench_ns},
+                                {"name": "INA_UE_NAME", "value": "oai-ue"},
                                 {"name": "INFLUX_URL", "value": "http://influxdb.influxdb.svc.cluster.local:8086"},
                                 {"name": "INFLUX_TOKEN", "value": "ina-infra-influxdb-token"},
                                 {"name": "INFLUX_ORG", "value": "ina-infra"},

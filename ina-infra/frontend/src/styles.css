@@ -536,8 +536,102 @@ body { font-size: 1rem; }
 .status-deploy-table table { font-size: 11px; }
 .status-deploy-table th,
 .status-deploy-table td { padding: 4px 6px; }
-.status-deploy-table tr.is-selected td {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.status-deploy-table tr.is-selected td,
+.status-deploy-table tr.ue-iperf-detail-row td {
+  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+}
+.status-deploy-table tr.ue-row-open td {
+  border-bottom-color: transparent;
+}
+.status-deploy-table tr.ue-iperf-detail-row td {
+  padding: 0 6px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.status-deploy-table tr.ue-iperf-detail-row:hover td {
+  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+}
+.ue-expand-cell {
+  width: 1.5rem;
+  text-align: center;
+  vertical-align: middle;
+}
+.ue-expand-chevron {
+  display: inline-block;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.12s ease, color 0.12s ease;
+}
+.ue-expand-chevron.is-open {
+  transform: rotate(90deg);
+  color: var(--text);
+}
+
+.ue-iperf-panel {
+  margin: 0;
+  padding: 4px 4px 2px 1.75rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.ue-iperf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ue-iperf-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ue-iperf-head-left .section-label {
+  margin-bottom: 0;
+}
+.ue-iperf-proto {
+  justify-content: flex-start;
+}
+.ue-iperf-proto button,
+.ue-iperf-head .actions button {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: .15s;
+}
+.ue-iperf-proto button:hover:not(:disabled),
+.ue-iperf-head .actions button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+.ue-iperf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 14px;
+  align-items: end;
+}
+.ue-iperf-grid .field-help {
+  min-width: 0;
+}
+.ue-iperf-grid input,
+.ue-iperf-grid select {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 960px) {
+  .ue-iperf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .ue-iperf-grid { grid-template-columns: 1fr; }
 }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

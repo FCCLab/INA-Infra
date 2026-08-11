@@ -22,7 +22,15 @@ from app.schemas import (
     BenchmarkRunRequest,
     BenchmarkRunStatusOut,
     BenchmarkRunStopResponse,
+    BenchmarkTrafficOut,
+    BenchmarkTrafficRequest,
     BenchmarkUndeployRequest,
+    UeApplyReport,
+    UeDeclare,
+    UeDesiredOut,
+    UeDesiredRequest,
+    UeListOut,
+    UeOut,
     OperatorApplyReport,
     OperatorCpuSetRequest,
     OperatorResourceSetRequest,
@@ -64,8 +72,10 @@ from app.services import (
     benchmark_log,
     benchmark_prb_run,
     benchmark_run,
+    benchmark_traffic,
     cluster_status,
     operators,
+    ues,
     gitea_apply,
     pl_solver,
     pm_loop,
@@ -657,6 +667,198 @@ def benchmark_run_stop():
 )
 def benchmark_run_status():
     return benchmark_run.status()
+
+
+@router.get(
+    "/benchmark/traffic",
+    response_model=BenchmarkTrafficOut,
+    tags=["Benchmark"],
+    summary="Get desired UE iperf traffic type (UDP/TCP)",
+    description="Alias of global desired PROTOCOL from the UE WebSocket control plane.",
+)
+def benchmark_traffic_get():
+    return benchmark_traffic.get_traffic()
+
+
+@router.post(
+    "/benchmark/traffic",
+    response_model=BenchmarkTrafficOut,
+    tags=["Benchmark"],
+    summary="Set UE iperf traffic type (UDP/TCP)",
+    description=(
+        "Broadcasts PROTOCOL via WebSocket ``desired`` to connected UE "
+        "iperf3-clients (no pod restart). Prefer ``POST /ues/desired``."
+    ),
+)
+def benchmark_traffic_set(body: BenchmarkTrafficRequest):
+    try:
+        return benchmark_traffic.set_traffic(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/ues",
+    response_model=UeListOut,
+    tags=["UE agents"],
+    summary="List connected UE iperf agents",
+)
+def ues_list():
+    return ues.list_ues()
+
+
+@router.post(
+    "/ues/desired",
+    response_model=UeDesiredOut,
+    tags=["UE agents"],
+    summary="Set desired iperf params for one UE",
+    description=(
+        "Updates per-UE desired (protocol/action/bandwidth/…) and pushes a "
+        "``desired`` frame on that agent's `/ues/ws` session. ``id`` is required."
+    ),
+)
+def ues_set_desired(body: UeDesiredRequest):
+    try:
+        return ues.set_desired(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"UE agent not found: {exc}") from exc
+
+
+@router.get(
+    "/ues/{ue_id}",
+    response_model=UeOut,
+    tags=["UE agents"],
+    summary="Get one UE iperf agent",
+)
+def ues_get(ue_id: str):
+    try:
+        return ues.get_ue(ue_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/ues/{ue_id}",
+    tags=["UE agents"],
+    summary="Drop a UE agent from the registry",
+)
+def ues_delete(ue_id: str):
+    if not ues.delete_ue(ue_id):
+        raise HTTPException(status_code=404, detail=f"UE agent not found: {ue_id}")
+    return {"ok": True, "id": ue_id}
+
+
+@router.websocket("/ues/ws")
+async def ues_ws(websocket: WebSocket):
+    """Persistent UE iperf channel: declare, status, apply_report; receive desired."""
+    await websocket.accept()
+    ue_id: Optional[str] = None
+    out_q: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    writer_task: Optional[asyncio.Task] = None
+
+    async def writer() -> None:
+        while True:
+            msg = await out_q.get()
+            await websocket.send_json(msg)
+
+    try:
+        writer_task = asyncio.create_task(writer())
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                await out_q.put({"type": "error", "message": "invalid JSON"})
+                continue
+            if not isinstance(data, dict):
+                await out_q.put(
+                    {"type": "error", "message": "message must be a JSON object"}
+                )
+                continue
+            msg_type = str(data.get("type") or "").strip().lower()
+
+            if msg_type in ("hello", "declare"):
+                try:
+                    body = UeDeclare.model_validate(
+                        {k: v for k, v in data.items() if k != "type"}
+                    )
+                except ValidationError as exc:
+                    await out_q.put({"type": "error", "message": str(exc)})
+                    continue
+                if ue_id and ue_id != body.id:
+                    await out_q.put(
+                        {
+                            "type": "error",
+                            "message": f"ue id changed mid-session ({ue_id} → {body.id})",
+                        }
+                    )
+                    continue
+                first = ue_id is None
+                if first:
+                    ue_id = body.id
+                    ues.attach_ws(ue_id, loop, out_q)
+                    await out_q.put({"type": "welcome", "id": ue_id})
+                ues.register(body)
+                continue
+
+            if msg_type == "status":
+                if not ue_id:
+                    await out_q.put({"type": "error", "message": "declare before status"})
+                    continue
+                try:
+                    ues.report_status(ue_id, data)
+                except KeyError:
+                    await out_q.put(
+                        {"type": "error", "message": f"UE agent not found: {ue_id}"}
+                    )
+                except ValueError as exc:
+                    await out_q.put({"type": "error", "message": str(exc)})
+                continue
+
+            if msg_type == "apply_report":
+                if not ue_id:
+                    await out_q.put(
+                        {"type": "error", "message": "declare before apply_report"}
+                    )
+                    continue
+                try:
+                    report = UeApplyReport.model_validate(
+                        {k: v for k, v in data.items() if k != "type"}
+                    )
+                except ValidationError as exc:
+                    await out_q.put({"type": "error", "message": str(exc)})
+                    continue
+                try:
+                    ues.report_apply(ue_id, report)
+                except KeyError:
+                    await out_q.put(
+                        {"type": "error", "message": f"UE agent not found: {ue_id}"}
+                    )
+                continue
+
+            if msg_type == "ping":
+                await out_q.put({"type": "pong"})
+                continue
+
+            await out_q.put(
+                {"type": "error", "message": f"unknown type: {msg_type or '(empty)'}"}
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ue_id is not None:
+            ues.detach_ws(ue_id, out_q)
+        if writer_task is not None:
+            writer_task.cancel()
+            try:
+                await writer_task
+            except asyncio.CancelledError:
+                pass
 
 
 @router.get(

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   api,
   BenchmarkPrbRunStatusOut,
@@ -8,6 +15,7 @@ import {
   EDGE_RF_NODES,
   EdgeNodeOut,
   ProfileClusterStatusOut,
+  UeOut,
   type StreamHandlers,
 } from "../api/client";
 import FieldHelp from "../components/FieldHelp";
@@ -148,6 +156,23 @@ export default function BenchmarkPage() {
   const [ranNode, setRanNode] = useState(DEFAULT_RAN_NODE);
   const [edgeNodes, setEdgeNodes] = useState<EdgeNodeOut[]>([]);
   const [edgeNodesError, setEdgeNodesError] = useState<string | null>(null);
+  const [trafficProto, setTrafficProto] = useState<"udp" | "tcp">("udp");
+  const [trafficBusy, setTrafficBusy] = useState(false);
+  const [trafficMsg, setTrafficMsg] = useState<string | null>(null);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
+  const trafficBusyRef = useRef(false);
+  const [ues, setUes] = useState<UeOut[]>([]);
+  const [uesError, setUesError] = useState<string | null>(null);
+  const [selectedUeId, setSelectedUeId] = useState<string | null>(null);
+  const [iperfBw, setIperfBw] = useState("50M");
+  const [iperfParallel, setIperfParallel] = useState(5);
+  const [iperfTcpBw, setIperfTcpBw] = useState("");
+  const [iperfServer, setIperfServer] = useState("");
+  const [iperfPort, setIperfPort] = useState(5210);
+  const [iperfReverse, setIperfReverse] = useState(true);
+  const [iperfDuration, setIperfDuration] = useState(0);
+  const [iperfInterval, setIperfInterval] = useState(1);
+  const selectedUeIdRef = useRef<string | null>(null);
 
   const [consoleTitle, setConsoleTitle] = useState("Console");
   const [consoleText, setConsoleText] = useState("");
@@ -188,6 +213,7 @@ export default function BenchmarkPage() {
   const [prbSweep, setPrbSweep] = useState<BenchmarkPrbRunStatusOut | null>(null);
   const [prbBusy, setPrbBusy] = useState(false);
   const [prbError, setPrbError] = useState<string | null>(null);
+  const [prbFetchError, setPrbFetchError] = useState<string | null>(null);
   const [prbApplyMsg, setPrbApplyMsg] = useState<string | null>(null);
   const [prbLive, setPrbLive] = useState<BenchmarkPrbSliceOut[] | null>(null);
   const [prbXappUrl, setPrbXappUrl] = useState("");
@@ -197,6 +223,131 @@ export default function BenchmarkPage() {
   const busy = running !== null;
   const sweepRunning = Boolean(sweep?.running);
   const prbRunning = Boolean(prbSweep?.running);
+
+  const loadUeDesiredForm = useCallback((u: UeOut) => {
+    const d = u.desired;
+    const p = (d?.protocol || u.protocol || "udp").toLowerCase();
+    if (p === "tcp" || p === "udp") setTrafficProto(p);
+    setIperfBw(d?.bandwidth || "50M");
+    setIperfParallel(Number(d?.parallel) || 5);
+    setIperfTcpBw(d?.tcp_bandwidth || "");
+    setIperfServer(d?.server || u.server || "");
+    setIperfPort(Number(d?.port) || u.port || 5210);
+    setIperfReverse(d?.reverse !== false);
+    setIperfDuration(Number(d?.duration) || 0);
+    setIperfInterval(Number(d?.interval) || 1);
+  }, []);
+
+  const selectUe = useCallback(
+    (id: string) => {
+      // Toggle: click selected UE again to collapse its config.
+      if (selectedUeIdRef.current === id) {
+        selectedUeIdRef.current = null;
+        setSelectedUeId(null);
+        setTrafficError(null);
+        setTrafficMsg(null);
+        return;
+      }
+      selectedUeIdRef.current = id;
+      setSelectedUeId(id);
+      setTrafficError(null);
+      setTrafficMsg(null);
+      const u = ues.find((x) => x.id === id);
+      if (u) loadUeDesiredForm(u);
+    },
+    [ues, loadUeDesiredForm],
+  );
+
+  const refreshUes = useCallback(async () => {
+    try {
+      const out = await api.listUes();
+      const list = out.ues || [];
+      setUes(list);
+      setUesError(null);
+
+      const sel = selectedUeIdRef.current;
+      if (sel && !list.some((u) => u.id === sel)) {
+        selectedUeIdRef.current = null;
+        setSelectedUeId(null);
+      } else if (sel && !trafficBusyRef.current) {
+        const u = list.find((x) => x.id === sel);
+        // Refresh live status only; keep form fields while editing.
+        if (u?.desired?.protocol) {
+          const p = u.desired.protocol.toLowerCase();
+          if (p === "tcp" || p === "udp") setTrafficProto(p);
+        }
+      }
+    } catch (e) {
+      setUesError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const applyIperfDesired = useCallback(
+    async (action: "start" | "stop" | "set", protocol?: "udp" | "tcp") => {
+      if (trafficBusyRef.current) return;
+      const ueId = selectedUeIdRef.current;
+      if (!ueId) {
+        setTrafficError("Select a connected UE first");
+        return;
+      }
+      const nextProto = protocol ?? trafficProto;
+      const prev = trafficProto;
+      trafficBusyRef.current = true;
+      setTrafficBusy(true);
+      setTrafficError(null);
+      setTrafficMsg(null);
+      if (protocol) setTrafficProto(protocol);
+      try {
+        const out = await api.setUeDesired({
+          id: ueId,
+          protocol: nextProto,
+          action,
+          bandwidth: iperfBw.trim() || "50M",
+          parallel: Number(iperfParallel) || 5,
+          tcp_bandwidth: iperfTcpBw.trim(),
+          server: iperfServer.trim() || null,
+          port: Number(iperfPort) || 5210,
+          reverse: iperfReverse,
+          duration: Number(iperfDuration) || 0,
+          interval: Number(iperfInterval) || 1,
+        });
+        setTrafficMsg(
+          `${ueId}: ${out.action} ${out.protocol.toUpperCase()} -P${out.parallel} ` +
+            `gen=${out.generation}` +
+            (out.server ? ` @${out.server}:${out.port}` : ` :${out.port}`),
+        );
+        const live = (out.protocol || nextProto).toLowerCase();
+        if (live === "tcp" || live === "udp") setTrafficProto(live);
+        await refreshUes();
+      } catch (e) {
+        if (protocol) setTrafficProto(prev);
+        setTrafficError(e instanceof Error ? e.message : String(e));
+      } finally {
+        trafficBusyRef.current = false;
+        setTrafficBusy(false);
+      }
+    },
+    [
+      trafficProto,
+      iperfBw,
+      iperfParallel,
+      iperfTcpBw,
+      iperfServer,
+      iperfPort,
+      iperfReverse,
+      iperfDuration,
+      iperfInterval,
+      refreshUes,
+    ],
+  );
+
+  const onTrafficSelect = useCallback(
+    async (next: "udp" | "tcp") => {
+      if (next === trafficProto && !trafficError) return;
+      await applyIperfDesired("start", next);
+    },
+    [trafficProto, trafficError, applyIperfDesired],
+  );
 
   const prbSliceKey = useCallback(
     (s: Pick<BenchmarkPrbSliceOut, "sst" | "sd" | "direction">) =>
@@ -378,8 +529,9 @@ export default function BenchmarkPage() {
       setPrbIndications(
         typeof out.indications === "number" ? out.indications : null,
       );
-      // Do not clear prbError here — successful GET must not hide a prior
-      // Apply/Start failure (e.g. default-slice PATCH 400).
+      // Clear transient xApp GET errors (503 / connection refused) on success.
+      // Keep prbError for Apply/Start failures until those succeed.
+      setPrbFetchError(null);
       if (!prbHydratedRef.current && slices.length > 0) {
         const preferred =
           slices.find(
@@ -393,27 +545,37 @@ export default function BenchmarkPage() {
         prbHydratedRef.current = true;
       }
     } catch (e) {
-      setPrbError(e instanceof Error ? e.message : String(e));
+      setPrbFetchError(e instanceof Error ? e.message : String(e));
     }
   }, [applyPrbSliceToForm]);
 
   useEffect(() => {
     void refreshCluster();
     void refreshEdgeNodes();
+    void refreshUes();
     void refreshSweep();
     void refreshPrb();
     void refreshPrbSlices();
     const sweepId = window.setInterval(() => void refreshSweep(), 1000);
     const prbId = window.setInterval(() => void refreshPrb(), 1000);
     const slicesId = window.setInterval(() => void refreshPrbSlices(), 5000);
+    const uesId = window.setInterval(() => void refreshUes(), 2000);
     const clusterId = window.setInterval(() => void refreshCluster(), 10000);
     return () => {
       window.clearInterval(sweepId);
       window.clearInterval(prbId);
       window.clearInterval(slicesId);
+      window.clearInterval(uesId);
       window.clearInterval(clusterId);
     };
-  }, [refreshCluster, refreshEdgeNodes, refreshSweep, refreshPrb, refreshPrbSlices]);
+  }, [
+    refreshCluster,
+    refreshEdgeNodes,
+    refreshUes,
+    refreshSweep,
+    refreshPrb,
+    refreshPrbSlices,
+  ]);
 
   async function onDeploy() {
     if (
@@ -432,7 +594,9 @@ export default function BenchmarkPage() {
     setError(null);
     setStatus(null);
     resetConsole("Deploy oai-benchmark");
-    appendConsole(`# Starting deploy… DU=${ranNode} UE=${ranNode}`);
+    appendConsole(
+      `# Starting deploy… DU=${ranNode} UE=${ranNode} PROTOCOL=${trafficProto}`,
+    );
     try {
       const res = await api.benchmarkDeployStream(
         {
@@ -441,6 +605,7 @@ export default function BenchmarkPage() {
           clusters: [...BENCH_CLUSTERS],
           du_node: ranNode,
           ue_node: ranNode,
+          iperf_protocol: trafficProto,
         },
         streamHandlers("deploy"),
       );
@@ -705,6 +870,380 @@ export default function BenchmarkPage() {
               Undeploy
             </button>
           </div>
+
+          <div className="panel-head" style={{ marginTop: 18 }}>
+            <SectionLabel kicker="websocket">Connected UEs</SectionLabel>
+            <button
+              type="button"
+              disabled={busy || trafficBusy}
+              onClick={() => void refreshUes()}
+              title="Refresh UE agents from GET /api/v1/ues"
+            >
+              Refresh
+            </button>
+          </div>
+          {uesError && <p className="hint error">UEs: {uesError}</p>}
+          <div className="table-wrap status-deploy-table">
+            <table>
+              <thead>
+                <tr>
+                  <th />
+                  <th>ID / pod</th>
+                  <th>Online</th>
+                  <th>Desired</th>
+                  <th>Status</th>
+                  <th>Mbps</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ues.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <span className="hint">
+                        No UE agents connected — deploy oai-benchmark and wait for
+                        iperf3-client WebSocket (
+                        <code>ws://…/api/v1/ues/ws</code>).
+                      </span>
+                    </td>
+                  </tr>
+                ) : (
+                  ues.map((u) => {
+                    const open = u.id === selectedUeId;
+                    return (
+                      <Fragment key={u.id}>
+                        <tr
+                          className={
+                            open ? "is-selected ue-row-open" : "ue-row"
+                          }
+                          style={{ cursor: "pointer" }}
+                          onClick={() => selectUe(u.id)}
+                          aria-expanded={open}
+                        >
+                          <td className="ue-expand-cell">
+                            <span
+                              className={
+                                "ue-expand-chevron" + (open ? " is-open" : "")
+                              }
+                              aria-hidden
+                            >
+                              ▸
+                            </span>
+                          </td>
+                          <td>
+                            <code>{u.id}</code>
+                            {u.pod ? (
+                              <div className="hint" style={{ marginTop: 2 }}>
+                                {u.pod}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <span
+                              className={toneClass(
+                                u.ws_connected || u.online ? "ok" : "err",
+                              )}
+                            >
+                              {u.ws_connected
+                                ? "WS"
+                                : u.online
+                                  ? "stale"
+                                  : "offline"}
+                            </span>
+                          </td>
+                          <td>
+                            <code>
+                              {(
+                                u.desired?.protocol ||
+                                u.protocol ||
+                                "—"
+                              ).toUpperCase()}
+                              {u.desired?.parallel
+                                ? ` -P${u.desired.parallel}`
+                                : ""}
+                            </code>
+                          </td>
+                          <td>
+                            <span
+                              className={toneClass(
+                                u.status === "running"
+                                  ? "ok"
+                                  : u.status === "waiting_pdu"
+                                    ? "warn"
+                                    : "muted",
+                              )}
+                            >
+                              {u.status || "—"}
+                            </span>
+                          </td>
+                          <td>
+                            {typeof u.mbits_per_second === "number"
+                              ? u.mbits_per_second.toFixed(1)
+                              : "—"}
+                          </td>
+                          <td>{fmtTs(u.last_seen)}</td>
+                        </tr>
+                        {open ? (
+                          <tr className="ue-iperf-detail-row">
+                            <td colSpan={7}>
+                              <div
+                                className="ue-iperf-panel"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="ue-iperf-head">
+                                  <div className="ue-iperf-head-left">
+                                    <div
+                                      className="place-chips ue-iperf-proto"
+                                      role="group"
+                                      aria-label="Traffic type"
+                                    >
+                                      <button
+                                        type="button"
+                                        className={
+                                          trafficProto === "udp"
+                                            ? "primary"
+                                            : undefined
+                                        }
+                                        aria-pressed={trafficProto === "udp"}
+                                        disabled={
+                                          busy ||
+                                          trafficBusy ||
+                                          sweepRunning ||
+                                          prbRunning
+                                        }
+                                        onClick={() =>
+                                          void onTrafficSelect("udp")
+                                        }
+                                        title="iperf3 UDP"
+                                      >
+                                        <BtnProgress
+                                          active={
+                                            trafficBusy && trafficProto === "udp"
+                                          }
+                                        />
+                                        UDP
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={
+                                          trafficProto === "tcp"
+                                            ? "primary"
+                                            : undefined
+                                        }
+                                        aria-pressed={trafficProto === "tcp"}
+                                        disabled={
+                                          busy ||
+                                          trafficBusy ||
+                                          sweepRunning ||
+                                          prbRunning
+                                        }
+                                        onClick={() =>
+                                          void onTrafficSelect("tcp")
+                                        }
+                                        title="iperf3 TCP"
+                                      >
+                                        <BtnProgress
+                                          active={
+                                            trafficBusy && trafficProto === "tcp"
+                                          }
+                                        />
+                                        TCP
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="actions">
+                                    <button
+                                      type="button"
+                                      className="primary"
+                                      disabled={
+                                        busy ||
+                                        trafficBusy ||
+                                        sweepRunning ||
+                                        prbRunning
+                                      }
+                                      onClick={() =>
+                                        void applyIperfDesired("set")
+                                      }
+                                      title="Push config to this UE via WebSocket desired"
+                                    >
+                                      <BtnProgress active={trafficBusy} />
+                                      Apply
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        busy ||
+                                        trafficBusy ||
+                                        sweepRunning ||
+                                        prbRunning
+                                      }
+                                      onClick={() =>
+                                        void applyIperfDesired("start")
+                                      }
+                                    >
+                                      Start
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="danger"
+                                      disabled={busy || trafficBusy}
+                                      onClick={() =>
+                                        void applyIperfDesired("stop")
+                                      }
+                                    >
+                                      Stop
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="ue-iperf-grid">
+                                  <FieldHelp
+                                    label="Bandwidth"
+                                    help="UDP -b per stream (ignored for unlimited TCP)."
+                                  >
+                                    <input
+                                      value={iperfBw}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfBw(e.target.value)
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="Parallel (-P)"
+                                    help="iperf3 -P streams on one port."
+                                  >
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={64}
+                                      value={iperfParallel}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfParallel(
+                                          Number(e.target.value),
+                                        )
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="TCP bandwidth"
+                                    help="Optional TCP -b; leave empty for unlimited."
+                                  >
+                                    <input
+                                      value={iperfTcpBw}
+                                      placeholder="unlimited"
+                                      disabled={
+                                        busy ||
+                                        trafficBusy ||
+                                        trafficProto !== "tcp"
+                                      }
+                                      onChange={(e) =>
+                                        setIperfTcpBw(e.target.value)
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="Direction"
+                                    help="DL = -R (server→UE); UL = client→server."
+                                  >
+                                    <select
+                                      value={iperfReverse ? "dl" : "ul"}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfReverse(
+                                          e.target.value === "dl",
+                                        )
+                                      }
+                                    >
+                                      <option value="dl">DL (-R)</option>
+                                      <option value="ul">UL</option>
+                                    </select>
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="Server"
+                                    help="iperf3 -c (UPF N3). Empty = keep current."
+                                  >
+                                    <input
+                                      value={iperfServer}
+                                      placeholder="keep current"
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfServer(e.target.value)
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp label="Port" help="iperf3 -p">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={65535}
+                                      value={iperfPort}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfPort(Number(e.target.value))
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="Duration (s)"
+                                    help="iperf3 -t; 0 = forever."
+                                  >
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={iperfDuration}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfDuration(
+                                          Number(e.target.value),
+                                        )
+                                      }
+                                    />
+                                  </FieldHelp>
+                                  <FieldHelp
+                                    label="Interval (s)"
+                                    help="iperf3 -i sample period."
+                                  >
+                                    <input
+                                      type="number"
+                                      min={0.1}
+                                      step={0.5}
+                                      value={iperfInterval}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setIperfInterval(
+                                          Number(e.target.value),
+                                        )
+                                      }
+                                    />
+                                  </FieldHelp>
+                                </div>
+                                {trafficError && (
+                                  <p className="hint error">
+                                    Traffic: {trafficError}
+                                  </p>
+                                )}
+                                {trafficMsg && !trafficError && (
+                                  <p className="hint ok-inline">
+                                    Traffic: {trafficMsg}
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {ues.length > 0 && !selectedUeId ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              Click a UE to open its iperf3 config.
+            </p>
+          ) : null}
         </Card>
 
         <Card className="tier" glow>
@@ -904,7 +1443,9 @@ export default function BenchmarkPage() {
                 : prbSweep?.status && prbSweep.status !== "idle"
                   ? ` Last status: ${prbSweep.status}.`
                   : ""}
-              {prbError ? ` Error: ${prbError}` : ""}
+              {prbFetchError || prbError
+                ? ` Error: ${prbFetchError || prbError}`
+                : ""}
             </p>
           ) : (
             <>
@@ -944,8 +1485,10 @@ export default function BenchmarkPage() {
               Refresh
             </button>
           </div>
-          {prbError && <p className="hint error">{prbError}</p>}
-          {prbApplyMsg && !prbError && (
+          {(prbFetchError || prbError) && (
+            <p className="hint error">{prbFetchError || prbError}</p>
+          )}
+          {prbApplyMsg && !prbFetchError && !prbError && (
             <p className="hint ok-inline">{prbApplyMsg}</p>
           )}
           {!prbLive ? (
