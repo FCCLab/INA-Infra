@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Plot mean iperf3 throughput vs NS max PRB% from ``data/summary.npz``.
+"""Plot mean iperf3 throughput vs NS max PRB% from ``data_<tag>/summary.npz``.
+
+Default (no args): plot **all** ``data_*/summary.npz``.
+Single run: ``--tag dl_udp``.
 
 Writes under ``plots/`` (gitignored):
-  plots/throughput_vs_prb.png
-  plots/throughput_vs_prb.pdf
+  plots/throughput_vs_prb_dl_udp.png
+  plots/throughput_vs_prb_dl_udp.pdf
 """
 
 from __future__ import annotations
@@ -16,53 +19,48 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_SUMMARY = HERE / "data" / "summary.npz"
+DEFAULT_TAG = "all"
 DEFAULT_OUT = HERE / "plots"
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
-    p.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    p.add_argument(
-        "--metric",
-        choices=("mean", "p50"),
-        default="mean",
-        help="client/server aggregate statistic (default: mean)",
+def list_plot_tags(tag: str) -> list[str]:
+    if tag != "all":
+        return [tag]
+    tags = sorted(
+        p.name[len("data_") :]
+        for p in HERE.glob("data_*")
+        if p.is_dir() and (p / "summary.npz").is_file()
     )
-    p.add_argument(
-        "--no-server",
-        action="store_true",
-        help="omit server_agg (offered) series",
-    )
-    args = p.parse_args(argv)
+    return tags
 
-    if not args.summary.is_file():
+
+def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -> int:
+    if not summary.is_file():
         print(
-            f"error: missing {args.summary} — run data_download.py first",
+            f"error: missing {summary} — run data_download.py --tag {tag} first",
             file=sys.stderr,
         )
         return 1
 
-    s = np.load(args.summary, allow_pickle=True)
+    s = np.load(summary, allow_pickle=True)
     prb = np.asarray(s["prb_pct"], dtype=np.float64)
-    if args.metric == "mean":
+    if metric == "mean":
         client = np.asarray(s["client_mean_mbps"], dtype=np.float64)
         server = np.asarray(s["server_mean_mbps"], dtype=np.float64)
         ylabel = "Average throughput (Mbps)"
-        title = "NS max PRB% vs average DL throughput"
+        title = f"NS max PRB% vs average DL throughput ({tag})"
     else:
         client = np.asarray(s["client_p50_mbps"], dtype=np.float64)
         server = np.asarray(s["server_p50_mbps"], dtype=np.float64)
         ylabel = "Median throughput (Mbps)"
-        title = "NS max PRB% vs median DL throughput"
+        title = f"NS max PRB% vs median DL throughput ({tag})"
 
     order = np.argsort(prb)
     prb = prb[order]
     client = client[order]
     server = server[order]
 
-    args.out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8.0, 4.5), constrained_layout=True)
     ax.plot(
         prb,
@@ -73,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         label="client_agg (UE receive)",
         color="#1f4e79",
     )
-    if not args.no_server:
+    if not no_server:
         ax.plot(
             prb,
             server,
@@ -94,14 +92,65 @@ def main(argv: list[str] | None = None) -> int:
     ax.legend(loc="lower right", frameon=False)
     ax.set_xticks(prb[:: max(1, len(prb) // 10)])
 
-    png = args.out / "throughput_vs_prb.png"
-    pdf = args.out / "throughput_vs_prb.pdf"
+    stem = f"throughput_vs_prb_{tag}"
+    png = out / f"{stem}.png"
+    pdf = out / f"{stem}.pdf"
     fig.savefig(png, dpi=160)
     fig.savefig(pdf)
     plt.close(fig)
     print(f"Wrote {png}")
     print(f"Wrote {pdf}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        "--tag",
+        default=DEFAULT_TAG,
+        help="run postfix, or 'all' (default) for every data_*/summary.npz",
+    )
+    p.add_argument(
+        "--summary",
+        type=Path,
+        default=None,
+        help="single summary.npz (overrides --tag)",
+    )
+    p.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    p.add_argument(
+        "--metric",
+        choices=("mean", "p50"),
+        default="mean",
+        help="client/server aggregate statistic (default: mean)",
+    )
+    p.add_argument(
+        "--no-server",
+        action="store_true",
+        help="omit server_agg (offered) series",
+    )
+    args = p.parse_args(argv)
+
+    if args.summary is not None:
+        tag = args.tag if args.tag != "all" else "custom"
+        return plot_one(tag, args.summary, args.out, args.metric, args.no_server)
+
+    tags = list_plot_tags(args.tag)
+    if not tags:
+        print(f"error: no data_*/summary.npz under {HERE}", file=sys.stderr)
+        return 1
+
+    rc = 0
+    for tag in tags:
+        code = plot_one(
+            tag,
+            HERE / f"data_{tag}" / "summary.npz",
+            args.out,
+            args.metric,
+            args.no_server,
+        )
+        if code:
+            rc = code
+    return rc
 
 
 if __name__ == "__main__":

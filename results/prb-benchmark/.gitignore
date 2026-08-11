@@ -1,2 +1,4 @@
-data
-plots
+data/
+data_*/
+plots/
+timestamps_*

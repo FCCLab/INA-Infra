@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Download oai-benchmark iperf3 series from InfluxDB into numpy files.
 
-Reads measure windows from ``timestamp.csv`` (same dir) and writes under
-``data/`` (gitignored):
+Naming (direction_proto postfix):
+  timestamps_dl_udp.csv / timestamps_dl_tcp.csv
+  data_dl_udp/ / data_dl_tcp/
 
-  data/step_01_20m.npz   # t_unix_s, client_mbps, server_mbps, …
-  data/summary.npz       # per-step aggregates
+Default (no args): process **all** ``timestamps_*.csv`` → matching ``data_<tag>/``.
+Single run: ``--tag dl_tcp`` or ``--csv timestamps_dl_tcp.csv``.
+
+Writes under ``data_<tag>/``:
+
+  data_dl_udp/step_01_20m.npz   # t_unix_s, client_mbps, server_mbps, …
+  data_dl_udp/summary.npz       # per-step aggregates
 
 Lab defaults (override with env):
   INFLUX_URL=http://10.1.137.104:8086
@@ -13,7 +19,7 @@ Lab defaults (override with env):
   INFLUX_ORG=ina-infra
   INFLUX_BUCKET=default
   INFLUX_MEASUREMENT=iperf3
-  INFLUX_TZ=Asia/Taipei   # timestamp.csv wall clock (no TZ in file)
+  INFLUX_TZ=Asia/Taipei   # timestamps CSV wall clock (no TZ in file)
 """
 
 from __future__ import annotations
@@ -35,13 +41,48 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_CSV = HERE / "timestamp.csv"
-DEFAULT_OUT = HERE / "data"
+DEFAULT_TAG = "all"
+DEFAULT_CSV = HERE / "timestamps_dl_udp.csv"  # docs / single-run example
+DEFAULT_OUT = HERE / "data_dl_udp"
 
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
+
+def tag_from_timestamps_csv(path: Path) -> str:
+    """``timestamps_dl_udp.csv`` → ``dl_udp``; bare stem otherwise."""
+    stem = path.stem
+    if stem.startswith("timestamps_"):
+        return stem[len("timestamps_") :]
+    return stem
+
+
+def list_timestamp_csvs(here: Path = HERE) -> List[Path]:
+    return sorted(here.glob("timestamps_*.csv"))
+
+
+def resolve_download_jobs(
+    *,
+    tag: str,
+    csv: Optional[Path],
+    out: Optional[Path],
+) -> List[Tuple[Path, Path]]:
+    """Return ``(timestamps.csv, data_dir)`` jobs. Default tag ``all`` = every CSV."""
+    if csv is not None:
+        return [(csv, out or (HERE / f"data_{tag_from_timestamps_csv(csv)}"))]
+    if tag != "all":
+        path = HERE / f"timestamps_{tag}.csv"
+        return [(path, out or (HERE / f"data_{tag}"))]
+    if out is not None:
+        raise ValueError("--out requires a single --tag or --csv (not --tag all)")
+    jobs = [
+        (path, HERE / f"data_{tag_from_timestamps_csv(path)}")
+        for path in list_timestamp_csvs()
+    ]
+    if not jobs:
+        raise FileNotFoundError(f"no timestamps_*.csv under {HERE}")
+    return jobs
 
 @dataclass(frozen=True)
 class StepWindow:
@@ -301,8 +342,23 @@ def save_step(out_dir: Path, step: StepWindow, t: np.ndarray, client: np.ndarray
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="step timestamp CSV")
-    p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="output directory")
+    p.add_argument(
+        "--tag",
+        default=DEFAULT_TAG,
+        help="run postfix, or 'all' (default) for every timestamps_*.csv",
+    )
+    p.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="single timestamps CSV (overrides --tag)",
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="output directory for a single run (default: data_<tag>/)",
+    )
     p.add_argument(
         "--url",
         default=env("INFLUX_URL", "http://10.1.137.104:8086"),
@@ -325,13 +381,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--step", type=int, default=0, help="only download this step # (0=all)")
     args = p.parse_args(argv)
 
-    tz = ZoneInfo(args.tz)
-    steps = load_steps(args.csv, tz)
-    if args.step:
-        steps = [s for s in steps if s.step == args.step]
-        if not steps:
-            print(f"error: step {args.step} not in {args.csv}", file=sys.stderr)
-            return 1
+    try:
+        jobs = resolve_download_jobs(tag=args.tag, csv=args.csv, out=args.out)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
     roles = [r.strip() for r in args.roles.split(",") if r.strip()]
     want_client = "client_agg" in roles
@@ -340,68 +394,93 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("error: --roles must include client_agg and/or server_agg", file=sys.stderr)
         return 1
 
-    args.out.mkdir(parents=True, exist_ok=True)
+    tz = ZoneInfo(args.tz)
     print(
         f"Influx {args.url} org={args.org} bucket={args.bucket} "
         f"measurement={args.measurement} tz={args.tz}"
     )
-    print(f"Steps: {len(steps)} → {args.out}")
 
-    summary_rows: List[Dict[str, float]] = []
-    for step in steps:
-        t_c = y_c = t_s = y_s = np.array([], dtype=np.float64)
-        if want_client:
-            t_c, y_c = query_role_mbps(
-                url=args.url,
-                token=args.token,
-                org=args.org,
-                bucket=args.bucket,
-                measurement=args.measurement,
-                role="client_agg",
-                start=step.start,
-                stop=step.stop,
-            )
-        if want_server:
-            t_s, y_s = query_role_mbps(
-                url=args.url,
-                token=args.token,
-                org=args.org,
-                bucket=args.bucket,
-                measurement=args.measurement,
-                role="server_agg",
-                start=step.start,
-                stop=step.stop,
-            )
-        t, client, server = align_series(t_c, y_c, t_s, y_s)
-        path = save_step(args.out, step, t, client, server)
-        c_mean = float(np.nanmean(client)) if client.size and np.any(~np.isnan(client)) else float("nan")
-        s_mean = float(np.nanmean(server)) if server.size and np.any(~np.isnan(server)) else float("nan")
-        print(
-            f"  {path.name}: n={t.size} "
-            f"client_mean={c_mean:.2f} Mbps server_mean={s_mean:.2f} Mbps "
-            f"({step.start.astimezone(tz):%H:%M:%S}–{step.stop.astimezone(tz):%H:%M:%S})"
-        )
-        summary_rows.append(
-            {
-                "step": step.step,
-                "cpu_millis": parse_cpu_millis(step.cpu),
-                "n": float(t.size),
-                "client_mean_mbps": c_mean,
-                "client_p50_mbps": float(np.nanmedian(client)) if client.size else float("nan"),
-                "server_mean_mbps": s_mean,
-                "server_p50_mbps": float(np.nanmedian(server)) if server.size else float("nan"),
-                "start_unix_s": step.start.timestamp(),
-                "stop_unix_s": step.stop.timestamp(),
-            }
-        )
+    for csv_path, out_dir in jobs:
+        if not csv_path.is_file():
+            print(f"error: missing {csv_path}", file=sys.stderr)
+            return 1
+        steps = load_steps(csv_path, tz)
+        if args.step:
+            steps = [s for s in steps if s.step == args.step]
+            if not steps:
+                print(f"error: step {args.step} not in {csv_path}", file=sys.stderr)
+                return 1
 
-    if summary_rows:
-        keys = list(summary_rows[0].keys())
-        packed = {k: np.asarray([row[k] for row in summary_rows]) for k in keys}
-        cpu_labels = np.asarray([s.cpu for s in steps])
-        summary_path = args.out / "summary.npz"
-        np.savez_compressed(summary_path, cpu=cpu_labels, **packed)
-        print(f"Wrote {summary_path}")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"CSV {csv_path.name} → {out_dir} ({len(steps)} steps)")
+
+        summary_rows: List[Dict[str, float]] = []
+        for step in steps:
+            t_c = y_c = t_s = y_s = np.array([], dtype=np.float64)
+            if want_client:
+                t_c, y_c = query_role_mbps(
+                    url=args.url,
+                    token=args.token,
+                    org=args.org,
+                    bucket=args.bucket,
+                    measurement=args.measurement,
+                    role="client_agg",
+                    start=step.start,
+                    stop=step.stop,
+                )
+            if want_server:
+                t_s, y_s = query_role_mbps(
+                    url=args.url,
+                    token=args.token,
+                    org=args.org,
+                    bucket=args.bucket,
+                    measurement=args.measurement,
+                    role="server_agg",
+                    start=step.start,
+                    stop=step.stop,
+                )
+            t, client, server = align_series(t_c, y_c, t_s, y_s)
+            path = save_step(out_dir, step, t, client, server)
+            c_mean = (
+                float(np.nanmean(client))
+                if client.size and np.any(~np.isnan(client))
+                else float("nan")
+            )
+            s_mean = (
+                float(np.nanmean(server))
+                if server.size and np.any(~np.isnan(server))
+                else float("nan")
+            )
+            print(
+                f"  {path.name}: n={t.size} "
+                f"client_mean={c_mean:.2f} Mbps server_mean={s_mean:.2f} Mbps "
+                f"({step.start.astimezone(tz):%H:%M:%S}–{step.stop.astimezone(tz):%H:%M:%S})"
+            )
+            summary_rows.append(
+                {
+                    "step": step.step,
+                    "cpu_millis": parse_cpu_millis(step.cpu),
+                    "n": float(t.size),
+                    "client_mean_mbps": c_mean,
+                    "client_p50_mbps": float(np.nanmedian(client))
+                    if client.size
+                    else float("nan"),
+                    "server_mean_mbps": s_mean,
+                    "server_p50_mbps": float(np.nanmedian(server))
+                    if server.size
+                    else float("nan"),
+                    "start_unix_s": step.start.timestamp(),
+                    "stop_unix_s": step.stop.timestamp(),
+                }
+            )
+
+        if summary_rows:
+            keys = list(summary_rows[0].keys())
+            packed = {k: np.asarray([row[k] for row in summary_rows]) for k in keys}
+            cpu_labels = np.asarray([s.cpu for s in steps])
+            summary_path = out_dir / "summary.npz"
+            np.savez_compressed(summary_path, cpu=cpu_labels, **packed)
+            print(f"Wrote {summary_path}")
 
     return 0
 
