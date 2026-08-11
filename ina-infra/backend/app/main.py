@@ -80,8 +80,8 @@ OPENAPI_TAGS = [
     {
         "name": "Benchmark",
         "description": (
-            "oai-benchmark GitOps deploy/undeploy and CPU-sweep run "
-            "(START/STOP; step start/stop times; throughput stored in SQLite)."
+            "oai-benchmark GitOps deploy/undeploy; CU-UP CPU sweep; "
+            "PRB dedicated/min/max via near-RT RIC xApp."
         ),
     },
 ]

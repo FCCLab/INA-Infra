@@ -179,12 +179,16 @@ def update_step(
     throughput_mbps: Optional[float] = None,
     set_started: bool = False,
     set_stopped: bool = False,
+    cpu: Optional[str] = None,
 ) -> None:
     sets: List[str] = []
     args: List[Any] = []
     if phase is not None:
         sets.append("phase = ?")
         args.append(phase)
+    if cpu is not None:
+        sets.append("cpu = ?")
+        args.append(cpu)
     if set_started:
         sets.append("started_at = ?")
         args.append(started_at or _now())
@@ -264,6 +268,44 @@ def latest_run() -> Optional[BenchmarkRunStatusOut]:
     with _db() as conn:
         run = conn.execute(
             "SELECT * FROM benchmark_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not run:
+            return None
+        steps = conn.execute(
+            "SELECT * FROM benchmark_steps WHERE run_id = ? ORDER BY step_index",
+            (int(run["id"]),),
+        ).fetchall()
+    return _row_to_status(run, steps)
+
+
+def latest_run_for_operator(operator_id: str) -> Optional[BenchmarkRunStatusOut]:
+    with _db() as conn:
+        run = conn.execute(
+            """
+            SELECT * FROM benchmark_runs
+            WHERE operator_id = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (operator_id,),
+        ).fetchone()
+        if not run:
+            return None
+        steps = conn.execute(
+            "SELECT * FROM benchmark_steps WHERE run_id = ? ORDER BY step_index",
+            (int(run["id"]),),
+        ).fetchall()
+    return _row_to_status(run, steps)
+
+
+def latest_run_excluding_operator(operator_id: str) -> Optional[BenchmarkRunStatusOut]:
+    with _db() as conn:
+        run = conn.execute(
+            """
+            SELECT * FROM benchmark_runs
+            WHERE operator_id != ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (operator_id,),
         ).fetchone()
         if not run:
             return None

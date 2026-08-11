@@ -244,6 +244,76 @@ export type BenchmarkRunRequest = {
   nf?: string;
 };
 
+export type BenchmarkPrbSliceOut = {
+  sst: number;
+  sd: string;
+  direction: string;
+  dedicated: number;
+  min: number;
+  max: number;
+};
+
+export type BenchmarkPrbSlicesOut = {
+  ok: boolean;
+  xapp_url: string;
+  tstamp?: number | null;
+  indications?: number | null;
+  slices: BenchmarkPrbSliceOut[];
+  message?: string;
+};
+
+export type BenchmarkPrbApplyRequest = {
+  sst: number;
+  sd: string;
+  direction: string;
+  dedicated: number;
+  min_prb: number;
+  max_prb: number;
+};
+
+export type BenchmarkPrbApplyResponse = {
+  ok: boolean;
+  message: string;
+  applied?: BenchmarkPrbSliceOut | null;
+};
+
+export type BenchmarkPrbRunRequest = {
+  sst: number;
+  sd: string;
+  direction: string;
+  dedicated: number;
+  min_prb: number;
+  sweep_min: number;
+  sweep_max: number;
+  prb_step: number;
+  step_sec: number;
+  warmup_sec: number;
+};
+
+export type BenchmarkPrbRunStatusOut = {
+  id?: number | null;
+  running: boolean;
+  status: string;
+  message: string;
+  operator_id: string;
+  nf: string;
+  sweep_min: number;
+  sweep_max: number;
+  steps: number;
+  step_sec: number;
+  warmup_sec: number;
+  current_index?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  step_list: BenchmarkStepOut[];
+};
+
+export type BenchmarkPrbStopResponse = {
+  ok: boolean;
+  message: string;
+  status?: BenchmarkPrbRunStatusOut | null;
+};
+
 export type PlPushResponse = {
   ok: boolean;
   message: string;
@@ -979,4 +1049,24 @@ export const api = {
     }),
   benchmarkRunStatus: () =>
     request<BenchmarkRunStatusOut>("/api/v1/benchmark/run/status"),
+
+  benchmarkPrbSlices: () =>
+    request<BenchmarkPrbSlicesOut>("/api/v1/benchmark/prb/slices"),
+  benchmarkPrbApply: (body: BenchmarkPrbApplyRequest) =>
+    request<BenchmarkPrbApplyResponse>("/api/v1/benchmark/prb/apply", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  benchmarkPrbRunStart: (body: BenchmarkPrbRunRequest) =>
+    request<BenchmarkPrbRunStatusOut>("/api/v1/benchmark/prb/run/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  benchmarkPrbRunStop: () =>
+    request<BenchmarkPrbStopResponse>("/api/v1/benchmark/prb/run/stop", {
+      method: "POST",
+      body: "{}",
+    }),
+  benchmarkPrbRunStatus: () =>
+    request<BenchmarkPrbRunStatusOut>("/api/v1/benchmark/prb/run/status"),
 };

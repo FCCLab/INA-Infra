@@ -2,7 +2,8 @@
 # Render oai-benchmark GitOps: non-slice OAI stack for throughput/latency benchmarks.
 #   central — dedicated 5GC CP executors in oai-benchmark (no Kopf operators)
 #   edge    — oai-ran-controller + NFDeployments (operator create-once CU/CUUP/DU);
-#             UPF + nrUE static; DU+UE node via OAI_BENCH_* (default usrp); UPF N6=DHCP
+#             UPF + nrUE static; FlexRIC near-RT RIC + nws-xapp; DU+UE node via
+#             OAI_BENCH_* (default usrp); UPF N6=DHCP
 # Deploy: render → push → operator creates RAN → patch_oai_benchmark_ran_vpc.sh
 set -euo pipefail
 
@@ -19,10 +20,13 @@ OAI_SMF_IMAGE="${OAI_SMF_IMAGE:-10.1.132.30:5000/oaisoftwarealliance/oai-smf:v2.
 OAI_UPF_IMAGE="${OAI_UPF_IMAGE:-docker.io/oaisoftwarealliance/oai-upf:v2.2.1}"
 OAI_REGISTRY="${OAI_REGISTRY:-10.1.132.30:5000}"
 OAI_IMAGE_TAG="${OAI_IMAGE_TAG:-nws-v0.8-amd64}"
+OAI_SIDECAR_IMAGE_TAG="${OAI_SIDECAR_IMAGE_TAG:-nws-v0.5-amd64}"
 OAI_CUCP_IMAGE="${OAI_CUCP_IMAGE:-${OAI_REGISTRY}/oai-cucp:${OAI_IMAGE_TAG}}"
 OAI_DU_IMAGE="${OAI_DU_IMAGE:-${OAI_REGISTRY}/oai-du:${OAI_IMAGE_TAG}}"
 OAI_CUUP_IMAGE="${OAI_CUUP_IMAGE:-${OAI_REGISTRY}/oai-nr-cuup:${OAI_IMAGE_TAG}}"
 OAI_NR_UE_IMAGE="${OAI_NR_UE_IMAGE:-${OAI_REGISTRY}/oai-nr-ue:${OAI_IMAGE_TAG}}"
+OAI_FLEXRIC_IMAGE="${OAI_FLEXRIC_IMAGE:-${OAI_REGISTRY}/oai-flexric:${OAI_IMAGE_TAG}}"
+OAI_XAPP_IMAGE="${OAI_XAPP_IMAGE:-${OAI_REGISTRY}/nws-xapp:nws-v0.6-amd64}"
 OAI_RAN_OPERATOR_IMAGE="${OAI_RAN_OPERATOR_IMAGE:-${OAI_REGISTRY}/oai-ran-controller:cpuagent-v8}"
 IPERF3_N6_IMAGE="${IPERF3_N6_IMAGE:-${OAI_REGISTRY}/iperf3-n6:stalefix}"
 DEBUG_IMAGE="${OAI_DEBUG_SIDECAR_IMAGE:-docker.io/nicolaka/netshoot}"
@@ -39,6 +43,10 @@ CUUP_N3="$(oai_bench_cuup_n3)"
 DU_F1="$(oai_bench_du_f1)"
 DU_RF="$(oai_bench_du_rf)"
 UE_RF="$(oai_bench_ue_rf)"
+FLEXRIC_IP="$(oai_bench_flexric)"
+XAPP_E2_IP="$(oai_bench_xapp_e2)"
+XAPP_SWAGGER_VIP="${OAI_XAPP_SWAGGER_VIP}"
+XAPP_API_PORT="${OAI_BENCH_XAPP_API_PORT}"
 UPF_N3="$(oai_bench_upf_n3)"
 UPF_N4="$(oai_bench_upf_n4)"
 UPF_N6_LOGICAL="$(oai_bench_upf_n6_logical)"
@@ -123,6 +131,8 @@ python3 - "$REPOS_DIR" "$BENCH_NS" \
   "$NAD_PARENT" "$USRP_IFACE" "$BENCH_IMSI" "$UPF_NAME" \
   "$OAI_RAN_OPERATOR_IMAGE" "$IPERF3_N6_IMAGE" \
   "$DU_NODE" "$UE_NODE" \
+  "$FLEXRIC_IP" "$XAPP_E2_IP" "$XAPP_SWAGGER_VIP" "$XAPP_API_PORT" \
+  "$OAI_FLEXRIC_IMAGE" "$OAI_XAPP_IMAGE" \
   <<'PY'
 import importlib.util
 import json
@@ -145,7 +155,10 @@ import yaml
     nad_parent, usrp_iface, bench_imsi, upf_name,
     ran_op_image, iperf3_n6_image,
     du_node, ue_node,
-) = sys.argv[1:40]
+    flexric_ip, xapp_e2_ip, xapp_swagger_vip, xapp_api_port_s,
+    flexric_image, xapp_image,
+) = sys.argv[1:46]
+xapp_api_port = int(xapp_api_port_s)
 
 repos = Path(repos_dir)
 gw_default = gw
@@ -527,7 +540,8 @@ def patch_smf_core_configmap(cn_dir: Path) -> None:
         "log_level": {"general": "info"},
         "register_nf": {"general": True},
         "http_version": 2,
-        "snssais": [{"sst": 1, "sd": "FFFFFF"}],
+        # Controllable NS slice (xApp cannot SET default 0xffffff over E2).
+        "snssais": [{"sst": 1, "sd": "000001"}],
         "nfs": {
             "amf": {"host": "oai-amf", "sbi": {"port": 80, "api_version": "v1"}},
             "smf": {
@@ -545,7 +559,7 @@ def patch_smf_core_configmap(cn_dir: Path) -> None:
         "discover_upf": "no",
         "use_local_subscription_info": "yes",
     })
-    slice0 = {"sst": 1, "sd": "FFFFFF"}
+    slice0 = {"sst": 1, "sd": "000001"}
     smf.setdefault("smf_info", {})["sNssaiSmfInfoList"] = [
         {"sNssai": slice0, "dnnSmfInfoList": [{"dnn": "internet"}]},
     ]
@@ -563,7 +577,9 @@ def patch_smf_core_configmap(cn_dir: Path) -> None:
                 {"interfaceType": "N3", "networkInstance": "access.oai.org"},
                 {"interfaceType": "N6", "networkInstance": "core.oai.org"},
             ],
-            "sNssaiUpfInfoList": [],
+            "sNssaiUpfInfoList": [
+                {"sNssai": slice0, "dnnUpfInfoList": [{"dnn": "internet"}]},
+            ],
         },
     }]
     dump({
@@ -626,7 +642,7 @@ http_version: 2
 http_request_timeout: 3000
 snssais:
   - sst: 1
-    sd: "FFFFFF"
+    sd: "000001"
 nfs:
   upf:
     host: oai-upf
@@ -660,7 +676,7 @@ upf:
     sNssaiUpfInfoList:
       - sNssai:
           sst: 1
-          sd: "FFFFFF"
+          sd: "000001"
         dnnUpfInfoList:
           - dnn: internet
 dnns:
@@ -933,7 +949,7 @@ gNBs =
     tracking_area_code  =  81;
     uess_agg_levels = [8, 8, 8, 5, 2];
     coreset_duration = 2;
-    plmn_list = ({{ mcc = 001; mnc = 01; mnc_length = 2; snssaiList = ({{ sst = 1, sd = 0xFFFFFF }}) }});
+    plmn_list = ({{ mcc = 001; mnc = 01; mnc_length = 2; snssaiList = ({{ sst = 1, sd = 0xFFFFFF }}, {{ sst = 1, sd = 0x000001 }}) }});
     nr_cellid = {NR_CELLID};
     min_rxtxtime = 6;
     servingCellConfigCommon = (
@@ -1021,7 +1037,8 @@ MACRLCs = (
 );
 
 Slices = (
-  {{ slice_id = 0; sst = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; }}
+  {{ slice_id = 0; sst = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; }},
+  {{ slice_id = 1; sst = 1; sd = 0x000001; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; }}
 );
 
 L1s = (
@@ -1064,6 +1081,11 @@ log_config :
     mac_log_level = "info";
     rlc_log_level = "info";
     f1ap_log_level = "info";
+}};
+
+e2_agent = {{
+  near_ric_ip_addr = "{flexric_ip}";
+  sm_dir = "/usr/local/lib/flexric/";
 }};
 """
 dump(
@@ -1116,7 +1138,10 @@ def nfconfig(name, image):
                         "PLMNInfo": [{
                             "plmnID": {"mcc": "001", "mnc": "01"},
                             "tac": 81,
-                            "nssai": [{"sst": 1, "sd": "FFFFFF"}],
+                            "nssai": [
+                                {"sst": 1, "sd": "FFFFFF"},
+                                {"sst": 1, "sd": "000001"},
+                            ],
                         }],
                     },
                 },
@@ -1257,7 +1282,7 @@ ue_conf = f"""uicc0 = {{
   opc = "C42449363BBAD02B66D16BC975D77CC1";
   dnn = "internet";
   nssai_sst = 1;
-  nssai_sd = 0xFFFFFF;
+  nssai_sd = 0x000001;
 }}
 
 thread-pool = "-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1";
@@ -1406,14 +1431,275 @@ dump(
 )
 
 
+# FlexRIC near-RT RIC + nws-xapp (E2 on macvlan; Swagger via edge mgmt VIP :18081)
+flexric_conf = f"""[NEAR-RIC]
+NEAR_RIC_IP = {flexric_ip}
+
+[XAPP]
+DB_DIR = /tmp/
+DB_NAME = xapp_db
+"""
+dump(
+    nad("flexric-bench-e2", bench_ns, nad_parent, flexric_ip),
+    edge_dir / "40-networkattachmentdefinition-flexric-bench-e2.yaml",
+)
+dump(
+    nad("xapp-bench-e2", bench_ns, nad_parent, xapp_e2_ip),
+    edge_dir / "40-networkattachmentdefinition-xapp-bench-e2.yaml",
+)
+dump(
+    {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": "oai-flexric-configmap", "namespace": bench_ns},
+        "data": {"flexric.conf": flexric_conf},
+    },
+    edge_dir / "41-configmap-oai-flexric-configmap.yaml",
+)
+dump(
+    {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "oai-flexric",
+            "namespace": bench_ns,
+            "labels": {"app.kubernetes.io/name": "oai-flexric"},
+        },
+        "spec": {
+            "replicas": 1,
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": {"app.kubernetes.io/name": "oai-flexric"}},
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": "oai-flexric",
+                        "app.kubernetes.io/name": "oai-flexric",
+                    },
+                    "annotations": {
+                        "k8s.v1.cni.cncf.io/networks": networks_annot(
+                            [("flexric-bench-e2", "e2", flexric_ip)]
+                        )
+                    },
+                },
+                "spec": {
+                    "terminationGracePeriodSeconds": 5,
+                    # Opposite node from xApp (macvlan cannot hairpin).
+                    "nodeSelector": {"kubernetes.io/hostname": "edge-1"},
+                    "containers": [
+                        {
+                            "name": "flexric",
+                            "image": flexric_image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "workingDir": "/tmp",
+                            "securityContext": {
+                                "privileged": True,
+                                "capabilities": {"add": ["NET_ADMIN", "NET_RAW"]},
+                            },
+                            "command": ["stdbuf", "-o0", "nearRT-RIC"],
+                            "env": [
+                                {"name": "E2AP_VERSION", "value": "E2AP_V3"},
+                                {"name": "KPM_VERSION", "value": "KPM_V3_00"},
+                                {"name": "ASAN_OPTIONS", "value": "detect_leaks=0"},
+                            ],
+                            "volumeMounts": [
+                                {
+                                    "name": "configuration",
+                                    "mountPath": "/usr/local/etc/flexric/flexric.conf",
+                                    "subPath": "flexric.conf",
+                                }
+                            ],
+                        }
+                    ],
+                    "volumes": [
+                        {
+                            "name": "configuration",
+                            "configMap": {"name": "oai-flexric-configmap"},
+                        }
+                    ],
+                },
+            },
+        },
+    },
+    edge_dir / "42-deployment-oai-flexric.yaml",
+)
+dump(
+    {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "nws-xapp",
+            "namespace": bench_ns,
+            "labels": {"app.kubernetes.io/name": "nws-xapp"},
+        },
+        "spec": {
+            "replicas": 1,
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": {"app.kubernetes.io/name": "nws-xapp"}},
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": "nws-xapp",
+                        "app.kubernetes.io/name": "nws-xapp",
+                    },
+                    "annotations": {
+                        "k8s.v1.cni.cncf.io/networks": networks_annot(
+                            [("xapp-bench-e2", "e2", xapp_e2_ip)]
+                        )
+                    },
+                },
+                "spec": {
+                    "terminationGracePeriodSeconds": 5,
+                    "nodeSelector": {"kubernetes.io/hostname": "edge-0"},
+                    "containers": [
+                        {
+                            "name": "xapp",
+                            "image": xapp_image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "securityContext": {
+                                "capabilities": {"add": ["NET_ADMIN", "NET_RAW"]}
+                            },
+                            "command": [
+                                "bash",
+                                "-lc",
+                                (
+                                    "set -e; "
+                                    'echo "waiting 30s for DU E2 attach to ${NEAR_RIC_IP}"; '
+                                    "sleep 30; "
+                                    "exec python3 -u /xapp/xapp_slice.py "
+                                    "--conf /etc/flexric/flexric.conf "
+                                    "--out /tmp/rt_slice_stats.json "
+                                    "--ns-out /tmp/rt_ns_slice_policy.json --print"
+                                ),
+                            ],
+                            "env": [
+                                {
+                                    "name": "PYTHONPATH",
+                                    "value": "/usr/local/flexric/xApp/python3",
+                                },
+                                {
+                                    "name": "LD_LIBRARY_PATH",
+                                    "value": "/usr/local/lib:/flexric/build/src/xApp",
+                                },
+                                {
+                                    "name": "FLEXRIC_CONF",
+                                    "value": "/etc/flexric/flexric.conf",
+                                },
+                                {"name": "NWS_XAPP_IN_DOCKER", "value": "1"},
+                                {"name": "NEAR_RIC_IP", "value": flexric_ip},
+                                {"name": "NWS_XAPP_API_HOST", "value": "0.0.0.0"},
+                                {
+                                    "name": "NWS_XAPP_API_PORT",
+                                    "value": str(xapp_api_port),
+                                },
+                                {
+                                    "name": "NWS_XAPP_LAB_IP",
+                                    "value": xapp_swagger_vip,
+                                },
+                            ],
+                            "ports": [
+                                {
+                                    "name": "http",
+                                    "containerPort": xapp_api_port,
+                                    "protocol": "TCP",
+                                }
+                            ],
+                            "volumeMounts": [
+                                {
+                                    "name": "configuration",
+                                    "mountPath": "/etc/flexric/flexric.conf",
+                                    "subPath": "flexric.conf",
+                                }
+                            ],
+                        }
+                    ],
+                    "volumes": [
+                        {
+                            "name": "configuration",
+                            "configMap": {"name": "oai-flexric-configmap"},
+                        }
+                    ],
+                },
+            },
+        },
+    },
+    edge_dir / "43-deployment-nws-xapp.yaml",
+)
+dump(
+    {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": "nws-xapp",
+            "namespace": bench_ns,
+            "labels": {"app.kubernetes.io/name": "nws-xapp"},
+        },
+        "spec": {
+            "type": "ClusterIP",
+            "externalIPs": [xapp_swagger_vip],
+            "selector": {"app.kubernetes.io/name": "nws-xapp"},
+            "ports": [
+                {
+                    "name": "http",
+                    "port": xapp_api_port,
+                    "targetPort": xapp_api_port,
+                    "protocol": "TCP",
+                }
+            ],
+        },
+    },
+    edge_dir / "44-service-nws-xapp.yaml",
+)
+
+
 render_upf_executor()
+
+# Bench UE uses SST=1 / SD=0x000001 (xApp-controllable). Patch MySQL
+# SessionManagementSubscriptionData so UDM serves that NSSAI (decimal sd=1).
+import re
+mysql_cm = cn_dir / "05-configmap-mysql-initialization.yaml"
+if mysql_cm.is_file():
+    doc = yaml.safe_load(mysql_cm.read_text())
+    key = next(iter(doc["data"]))
+    sql = doc["data"][key]
+    sd_dec = "1"  # 0x000001
+    pattern = (
+        rf"\('{re.escape(bench_imsi)}',\s*'00101',\s*'"
+        r'\{\\"sst\\": 1, \\"sd\\": \\"[0-9]+\\"\}'
+        r"'"
+    )
+    repl = (
+        f"('{bench_imsi}', '00101', "
+        f"'{{\\\"sst\\\": 1, \\\"sd\\\": \\\"{sd_dec}\\\"}}'"
+    )
+    sql2, nsub = re.subn(pattern, repl, sql, count=1)
+    if not nsub:
+        pattern2 = (
+            rf"\('{re.escape(bench_imsi)}', '00101', "
+            r"'{\"sst\": 1, \"sd\": \"[0-9]+\"}'"
+        )
+        sql2, nsub = re.subn(
+            pattern2,
+            f"('{bench_imsi}', '00101', '{{\"sst\": 1, \"sd\": \"{sd_dec}\"}}'",
+            sql,
+            count=1,
+        )
+    if nsub:
+        doc["data"][key] = sql2
+        dump(doc, mysql_cm)
+        print(f"  MySQL: {bench_imsi} SessionManagement NSSAI → sst=1 sd={sd_dec} (0x000001)")
+    else:
+        print(f"  WARN: MySQL SessionManagement row for {bench_imsi} not patched")
+else:
+    print(f"  WARN: missing {mysql_cm.name}; UE NSSAI may stay on default FFFFFF")
 
 print(f"Rendered {bench_ns} @ edge:")
 print(f"  RAN: oai-ran-controller ({ran_op_image}) → NFDeployments cucp/cuup/du-bench")
 print(f"  Nodes: DU={du_node} UE={ue_node} (rfsim Multus parent {usrp_iface})")
 print(f"  CU-CP N2/F1/E1 {cucp_n2}/{cucp_f1c}/{cucp_e1} → AMF {amf_n2}")
 print(f"  CU-UP E1/F1U/N3 {cuup_e1}/{cuup_f1u}/{cuup_n3} → UPF N3 {upf_n3}")
-print(f"  DU F1/rfsim {du_f1}/{du_rf}, UE RF {ue_rf} (IMSI {bench_imsi}, DNN internet)")
+print(f"  DU F1/rfsim {du_f1}/{du_rf}, UE RF {ue_rf} (IMSI {bench_imsi}, NSSAI 1/0x000001, DNN internet)")
+print(f"  near-RT RIC FlexRIC {flexric_ip} + xApp E2 {xapp_e2_ip}")
+print(f"  xApp Swagger http://{xapp_swagger_vip}:{xapp_api_port}/docs")
 print(f"  UPF {upf_name} N3/N4 {upf_n3}/{upf_n4} N6=DHCP (logical {upf_n6_logical} for SMF)")
 print(f"  iperf3-n6: {iperf3_n6_image} (UPF sidecar :5201-5326 → InfluxDB; UE client helper)")
 print(f"  Core {bench_ns}: AMF {amf_n2} SMF {smf_n4}")
@@ -1424,6 +1710,7 @@ echo "Push:  ./bringup/03_push_to_git_repos/push_git_repos.sh central edge"
 echo "Verify: ./scripts/check-configsync.sh central edge"
 echo "       kubectl --context edge@edge -n ${BENCH_NS} get nfdeployment,deploy"
 echo "DU/UE nodes: ${DU_NODE} / ${UE_NODE}"
+echo "near-RT RIC: FlexRIC ${FLEXRIC_IP}  xApp http://${XAPP_SWAGGER_VIP}:${XAPP_API_PORT}/docs"
 echo "After operator create-once, pin VPC Multus parents + DU node:"
 echo "       OAI_BENCH_DU_NODE=${DU_NODE} ./scripts/patch_oai_benchmark_ran_vpc.sh"
 echo "       (needs node labels from ./scripts/label_ina_multus_masters.sh edge)"

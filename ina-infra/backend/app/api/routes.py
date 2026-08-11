@@ -12,6 +12,13 @@ from pydantic import ValidationError
 
 from app.schemas import (
     BenchmarkDeployRequest,
+    BenchmarkPrbApplyRequest,
+    BenchmarkPrbApplyResponse,
+    BenchmarkPrbRunRequest,
+    BenchmarkPrbRunStatusOut,
+    BenchmarkPrbSlicesOut,
+    BenchmarkPrbSliceOut,
+    BenchmarkPrbStopResponse,
     BenchmarkRunRequest,
     BenchmarkRunStatusOut,
     BenchmarkRunStopResponse,
@@ -55,6 +62,7 @@ from app.schemas import (
 from app.services import (
     benchmark,
     benchmark_log,
+    benchmark_prb_run,
     benchmark_run,
     cluster_status,
     operators,
@@ -64,6 +72,7 @@ from app.services import (
     profile_rollout,
     profile_store,
     ps_loop,
+    xapp_prb,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -648,6 +657,114 @@ def benchmark_run_stop():
 )
 def benchmark_run_status():
     return benchmark_run.status()
+
+
+@router.get(
+    "/benchmark/prb/slices",
+    response_model=BenchmarkPrbSlicesOut,
+    tags=["Benchmark"],
+    summary="GET NS PRB policy from near-RT RIC xApp",
+)
+def benchmark_prb_slices():
+    try:
+        raw = xapp_prb.get_slices()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    slices = [
+        BenchmarkPrbSliceOut(
+            sst=int(s.get("sst") or 0),
+            sd=str(s.get("sd") or ""),
+            direction=str(s.get("direction") or ""),
+            dedicated=float(s.get("dedicated") or 0),
+            min=float(s.get("min") or 0),
+            max=float(s.get("max") or 0),
+        )
+        for s in (raw.get("slices") or [])
+    ]
+    return BenchmarkPrbSlicesOut(
+        ok=True,
+        xapp_url=xapp_prb.xapp_base_url(),
+        tstamp=raw.get("tstamp"),
+        indications=raw.get("indications"),
+        slices=slices,
+    )
+
+
+@router.post(
+    "/benchmark/prb/apply",
+    response_model=BenchmarkPrbApplyResponse,
+    tags=["Benchmark"],
+    summary="PATCH dedicated/min/max PRB via near-RT RIC xApp",
+)
+def benchmark_prb_apply(body: BenchmarkPrbApplyRequest):
+    try:
+        raw = xapp_prb.set_prb(
+            sst=body.sst,
+            sd=body.sd,
+            direction=body.direction,
+            dedicated=body.dedicated,
+            min_prb=body.min_prb,
+            max_prb=body.max_prb,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    benchmark_log.write(
+        f"prb apply sst={body.sst} sd={body.sd} dir={body.direction} "
+        f"d/m/M={body.dedicated:g}/{body.min_prb:g}/{body.max_prb:g}",
+        source="prb",
+    )
+    return BenchmarkPrbApplyResponse(
+        ok=True,
+        message="PATCH sent to xApp (confirm via GET /benchmark/prb/slices)",
+        applied=BenchmarkPrbSliceOut(
+            sst=body.sst,
+            sd=xapp_prb.normalize_sd(body.sd),
+            direction=body.direction.lower(),
+            dedicated=body.dedicated,
+            min=body.min_prb,
+            max=body.max_prb,
+        ),
+        raw=raw if isinstance(raw, dict) else None,
+    )
+
+
+@router.post(
+    "/benchmark/prb/run/start",
+    response_model=BenchmarkPrbRunStatusOut,
+    tags=["Benchmark"],
+    summary="Start PRB max% sweep via near-RT RIC xApp",
+)
+def benchmark_prb_run_start(body: BenchmarkPrbRunRequest):
+    try:
+        return benchmark_prb_run.start_run(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/benchmark/prb/run/stop",
+    response_model=BenchmarkPrbStopResponse,
+    tags=["Benchmark"],
+    summary="Stop PRB sweep",
+)
+def benchmark_prb_run_stop():
+    return benchmark_prb_run.stop_run()
+
+
+@router.get(
+    "/benchmark/prb/run/status",
+    response_model=BenchmarkPrbRunStatusOut,
+    tags=["Benchmark"],
+    summary="PRB sweep status + step list",
+)
+def benchmark_prb_run_status():
+    return benchmark_prb_run.status()
 
 
 # ── Medium (PM) ──────────────────────────────────────────────────────────────

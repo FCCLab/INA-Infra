@@ -375,6 +375,11 @@ OAI_BENCH_CUUP_N3_OFFSET="${OAI_BENCH_CUUP_N3_OFFSET:-17}"   # edge .127
 OAI_BENCH_DU_F1_OFFSET="${OAI_BENCH_DU_F1_OFFSET:-18}"       # edge .128
 OAI_BENCH_DU_RF_OFFSET="${OAI_BENCH_DU_RF_OFFSET:-19}"       # edge .129
 OAI_BENCH_UE_RF_OFFSET="${OAI_BENCH_UE_RF_OFFSET:-20}"       # edge .130
+# near-RT RIC + xApp (after UE .130; avoid clash with slice .120/.121)
+OAI_BENCH_FLEXRIC_OFFSET="${OAI_BENCH_FLEXRIC_OFFSET:-21}"   # edge .131
+OAI_BENCH_XAPP_E2_OFFSET="${OAI_BENCH_XAPP_E2_OFFSET:-22}"   # edge .132
+# Swagger on edge mgmt IP; port differs from slice xApp (:18080).
+OAI_BENCH_XAPP_API_PORT="${OAI_BENCH_XAPP_API_PORT:-18081}"
 OAI_BENCH_UPF_OFFSET0="${OAI_BENCH_UPF_OFFSET0:-25}"         # central pool .35/.36 (N3/N4); N6 = DHCP
 OAI_BENCH_CORE_OFFSET0="${OAI_BENCH_CORE_OFFSET0:-40}"       # central pool .50+ (dedicated 5GC CP)
 OAI_BENCHMARK_NS="${OAI_BENCHMARK_NS:-oai-benchmark}"
@@ -392,6 +397,8 @@ oai_bench_cuup_n3() { oai_macvlan_ip edge "$OAI_BENCH_CUUP_N3_OFFSET"; }
 oai_bench_du_f1() { oai_macvlan_ip edge "$OAI_BENCH_DU_F1_OFFSET"; }
 oai_bench_du_rf() { oai_macvlan_ip edge "$OAI_BENCH_DU_RF_OFFSET"; }
 oai_bench_ue_rf() { oai_macvlan_ip edge "$OAI_BENCH_UE_RF_OFFSET"; }
+oai_bench_flexric() { oai_macvlan_ip edge "$OAI_BENCH_FLEXRIC_OFFSET"; }
+oai_bench_xapp_e2() { oai_macvlan_ip edge "$OAI_BENCH_XAPP_E2_OFFSET"; }
 oai_bench_upf_n3() { oai_macvlan_ip central $((OAI_BENCH_UPF_OFFSET0 + 0)); }
 oai_bench_upf_n4() { oai_macvlan_ip central $((OAI_BENCH_UPF_OFFSET0 + 1)); }
 # Logical N6 for SMF UPF-graph only; live N6 is DHCP (Glass 10.1.137).

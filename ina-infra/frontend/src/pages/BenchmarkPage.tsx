@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  BenchmarkPrbRunStatusOut,
+  BenchmarkPrbSliceOut,
   BenchmarkRunStatusOut,
   ClusterDeployStatus,
   EDGE_RF_NODES,
@@ -169,9 +171,59 @@ export default function BenchmarkPage() {
   const [sweep, setSweep] = useState<BenchmarkRunStatusOut | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
   const [sweepError, setSweepError] = useState<string | null>(null);
+  const [showCuup, setShowCuup] = useState(false);
+  const [showPrb, setShowPrb] = useState(false);
+
+  const [prbSst, setPrbSst] = useState(1);
+  const [prbSd, setPrbSd] = useState("0x000001");
+  const [prbDir, setPrbDir] = useState<"dl" | "ul">("dl");
+  const [prbDedicated, setPrbDedicated] = useState(0);
+  const [prbMin, setPrbMin] = useState(0);
+  const [prbMax, setPrbMax] = useState(100);
+  const [prbSweepMin, setPrbSweepMin] = useState(10);
+  const [prbSweepMax, setPrbSweepMax] = useState(100);
+  const [prbStep, setPrbStep] = useState(10);
+  const [prbStepSec, setPrbStepSec] = useState(120);
+  const [prbWarmupSec, setPrbWarmupSec] = useState(60);
+  const [prbSweep, setPrbSweep] = useState<BenchmarkPrbRunStatusOut | null>(null);
+  const [prbBusy, setPrbBusy] = useState(false);
+  const [prbError, setPrbError] = useState<string | null>(null);
+  const [prbApplyMsg, setPrbApplyMsg] = useState<string | null>(null);
+  const [prbLive, setPrbLive] = useState<BenchmarkPrbSliceOut[] | null>(null);
+  const [prbXappUrl, setPrbXappUrl] = useState("");
+  const [prbIndications, setPrbIndications] = useState<number | null>(null);
+  const prbHydratedRef = useRef(false);
 
   const busy = running !== null;
   const sweepRunning = Boolean(sweep?.running);
+  const prbRunning = Boolean(prbSweep?.running);
+
+  const prbSliceKey = useCallback(
+    (s: Pick<BenchmarkPrbSliceOut, "sst" | "sd" | "direction">) =>
+      `${s.sst}|${s.sd}|${s.direction}`,
+    [],
+  );
+
+  const prbSelectedKey = useMemo(
+    () => prbSliceKey({ sst: prbSst, sd: prbSd, direction: prbDir }),
+    [prbSliceKey, prbSst, prbSd, prbDir],
+  );
+
+  const prbSelectedLive = useMemo(() => {
+    if (!prbLive?.length) return null;
+    return (
+      prbLive.find((s) => prbSliceKey(s) === prbSelectedKey) || null
+    );
+  }, [prbLive, prbSliceKey, prbSelectedKey]);
+
+  const applyPrbSliceToForm = useCallback((s: BenchmarkPrbSliceOut) => {
+    setPrbSst(s.sst);
+    setPrbSd(s.sd);
+    setPrbDir(s.direction === "ul" ? "ul" : "dl");
+    setPrbDedicated(Number(s.dedicated) || 0);
+    setPrbMin(Number(s.min) || 0);
+    setPrbMax(Number(s.max) || 0);
+  }, []);
 
   const appendConsole = useCallback((line: string) => {
     setConsoleText((prev) => (prev ? `${prev}\n${line}` : line));
@@ -308,17 +360,60 @@ export default function BenchmarkPage() {
     }
   }, []);
 
+  const refreshPrb = useCallback(async () => {
+    try {
+      const st = await api.benchmarkPrbRunStatus();
+      setPrbSweep(st);
+    } catch {
+      /* keep last */
+    }
+  }, []);
+
+  const refreshPrbSlices = useCallback(async () => {
+    try {
+      const out = await api.benchmarkPrbSlices();
+      const slices = out.slices || [];
+      setPrbLive(slices);
+      setPrbXappUrl(out.xapp_url || "");
+      setPrbIndications(
+        typeof out.indications === "number" ? out.indications : null,
+      );
+      // Do not clear prbError here — successful GET must not hide a prior
+      // Apply/Start failure (e.g. default-slice PATCH 400).
+      if (!prbHydratedRef.current && slices.length > 0) {
+        const preferred =
+          slices.find(
+            (s) =>
+              s.sd !== "0xffffff" &&
+              String(s.direction).toLowerCase() === "dl",
+          ) ||
+          slices.find((s) => String(s.direction).toLowerCase() === "dl") ||
+          slices[0];
+        if (preferred) applyPrbSliceToForm(preferred);
+        prbHydratedRef.current = true;
+      }
+    } catch (e) {
+      setPrbError(e instanceof Error ? e.message : String(e));
+    }
+  }, [applyPrbSliceToForm]);
+
   useEffect(() => {
     void refreshCluster();
     void refreshEdgeNodes();
     void refreshSweep();
+    void refreshPrb();
+    void refreshPrbSlices();
     const sweepId = window.setInterval(() => void refreshSweep(), 1000);
+    const prbId = window.setInterval(() => void refreshPrb(), 1000);
+    const slicesId = window.setInterval(() => void refreshPrbSlices(), 5000);
     const clusterId = window.setInterval(() => void refreshCluster(), 10000);
     return () => {
       window.clearInterval(sweepId);
+      window.clearInterval(prbId);
+      window.clearInterval(slicesId);
       window.clearInterval(clusterId);
     };
-  }, [refreshCluster, refreshEdgeNodes, refreshSweep]);
+  }, [refreshCluster, refreshEdgeNodes, refreshSweep, refreshPrb, refreshPrbSlices]);
 
   async function onDeploy() {
     if (
@@ -475,6 +570,72 @@ export default function BenchmarkPage() {
     }
   }
 
+  async function onPrbApply() {
+    setPrbBusy(true);
+    setPrbApplyMsg(null);
+    try {
+      const res = await api.benchmarkPrbApply({
+        sst: Number(prbSst) || 1,
+        sd: prbSd.trim() || "0x000001",
+        direction: prbDir,
+        dedicated: Number(prbDedicated) || 0,
+        min_prb: Number(prbMin) || 0,
+        max_prb: Number(prbMax) || 0,
+      });
+      if (!res.ok) throw new Error(res.message || "apply failed");
+      const applied = res.applied;
+      setPrbError(null);
+      setPrbApplyMsg(
+        applied
+          ? `Applied SST ${applied.sst} ${applied.sd} ${applied.direction} → ${applied.dedicated}/${applied.min}/${applied.max}%`
+          : res.message || "Applied",
+      );
+      await refreshPrbSlices();
+    } catch (e) {
+      setPrbError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrbBusy(false);
+    }
+  }
+
+  async function onPrbStart() {
+    setPrbBusy(true);
+    try {
+      const st = await api.benchmarkPrbRunStart({
+        sst: Number(prbSst) || 1,
+        sd: prbSd.trim() || "0x000001",
+        direction: prbDir,
+        dedicated: Number(prbDedicated) || 0,
+        min_prb: Number(prbMin) || 0,
+        sweep_min: Number(prbSweepMin) || 0,
+        sweep_max: Number(prbSweepMax) || 100,
+        prb_step: Number(prbStep) || 10,
+        step_sec: Number(prbStepSec) || 1,
+        warmup_sec: Number(prbWarmupSec) || 0,
+      });
+      setPrbError(null);
+      setPrbApplyMsg(null);
+      setPrbSweep(st);
+    } catch (e) {
+      setPrbError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrbBusy(false);
+    }
+  }
+
+  async function onPrbStop() {
+    setPrbBusy(true);
+    try {
+      const res = await api.benchmarkPrbRunStop();
+      if (res.status) setPrbSweep(res.status);
+      else await refreshPrb();
+    } catch (e) {
+      setPrbError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrbBusy(false);
+    }
+  }
+
   const benchClusters = (cluster?.clusters || []).filter((c) =>
     (BENCH_CLUSTERS as readonly string[]).includes(c.cluster),
   );
@@ -547,91 +708,543 @@ export default function BenchmarkPage() {
         </Card>
 
         <Card className="tier" glow>
-          <SectionLabel kicker="cpu sweep">Run</SectionLabel>
+          <div className="panel-head">
+            <SectionLabel kicker={showCuup ? "cpu sweep" : "collapsed"}>
+              CU-UP benchmark
+            </SectionLabel>
+            <button type="button" onClick={() => setShowCuup((v) => !v)}>
+              {showCuup ? "Hide" : "Show"}
+            </button>
+          </div>
+          {!showCuup ? (
+            <p className="hint" style={{ marginTop: 0 }}>
+              Collapsed — CU-UP CPU request=limit sweep via Operators agent.
+              {sweep?.running
+                ? ` Running step ${(sweep.current_index ?? 0) + 1}/${sweep.steps}.`
+                : sweep?.status && sweep.status !== "idle"
+                  ? ` Last status: ${sweep.status}.`
+                  : ""}
+            </p>
+          ) : (
+            <>
+              <p className="hint" style={{ marginTop: 0 }}>
+                START walks CU-UP CPU from min→max in N steps (request=limit via
+                Operators). Each step: apply → warmup → measure. Throughput is
+                stored in the backend DB; this list shows start/stop only. Deploy
+                and sweep lines are also appended to{" "}
+                <code>logs/benchmark.log</code>.
+              </p>
+              <div className="profile-grid" style={{ marginTop: 12 }}>
+                <FieldHelp label="Min CPU" help="Lowest CPU for step 1 (default 50m).">
+                  <input
+                    value={minCpu}
+                    disabled={sweepRunning || sweepBusy || busy}
+                    onChange={(e) => setMinCpu(e.target.value)}
+                  />
+                </FieldHelp>
+                <FieldHelp label="Max CPU" help="Highest CPU; always included (default 1000m).">
+                  <input
+                    value={maxCpu}
+                    disabled={sweepRunning || sweepBusy || busy}
+                    onChange={(e) => setMaxCpu(e.target.value)}
+                  />
+                </FieldHelp>
+                <FieldHelp
+                  label="CPU step"
+                  help="Increment. Default 50m → 50m, 100m, 150m, … 1000m."
+                >
+                  <input
+                    value={cpuStep}
+                    disabled={sweepRunning || sweepBusy || busy}
+                    onChange={(e) => setCpuStep(e.target.value)}
+                  />
+                </FieldHelp>
+                <FieldHelp
+                  label="Time / step (s)"
+                  help="Measure window after warmup — start/stop timestamps bound this interval."
+                >
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={1}
+                    value={stepSec}
+                    disabled={sweepRunning || sweepBusy || busy}
+                    onChange={(e) => setStepSec(Number(e.target.value))}
+                  />
+                </FieldHelp>
+                <FieldHelp
+                  label="Warmup (s)"
+                  help="Seconds after CPU apply before the measure window starts."
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={warmupSec}
+                    disabled={sweepRunning || sweepBusy || busy}
+                    onChange={(e) => setWarmupSec(Number(e.target.value))}
+                  />
+                </FieldHelp>
+              </div>
+              {sweepError && <p className="hint error">{sweepError}</p>}
+              {sweep && sweep.status && sweep.status !== "idle" && (
+                <p className="hint" style={{ marginTop: 8 }}>
+                  Status:{" "}
+                  <span
+                    className={toneClass(
+                      sweep.running
+                        ? "warn"
+                        : sweep.status === "done"
+                          ? "ok"
+                          : sweep.status === "error"
+                            ? "err"
+                            : "muted",
+                    )}
+                  >
+                    {sweep.status}
+                    {sweep.current_index != null
+                      ? ` · step ${sweep.current_index + 1}/${sweep.steps}`
+                      : ""}
+                  </span>
+                  {sweep.message ? ` — ${sweep.message}` : ""}
+                  {sweep.nf ? (
+                    <>
+                      {" "}
+                      · NF <code>{sweep.nf}</code>
+                    </>
+                  ) : null}
+                </p>
+              )}
+              <div className="actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className={"primary" + (sweepRunning ? " is-running" : "")}
+                  disabled={busy || sweepBusy || sweepRunning || prbRunning}
+                  onClick={() => void onSweepStart()}
+                >
+                  <BtnProgress active={sweepRunning} />
+                  Start
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={!sweepRunning && !sweepBusy}
+                  onClick={() => void onSweepStop()}
+                >
+                  Stop
+                </button>
+              </div>
+              <div className="table-wrap status-deploy-table" style={{ marginTop: 14 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>CPU</th>
+                      <th>Phase</th>
+                      <th>Start</th>
+                      <th>Stop</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sweep?.step_list || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>
+                          <span className="hint">No run yet — Start to generate steps.</span>
+                        </td>
+                      </tr>
+                    ) : (
+                      (sweep?.step_list || []).map((s) => (
+                        <tr key={s.index}>
+                          <td>{s.index + 1}</td>
+                          <td>
+                            <code>{s.cpu}</code>
+                          </td>
+                          <td>
+                            <span className={toneClass(phaseTone(s.phase))}>
+                              {s.phase}
+                            </span>
+                            {s.message ? (
+                              <span className="hint" style={{ marginLeft: 6 }}>
+                                {s.message}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>{fmtTs(s.started_at)}</td>
+                          <td>{fmtTs(s.stopped_at)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card className="tier" glow>
+          <div className="panel-head">
+            <SectionLabel kicker={showPrb ? "near-RT RIC" : "collapsed"}>
+              PRB benchmark
+            </SectionLabel>
+            <button type="button" onClick={() => setShowPrb((v) => !v)}>
+              {showPrb ? "Hide" : "Show"}
+            </button>
+          </div>
+          {!showPrb ? (
+            <p className="hint" style={{ marginTop: 0 }}>
+              Collapsed — NS dedicated/min/max via near-RT RIC xApp
+              {prbXappUrl ? (
+                <>
+                  {" "}
+                  · <code>{prbXappUrl}</code>
+                </>
+              ) : null}
+              {prbRunning
+                ? ` Running step ${(prbSweep?.current_index ?? 0) + 1}/${prbSweep?.steps}.`
+                : prbSweep?.status && prbSweep.status !== "idle"
+                  ? ` Last status: ${prbSweep.status}.`
+                  : ""}
+              {prbError ? ` Error: ${prbError}` : ""}
+            </p>
+          ) : (
+            <>
           <p className="hint" style={{ marginTop: 0 }}>
-            START walks CU-UP CPU from min→max in N steps (request=limit via
-            Operators). Each step: apply → warmup → measure. Throughput is
-            stored in the backend DB; this list shows start/stop only. Deploy
-            and sweep lines are also appended to{" "}
-            <code>logs/benchmark.log</code>.
+            Control NS <strong>dedicated / min / max</strong> PRB ratios (%) via
+            the near-RT RIC xApp in <code>{BENCH_NS}</code>
+            {prbXappUrl ? (
+              <>
+                {" "}
+                · <code>{prbXappUrl}</code>
+              </>
+            ) : (
+              <>
+                {" "}
+                · <code>http://10.1.132.230:18081</code>
+              </>
+            )}
+            {prbIndications != null ? (
+              <>
+                {" "}
+                · {prbIndications.toLocaleString()} indications
+              </>
+            ) : null}
+            . Pick a slice below (defaults to first non-default DL), edit
+            dedicated/min/max, then <strong>Apply</strong> once — or Start a max%
+            sweep (<code>dedicated ≤ min ≤ max</code>).
+          </p>
+
+          <div className="panel-head" style={{ marginTop: 12 }}>
+            <SectionLabel kicker="xapp">Slices</SectionLabel>
+            <button
+              type="button"
+              disabled={busy || prbBusy}
+              onClick={() => void refreshPrbSlices()}
+              title="Refresh policy from xApp GET /api/v1/slices"
+            >
+              Refresh
+            </button>
+          </div>
+          {prbError && <p className="hint error">{prbError}</p>}
+          {prbApplyMsg && !prbError && (
+            <p className="hint ok-inline">{prbApplyMsg}</p>
+          )}
+          {!prbLive ? (
+            <p className="hint">Loading slices from xApp…</p>
+          ) : prbLive.length === 0 ? (
+            <p className="hint">No slices reported — is FlexRIC/xApp up?</p>
+          ) : (
+            <div className="table-wrap status-deploy-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th />
+                    <th>SST</th>
+                    <th>SD</th>
+                    <th>Dir</th>
+                    <th>Dedicated %</th>
+                    <th>Min %</th>
+                    <th>Max %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prbLive.map((s) => {
+                    const key = prbSliceKey(s);
+                    const selected = key === prbSelectedKey;
+                    return (
+                      <tr
+                        key={key}
+                        className={selected ? "is-selected" : undefined}
+                        style={{
+                          cursor:
+                            prbRunning || prbBusy || busy
+                              ? "default"
+                              : "pointer",
+                          opacity: s.sd === "0xffffff" ? 0.75 : 1,
+                        }}
+                        onClick={() => {
+                          if (prbRunning || prbBusy || busy) return;
+                          applyPrbSliceToForm(s);
+                          setPrbApplyMsg(null);
+                        }}
+                        title={
+                          s.sd === "0xffffff"
+                            ? "Default NSSAI (0xffffff)"
+                            : "Load into form for manual Apply / Start"
+                        }
+                      >
+                        <td>
+                          <input
+                            type="radio"
+                            name="prb-slice"
+                            checked={selected}
+                            disabled={prbRunning || prbBusy || busy}
+                            onChange={() => {
+                              applyPrbSliceToForm(s);
+                              setPrbApplyMsg(null);
+                            }}
+                            aria-label={`Select SST ${s.sst} SD ${s.sd} ${s.direction}`}
+                          />
+                        </td>
+                        <td>{s.sst}</td>
+                        <td>
+                          <code>{s.sd}</code>
+                          {s.sd === "0xffffff" ? (
+                            <span className="hint" style={{ marginLeft: 6 }}>
+                              default
+                            </span>
+                          ) : null}
+                        </td>
+                        <td>{s.direction}</td>
+                        <td>{s.dedicated}</td>
+                        <td>{s.min}</td>
+                        <td>{s.max}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {prbSelectedLive && (
+            <p className="hint" style={{ marginTop: 8 }}>
+              Live on xApp: SST <code>{prbSelectedLive.sst}</code> SD{" "}
+              <code>{prbSelectedLive.sd}</code> {prbSelectedLive.direction} ·
+              d/m/M{" "}
+              <strong>
+                {prbSelectedLive.dedicated}/{prbSelectedLive.min}/
+                {prbSelectedLive.max}
+              </strong>
+              %
+            </p>
+          )}
+
+          <div style={{ marginTop: 16 }}>
+            <SectionLabel kicker="manual">Manual apply</SectionLabel>
+          </div>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Edit SST/SD/direction and ratios, then Apply once (no sweep). Fields
+            are prefilled from the selected slice; you can override freely.
           </p>
           <div className="profile-grid" style={{ marginTop: 12 }}>
-            <FieldHelp label="Min CPU" help="Lowest CPU for step 1 (default 50m).">
-              <input
-                value={minCpu}
-                disabled={sweepRunning || sweepBusy || busy}
-                onChange={(e) => setMinCpu(e.target.value)}
-              />
-            </FieldHelp>
-            <FieldHelp label="Max CPU" help="Highest CPU; always included (default 1000m).">
-              <input
-                value={maxCpu}
-                disabled={sweepRunning || sweepBusy || busy}
-                onChange={(e) => setMaxCpu(e.target.value)}
-              />
-            </FieldHelp>
-            <FieldHelp
-              label="CPU step"
-              help="Increment. Default 50m → 50m, 100m, 150m, … 1000m."
-            >
-              <input
-                value={cpuStep}
-                disabled={sweepRunning || sweepBusy || busy}
-                onChange={(e) => setCpuStep(e.target.value)}
-              />
-            </FieldHelp>
-            <FieldHelp
-              label="Time / step (s)"
-              help="Measure window after warmup — start/stop timestamps bound this interval."
-            >
+            <FieldHelp label="SST" help="S-NSSAI SST (usually 1).">
               <input
                 type="number"
-                min={0.1}
-                step={1}
-                value={stepSec}
-                disabled={sweepRunning || sweepBusy || busy}
-                onChange={(e) => setStepSec(Number(e.target.value))}
+                min={0}
+                max={255}
+                value={prbSst}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbSst(Number(e.target.value));
+                  setPrbApplyMsg(null);
+                }}
               />
             </FieldHelp>
+            <FieldHelp label="SD" help="Slice differentiator hex (e.g. 0x000001).">
+              <input
+                value={prbSd}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbSd(e.target.value);
+                  setPrbApplyMsg(null);
+                }}
+              />
+            </FieldHelp>
+            <FieldHelp label="Direction" help="DL or UL NS policy entry.">
+              <select
+                value={prbDir}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbDir(e.target.value as "dl" | "ul");
+                  setPrbApplyMsg(null);
+                }}
+              >
+                <option value="dl">dl</option>
+                <option value="ul">ul</option>
+              </select>
+            </FieldHelp>
             <FieldHelp
-              label="Warmup (s)"
-              help="Seconds after CPU apply before the measure window starts."
+              label="Dedicated %"
+              help="Hard-isolated PRB share (≤ min)."
             >
               <input
                 type="number"
                 min={0}
+                max={100}
                 step={1}
-                value={warmupSec}
-                disabled={sweepRunning || sweepBusy || busy}
-                onChange={(e) => setWarmupSec(Number(e.target.value))}
+                value={prbDedicated}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbDedicated(Number(e.target.value));
+                  setPrbApplyMsg(null);
+                }}
+              />
+            </FieldHelp>
+            <FieldHelp label="Min %" help="Guaranteed PRB share (≤ max).">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={prbMin}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbMin(Number(e.target.value));
+                  setPrbApplyMsg(null);
+                }}
+              />
+            </FieldHelp>
+            <FieldHelp
+              label="Max %"
+              help="PRB ceiling for this one-shot Apply."
+            >
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={prbMax}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  setPrbMax(Number(e.target.value));
+                  setPrbApplyMsg(null);
+                }}
               />
             </FieldHelp>
           </div>
-          {sweepError && <p className="hint error">{sweepError}</p>}
-          {sweep && sweep.status && sweep.status !== "idle" && (
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              disabled={
+                busy || prbBusy || prbRunning || !prbSelectedLive
+              }
+              onClick={() => {
+                if (prbSelectedLive) {
+                  applyPrbSliceToForm(prbSelectedLive);
+                  setPrbApplyMsg(null);
+                }
+              }}
+              title="Reset form fields from live xApp values for the selected slice"
+            >
+              Reset from live
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || prbBusy || prbRunning || sweepRunning}
+              onClick={() => void onPrbApply()}
+              title="PATCH dedicated/min/max once via xApp (no sweep)"
+            >
+              <BtnProgress active={prbBusy && !prbRunning} />
+              Apply
+            </button>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <SectionLabel kicker="sweep">Max% sweep</SectionLabel>
+          </div>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Walks <em>max</em> from sweep-min→max; dedicated/min stay as set above.
+          </p>
+          <div className="profile-grid" style={{ marginTop: 12 }}>
+            <FieldHelp label="Sweep min (max%)" help="First max% step in Start sweep.">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={prbSweepMin}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => setPrbSweepMin(Number(e.target.value))}
+              />
+            </FieldHelp>
+            <FieldHelp label="Sweep max (max%)" help="Last max% step (always included).">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={prbSweepMax}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => setPrbSweepMax(Number(e.target.value))}
+              />
+            </FieldHelp>
+            <FieldHelp label="PRB step" help="max% increment for Start sweep.">
+              <input
+                type="number"
+                min={0.1}
+                max={100}
+                step={1}
+                value={prbStep}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => setPrbStep(Number(e.target.value))}
+              />
+            </FieldHelp>
+            <FieldHelp label="Time / step (s)" help="Measure window after warmup.">
+              <input
+                type="number"
+                min={0.1}
+                step={1}
+                value={prbStepSec}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => setPrbStepSec(Number(e.target.value))}
+              />
+            </FieldHelp>
+            <FieldHelp label="Warmup (s)" help="Seconds after xApp apply before measure.">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={prbWarmupSec}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => setPrbWarmupSec(Number(e.target.value))}
+              />
+            </FieldHelp>
+          </div>
+          {prbSweep && prbSweep.status && prbSweep.status !== "idle" && (
             <p className="hint" style={{ marginTop: 8 }}>
               Status:{" "}
               <span
                 className={toneClass(
-                  sweep.running
+                  prbSweep.running
                     ? "warn"
-                    : sweep.status === "done"
+                    : prbSweep.status === "done"
                       ? "ok"
-                      : sweep.status === "error"
+                      : prbSweep.status === "error"
                         ? "err"
                         : "muted",
                 )}
               >
-                {sweep.status}
-                {sweep.current_index != null
-                  ? ` · step ${sweep.current_index + 1}/${sweep.steps}`
+                {prbSweep.status}
+                {prbSweep.current_index != null
+                  ? ` · step ${prbSweep.current_index + 1}/${prbSweep.steps}`
                   : ""}
               </span>
-              {sweep.message ? ` — ${sweep.message}` : ""}
-              {sweep.nf ? (
+              {prbSweep.message ? ` — ${prbSweep.message}` : ""}
+              {prbSweep.nf ? (
                 <>
                   {" "}
-                  · NF <code>{sweep.nf}</code>
+                  · <code>{prbSweep.nf}</code>
                 </>
               ) : null}
             </p>
@@ -639,18 +1252,18 @@ export default function BenchmarkPage() {
           <div className="actions" style={{ marginTop: 12 }}>
             <button
               type="button"
-              className={"primary" + (sweepRunning ? " is-running" : "")}
-              disabled={busy || sweepBusy || sweepRunning}
-              onClick={() => void onSweepStart()}
+              className={"primary" + (prbRunning ? " is-running" : "")}
+              disabled={busy || prbBusy || prbRunning || sweepRunning}
+              onClick={() => void onPrbStart()}
             >
-              <BtnProgress active={sweepRunning} />
+              <BtnProgress active={prbRunning} />
               Start
             </button>
             <button
               type="button"
               className="danger"
-              disabled={!sweepRunning && !sweepBusy}
-              onClick={() => void onSweepStop()}
+              disabled={!prbRunning && !prbBusy}
+              onClick={() => void onPrbStop()}
             >
               Stop
             </button>
@@ -660,21 +1273,23 @@ export default function BenchmarkPage() {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>CPU</th>
+                  <th>PRB</th>
                   <th>Phase</th>
                   <th>Start</th>
                   <th>Stop</th>
                 </tr>
               </thead>
               <tbody>
-                {(sweep?.step_list || []).length === 0 ? (
+                {(prbSweep?.step_list || []).length === 0 ? (
                   <tr>
                     <td colSpan={5}>
-                      <span className="hint">No run yet — Start to generate steps.</span>
+                      <span className="hint">
+                        No PRB run yet — Apply once or Start a max% sweep.
+                      </span>
                     </td>
                   </tr>
                 ) : (
-                  (sweep?.step_list || []).map((s) => (
+                  (prbSweep?.step_list || []).map((s) => (
                     <tr key={s.index}>
                       <td>{s.index + 1}</td>
                       <td>
@@ -698,6 +1313,8 @@ export default function BenchmarkPage() {
               </tbody>
             </table>
           </div>
+            </>
+          )}
         </Card>
 
         <div ref={consolePanelRef}>

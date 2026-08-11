@@ -1032,3 +1032,78 @@ class BenchmarkRunStopResponse(BaseModel):
     ok: bool
     message: str = ""
     status: Optional[BenchmarkRunStatusOut] = None
+
+
+class BenchmarkPrbSliceOut(BaseModel):
+    sst: int
+    sd: str
+    direction: str
+    dedicated: float
+    min: float
+    max: float
+
+
+class BenchmarkPrbSlicesOut(BaseModel):
+    ok: bool = True
+    xapp_url: str = ""
+    tstamp: Optional[int] = None
+    indications: Optional[int] = None
+    slices: List[BenchmarkPrbSliceOut] = Field(default_factory=list)
+    message: str = ""
+
+
+class BenchmarkPrbApplyRequest(BaseModel):
+    """One-shot NS PRB policy via near-RT RIC xApp (PATCH)."""
+
+    sst: int = Field(1, ge=0, le=255)
+    sd: str = Field("0x000001", description="Slice differentiator (hex)")
+    direction: str = Field("dl", description="dl or ul")
+    dedicated: float = Field(0.0, ge=0.0, le=100.0)
+    min_prb: float = Field(0.0, ge=0.0, le=100.0)
+    max_prb: float = Field(100.0, ge=0.0, le=100.0)
+
+
+class BenchmarkPrbApplyResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    applied: Optional[BenchmarkPrbSliceOut] = None
+    raw: Optional[dict] = None
+
+
+class BenchmarkPrbRunRequest(BaseModel):
+    """Sweep max PRB% via xApp; dedicated/min stay fixed (≤ each max step)."""
+
+    sst: int = Field(1, ge=0, le=255)
+    sd: str = Field("0x000001")
+    direction: str = Field("dl")
+    dedicated: float = Field(0.0, ge=0.0, le=100.0)
+    min_prb: float = Field(0.0, ge=0.0, le=100.0)
+    sweep_min: float = Field(10.0, ge=0.0, le=100.0, description="First max PRB%")
+    sweep_max: float = Field(100.0, ge=0.0, le=100.0, description="Last max PRB%")
+    prb_step: float = Field(10.0, gt=0.0, le=100.0)
+    step_sec: float = Field(120.0, ge=0.1)
+    warmup_sec: float = Field(60.0, ge=0.0)
+
+
+class BenchmarkPrbRunStatusOut(BaseModel):
+    id: Optional[int] = None
+    running: bool = False
+    status: str = "idle"
+    message: str = ""
+    operator_id: str = ""
+    nf: str = ""
+    sweep_min: float = 0.0
+    sweep_max: float = 0.0
+    steps: int = 0
+    step_sec: float = 0.0
+    warmup_sec: float = 0.0
+    current_index: Optional[int] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    step_list: List[BenchmarkStepOut] = Field(default_factory=list)
+
+
+class BenchmarkPrbStopResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    status: Optional[BenchmarkPrbRunStatusOut] = None

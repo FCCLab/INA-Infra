@@ -381,6 +381,8 @@ def stop_run() -> BenchmarkRunStopResponse:
 
 def status() -> BenchmarkRunStatusOut:
     st = benchmark_store.latest_run()
+    if st is not None and st.operator_id == "nws-xapp":
+        st = benchmark_store.latest_run_excluding_operator("nws-xapp")
     if st is None:
         return BenchmarkRunStatusOut()
     with _lock:

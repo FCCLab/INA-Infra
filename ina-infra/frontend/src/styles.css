@@ -536,6 +536,9 @@ body { font-size: 1rem; }
 .status-deploy-table table { font-size: 11px; }
 .status-deploy-table th,
 .status-deploy-table td { padding: 4px 6px; }
+.status-deploy-table tr.is-selected td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .actions button,
