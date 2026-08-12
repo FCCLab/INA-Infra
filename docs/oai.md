@@ -4,6 +4,8 @@ OpenAirInterface 5G deployment across workload clusters via Config Sync ([ip_pla
 
 **Primary slice stack (`oai-slice-deployment`):** shared OAI 5GC CP on **central**; **co-located UPF + CU-UP** per slice — slice1 **central**, slice2 **regional**, slices 3–5 **edge**; **CU-CP + DU + 5 nrUEs** on **edge `usrp`**. Render: [`scripts/render_oai_slice_deployment_gitops.sh`](../scripts/render_oai_slice_deployment_gitops.sh).
 
+**Benchmark stack (`oai-benchmark`):** dedicated CP + RAN + UPF + nrUE for CU-UP CPU / PRB throughput sweeps (n78 40 MHz TDD on `usrp`). See [oai-benchmark.md](oai-benchmark.md).
+
 ## OAI macvlan IP plan (`10.1.139.0/24`)
 
 Untagged **macvlan** on `enp7s0` (Multus NADs; **usrp** uses `enp4s0f0`). Node identity for **usrp** is site IP **`10.1.137.134/24`** on `enp4s0f0` ([`workloads/netplan/usrp/55-k8s.yaml`](../workloads/netplan/usrp/55-k8s.yaml)); not `10.1.137.13` (`br-int-ue`). For UPF N6 → mgmt (`10.1.132.0/24`), run [`scripts/setup_oai_n6_gw.sh`](../scripts/setup_oai_n6_gw.sh) on site CPs (**central-0**, **regional-0**, **edge-0**). Per-site GWs on shared L2: **`.1` / `.2` / `.3`**. Ping/throughput default to mgmt-0 **`10.1.132.200`**.

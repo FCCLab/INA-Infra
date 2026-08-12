@@ -5,6 +5,9 @@ iperf3 DL client → N3 server (single port, -P parallel streams).
 Controlled by ina-infra over WebSocket (`/api/v1/ues/ws`):
   declare → welcome + desired → hot-restart iperf on protocol/action changes.
 
+Desired controls protocol (udp|tcp), bandwidth, parallel, direction, etc.
+Port is chosen locally (failover on busy server) — not from desired.
+
 Default (UDP):
   iperf3 -c <server> -p <port> -u -R -P 5 -b 50M -t 0 -i 1
 
@@ -40,7 +43,7 @@ INTERVAL_RE = re.compile(
 )
 SUM_RE = re.compile(r"\[SUM\]", re.IGNORECASE)
 
-CLIENT_VERSION = "ws-ctrl-1"
+CLIENT_VERSION = "ws-ctrl-7"
 
 
 def parse_interval_line(line: str) -> Optional[Tuple[float, bool]]:
@@ -178,9 +181,9 @@ class ClientRunner:
             server = self.server
         else:
             server = str(server_in).strip()
-        port = int(desired.get("port") or self.port)
-        if port < 1 or port > 65535:
-            port = self.port
+        # Port is client-local (failover across PORT_START..PORT_START+COUNT).
+        # Never take port from desired — that caused restart loops when the
+        # client advanced past a busy server and API re-pushed the old port.
         reverse = (
             bool(desired["reverse"])
             if "reverse" in desired and desired["reverse"] is not None
@@ -203,56 +206,56 @@ class ClientRunner:
         gen = int(desired.get("generation") or 0)
 
         with self.lock:
-            if gen and gen == self.applied_generation and action != "stop":
-                cfg_same = (
-                    self.enabled == (action != "stop")
-                    and self.protocol == proto
-                    and self.parallel == parallel
-                    and self.bandwidth == bandwidth
-                    and self.tcp_bandwidth == tcp_bw
-                    and self.server == server
-                    and self.port == port
-                    and self.reverse == reverse
-                    and self.duration == duration
-                    and abs(self.sample_interval_s - interval) < 1e-9
+            # Seed/snapshot (gen 0) must not override a UI-applied config.
+            if gen <= 0 and self.applied_generation > 0 and action != "stop":
+                return (
+                    False,
+                    f"ignore seed gen={gen} (applied={self.applied_generation})",
                 )
-                if cfg_same:
-                    return False, f"gen={gen} already applied"
             changed = (
                 proto != self.protocol
                 or parallel != self.parallel
                 or bandwidth != self.bandwidth
                 or tcp_bw != self.tcp_bandwidth
                 or server != self.server
-                or port != self.port
                 or reverse != self.reverse
                 or duration != self.duration
                 or abs(self.sample_interval_s - interval) >= 1e-9
                 or (action == "stop" and self.enabled)
                 or (action in ("start", "set") and not self.enabled)
             )
+            # Same generation + same config = no-op (redeclare). Same generation
+            # but drifted live config (e.g. after a bad seed) → re-apply.
+            if (
+                gen
+                and gen == self.applied_generation
+                and action != "stop"
+                and not changed
+            ):
+                return False, f"gen={gen} already applied"
             self.protocol = proto
             self.parallel = parallel
             self.bandwidth = bandwidth
             self.tcp_bandwidth = tcp_bw
             self.server = server
-            self.port = port
-            self.port_min = port
             self.reverse = reverse
             self.duration = duration
             self.sample_interval_s = interval
             self.enabled = action != "stop"
-            self.applied_generation = gen
+            self.applied_generation = gen if gen > 0 else self.applied_generation
             self.status = "idle" if not self.enabled else self.status
 
-        if changed:
+        # Always kill on stop (even if already idle) so an orphan iperf cannot
+        # keep running after a missed earlier stop while WS was stuck.
+        if changed or action == "stop":
             self.reload.set()
             self._kill()
-            return (
-                True,
-                f"applied gen={gen} {proto} -P{parallel} "
-                f"{'DL' if reverse else 'UL'} action={action}",
-            )
+            if changed:
+                return (
+                    True,
+                    f"applied gen={gen} {proto} -P{parallel} "
+                    f"{'DL' if reverse else 'UL'} action={action}",
+                )
         return False, f"no-op gen={gen}"
 
     def _cmd(self) -> List[str]:
@@ -296,12 +299,30 @@ class ClientRunner:
         return cmd
 
     def _kill(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            self._proc.send_signal(signal.SIGTERM)
+        proc = self._proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
             try:
-                self._proc.wait(timeout=3)
+                proc.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                return
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    return
+            try:
+                proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                self._proc.kill()
+                pass
 
     def _should_log(self) -> bool:
         if self.log_interval_s <= 0:
@@ -371,6 +392,7 @@ class ClientRunner:
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
+                    start_new_session=True,
                 )
             except FileNotFoundError:
                 print("iperf3 binary not found", file=sys.stderr)
@@ -391,6 +413,7 @@ class ClientRunner:
                         stderr=subprocess.STDOUT,
                         text=True,
                         bufsize=1,
+                        start_new_session=True,
                     )
                 else:
                     raise
@@ -484,6 +507,27 @@ class ClientRunner:
                 continue
 
 
+def _ws_send(ws: Any, payload: dict, *, timeout: float = 2.0) -> bool:
+    """Send JSON with a short timeout so status cannot block Stop/desired."""
+    raw = json.dumps(payload)
+    try:
+        ws.send(raw, timeout=timeout)
+        return True
+    except TypeError:
+        try:
+            ws.send(raw)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ws] send failed: {exc}", flush=True)
+            return False
+    except TimeoutError:
+        print(f"[ws] send timeout ({timeout}s) — reconnecting", flush=True)
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ws] send failed: {exc}", flush=True)
+        return False
+
+
 def _ws_loop(
     ws_url: str,
     ue_id: str,
@@ -508,7 +552,20 @@ def _ws_loop(
     while not stop.is_set():
         try:
             print(f"[ws] connecting {ws_url}", flush=True)
-            with connect(ws_url, open_timeout=10, close_timeout=3) as ws:
+            # Disable library protocol pings: under UL load eth0 stalls and the
+            # keepalive thread dumps a ConnectionClosedError traceback, while
+            # Stop/desired was already blocked on the same socket. Health is
+            # from timed status sends below (reconnect → re-push desired).
+            try:
+                ws_cm = connect(
+                    ws_url,
+                    open_timeout=10,
+                    close_timeout=2,
+                    ping_interval=None,
+                )
+            except TypeError:
+                ws_cm = connect(ws_url, open_timeout=10, close_timeout=2)
+            with ws_cm as ws:
                 backoff = 1.0
                 snap = runner.snapshot()
                 declare = {
@@ -523,31 +580,90 @@ def _ws_loop(
                     "status": snap["status"],
                     "server": snap["server"],
                     "port": snap["port"],
+                    "bandwidth": snap["bandwidth"],
+                    "parallel": snap["parallel"],
+                    "tcp_bandwidth": snap["tcp_bandwidth"],
+                    "reverse": snap["reverse"],
                     "mbits_per_second": snap["mbits_per_second"],
                     "message": "websocket declare",
                 }
-                ws.send(json.dumps(declare))
+                if not _ws_send(ws, declare, timeout=5.0):
+                    raise TimeoutError("declare send failed")
                 last_status = 0.0
                 last_declare = time.monotonic()
 
                 while not stop.is_set():
-                    # Status / re-declare
+                    # Prefer recv so Stop/desired is never stuck behind status sends.
+                    try:
+                        raw = ws.recv(timeout=0.25)
+                    except TimeoutError:
+                        raw = None
+                    except Exception:
+                        break
+
+                    if raw is not None:
+                        try:
+                            msg = json.loads(raw)
+                        except json.JSONDecodeError:
+                            msg = None
+                        if isinstance(msg, dict):
+                            mtype = str(msg.get("type") or "").lower()
+                            if mtype == "desired":
+                                changed, note = runner.apply_desired(msg)
+                                snap = runner.snapshot()
+                                if not _ws_send(
+                                    ws,
+                                    {
+                                        "type": "apply_report",
+                                        "generation": int(
+                                            msg.get("generation") or 0
+                                        ),
+                                        "ok": True,
+                                        "message": note,
+                                        "protocol": snap["protocol"],
+                                        "status": snap["status"],
+                                    },
+                                    timeout=2.0,
+                                ):
+                                    break
+                                print(
+                                    f"[ws] desired → {note} (changed={changed})",
+                                    flush=True,
+                                )
+                            elif mtype == "welcome":
+                                print(
+                                    f"[ws] welcome id={msg.get('id')}",
+                                    flush=True,
+                                )
+                            elif mtype == "error":
+                                print(
+                                    f"[ws] error: {msg.get('message')}",
+                                    flush=True,
+                                )
+                            elif mtype in ("pong", "ping"):
+                                pass
+
                     now = time.monotonic()
                     if now - last_status >= 2.0:
                         snap = runner.snapshot()
-                        ws.send(
-                            json.dumps(
-                                {
-                                    "type": "status",
-                                    "protocol": snap["protocol"],
-                                    "status": snap["status"],
-                                    "server": snap["server"],
-                                    "port": snap["port"],
-                                    "mbits_per_second": snap["mbits_per_second"],
-                                    "message": "",
-                                }
-                            )
-                        )
+                        if not _ws_send(
+                            ws,
+                            {
+                                "type": "status",
+                                "protocol": snap["protocol"],
+                                "status": snap["status"],
+                                "server": snap["server"],
+                                "port": snap["port"],
+                                "bandwidth": snap["bandwidth"],
+                                "parallel": snap["parallel"],
+                                "tcp_bandwidth": snap["tcp_bandwidth"],
+                                "reverse": snap["reverse"],
+                                "mbits_per_second": snap["mbits_per_second"],
+                                "message": "",
+                            },
+                            timeout=1.0,
+                        ):
+                            break
                         last_status = now
                     if now - last_declare >= 15.0:
                         snap = runner.snapshot()
@@ -557,53 +673,21 @@ def _ws_loop(
                                 "status": snap["status"],
                                 "server": snap["server"],
                                 "port": snap["port"],
+                                "bandwidth": snap["bandwidth"],
+                                "parallel": snap["parallel"],
+                                "tcp_bandwidth": snap["tcp_bandwidth"],
+                                "reverse": snap["reverse"],
                                 "mbits_per_second": snap["mbits_per_second"],
                                 "message": "websocket redeclare",
                             }
                         )
-                        ws.send(json.dumps(declare))
+                        if not _ws_send(ws, declare, timeout=1.0):
+                            break
                         last_declare = now
-
-                    try:
-                        raw = ws.recv(timeout=0.5)
-                    except TimeoutError:
-                        continue
-                    except Exception:
-                        break
-
-                    try:
-                        msg = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(msg, dict):
-                        continue
-                    mtype = str(msg.get("type") or "").lower()
-                    if mtype == "desired":
-                        changed, note = runner.apply_desired(msg)
-                        snap = runner.snapshot()
-                        ws.send(
-                            json.dumps(
-                                {
-                                    "type": "apply_report",
-                                    "generation": int(msg.get("generation") or 0),
-                                    "ok": True,
-                                    "message": note,
-                                    "protocol": snap["protocol"],
-                                    "status": snap["status"],
-                                }
-                            )
-                        )
-                        print(f"[ws] desired → {note} (changed={changed})", flush=True)
-                    elif mtype == "welcome":
-                        print(f"[ws] welcome id={msg.get('id')}", flush=True)
-                    elif mtype == "pong":
-                        pass
-                    elif mtype == "error":
-                        print(f"[ws] error: {msg.get('message')}", flush=True)
-                    elif mtype == "ping":
-                        ws.send(json.dumps({"type": "ping"}))
         except Exception as exc:  # noqa: BLE001
-            print(f"[ws] disconnected: {exc}", flush=True)
+            # One-line notice — library keepalive used to dump a full traceback.
+            msg = str(exc).split("\n", 1)[0].strip() or exc.__class__.__name__
+            print(f"[ws] disconnected: {msg}", flush=True)
         if stop.wait(backoff):
             break
         backoff = min(backoff * 2, 30.0)

@@ -6,7 +6,7 @@ RUN apt-get update \
         iproute2 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir "websockets>=12,<14"
+    && pip install --no-cache-dir "websockets>=15,<17"
 
 WORKDIR /app
 COPY influx_writer.py server.py client.py client_entrypoint.sh ./

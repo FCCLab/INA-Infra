@@ -8,6 +8,9 @@ PRB max% sweep (near-RT RIC). Naming (direction_proto postfix):
 Default (no args): process **all** ``timestamps_*.csv`` → matching ``data_<tag>/``.
 Single run: ``--tag dl_udp`` or ``--csv timestamps_dl_udp.csv``.
 
+Existing ``step_*.npz`` / ``summary.npz`` are left untouched (skipped).
+Use ``--force`` to re-query Influx and overwrite.
+
 Writes under ``data_<tag>/`` (gitignored):
 
   data_dl_udp/step_01_5pct.npz  # t_unix_s, client_mbps, server_mbps, …
@@ -385,6 +388,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="comma-separated Influx role tags to pull",
     )
     p.add_argument("--step", type=int, default=0, help="only download this step # (0=all)")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing step_*.npz / summary.npz (default: skip)",
+    )
     args = p.parse_args(argv)
 
     try:
@@ -420,8 +428,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"CSV {csv_path.name} → {out_dir} ({len(steps)} steps)")
 
-        summary_rows: List[Dict[str, float]] = []
+        downloaded = 0
+        skipped = 0
         for step in steps:
+            path = out_dir / f"{step.stem}.npz"
+            if path.is_file() and not args.force:
+                skipped += 1
+                print(f"  {path.name}: skip (exists)")
+                continue
+
             t_c = y_c = t_s = y_s = np.array([], dtype=np.float64)
             if want_client:
                 t_c, y_c = query_role_mbps(
@@ -447,6 +462,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
             t, client, server = align_series(t_c, y_c, t_s, y_s)
             path = save_step(out_dir, step, t, client, server)
+            downloaded += 1
             c_mean = (
                 float(np.nanmean(client))
                 if client.size and np.any(~np.isnan(client))
@@ -462,31 +478,62 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"client_mean={c_mean:.2f} Mbps server_mean={s_mean:.2f} Mbps "
                 f"({step.start.astimezone(tz):%H:%M:%S}–{step.stop.astimezone(tz):%H:%M:%S})"
             )
-            summary_rows.append(
-                {
-                    "step": step.step,
-                    "prb_pct": parse_prb_pct(step.prb),
-                    "n": float(t.size),
-                    "client_mean_mbps": c_mean,
-                    "client_p50_mbps": float(np.nanmedian(client))
-                    if client.size
-                    else float("nan"),
-                    "server_mean_mbps": s_mean,
-                    "server_p50_mbps": float(np.nanmedian(server))
-                    if server.size
-                    else float("nan"),
-                    "start_unix_s": step.start.timestamp(),
-                    "stop_unix_s": step.stop.timestamp(),
-                }
-            )
 
-        if summary_rows:
-            keys = list(summary_rows[0].keys())
-            packed = {k: np.asarray([row[k] for row in summary_rows]) for k in keys}
-            prb_labels = np.asarray([s.prb for s in steps])
-            summary_path = out_dir / "summary.npz"
-            np.savez_compressed(summary_path, prb=prb_labels, **packed)
-            print(f"Wrote {summary_path}")
+        summary_path = out_dir / "summary.npz"
+        if summary_path.is_file() and not args.force:
+            print(
+                f"  summary.npz: skip (exists; "
+                f"downloaded {downloaded}, skipped {skipped})"
+            )
+        else:
+            summary_rows: List[Dict[str, float]] = []
+            prb_labels: List[str] = []
+            for step in steps:
+                path = out_dir / f"{step.stem}.npz"
+                if not path.is_file():
+                    continue
+                z = np.load(path)
+                client = z["client_mbps"]
+                server = z["server_mbps"]
+                c_mean = (
+                    float(np.nanmean(client))
+                    if client.size and np.any(~np.isnan(client))
+                    else float("nan")
+                )
+                s_mean = (
+                    float(np.nanmean(server))
+                    if server.size and np.any(~np.isnan(server))
+                    else float("nan")
+                )
+                prb_labels.append(step.prb)
+                summary_rows.append(
+                    {
+                        "step": step.step,
+                        "prb_pct": parse_prb_pct(step.prb),
+                        "n": float(z["t_unix_s"].size),
+                        "client_mean_mbps": c_mean,
+                        "client_p50_mbps": float(np.nanmedian(client))
+                        if client.size
+                        else float("nan"),
+                        "server_mean_mbps": s_mean,
+                        "server_p50_mbps": float(np.nanmedian(server))
+                        if server.size
+                        else float("nan"),
+                        "start_unix_s": float(z["start_unix_s"]),
+                        "stop_unix_s": float(z["stop_unix_s"]),
+                    }
+                )
+            if summary_rows:
+                keys = list(summary_rows[0].keys())
+                packed = {
+                    k: np.asarray([row[k] for row in summary_rows]) for k in keys
+                }
+                np.savez_compressed(
+                    summary_path, prb=np.asarray(prb_labels), **packed
+                )
+                print(f"Wrote {summary_path}")
+            else:
+                print("  summary.npz: skip (no step files)")
 
     return 0
 

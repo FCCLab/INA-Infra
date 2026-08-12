@@ -262,7 +262,6 @@ export type UeDesiredOut = {
   parallel: number;
   tcp_bandwidth: string;
   server: string;
-  port: number;
   reverse: boolean;
   duration: number;
   interval: number;
@@ -305,7 +304,6 @@ export type UeDesiredRequest = {
   parallel?: number | null;
   tcp_bandwidth?: string | null;
   server?: string | null;
-  port?: number | null;
   reverse?: boolean | null;
   duration?: number | null;
   interval?: number | null;

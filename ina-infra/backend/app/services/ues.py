@@ -26,6 +26,8 @@ STALE_AFTER_SEC = 30
 _lock = threading.RLock()
 _ues: Dict[str, dict] = {}
 _ws: Dict[str, Tuple[asyncio.AbstractEventLoop, "asyncio.Queue[dict]"]] = {}
+# Survives prune/offline so reconnect does not wipe UI-applied desired.
+_desired_cache: Dict[str, dict] = {}
 
 _DEFAULT_DESIRED: Dict[str, Any] = {
     "protocol": "udp",
@@ -34,7 +36,6 @@ _DEFAULT_DESIRED: Dict[str, Any] = {
     "parallel": 5,
     "tcp_bandwidth": "",
     "server": "",
-    "port": 5210,
     "reverse": True,
     "duration": 0,
     "interval": 1.0,
@@ -67,8 +68,16 @@ def _is_online(cur: dict, now: Optional[datetime] = None) -> bool:
 
 
 def _prune_stale_locked(now: Optional[datetime] = None) -> None:
+    """Drop offline agents from the live map, but keep their desired config.
+
+    Reconnect restores that desired instead of reseeding DL defaults.
+    """
     now = now or datetime.now(timezone.utc)
     for uid in [uid for uid, cur in _ues.items() if not _is_online(cur, now)]:
+        cur = _ues.get(uid) or {}
+        desired = cur.get("desired")
+        if isinstance(desired, dict) and int(desired.get("generation") or 0) > 0:
+            _desired_cache[uid] = dict(desired)
         _ws.pop(uid, None)
         _ues.pop(uid, None)
 
@@ -91,6 +100,8 @@ def _desired_dict(raw: Optional[dict] = None) -> Dict[str, Any]:
     out = dict(_DEFAULT_DESIRED)
     if raw:
         out.update(raw)
+    # Port is client-local; never keep it in desired.
+    out.pop("port", None)
     return out
 
 
@@ -103,7 +114,6 @@ def _desired_out(raw: Optional[dict]) -> UeDesiredOut:
         parallel=int(d.get("parallel") or 5),
         tcp_bandwidth=str(d.get("tcp_bandwidth") or ""),
         server=str(d.get("server") or ""),
-        port=int(d.get("port") or 5210),
         reverse=bool(d.get("reverse", True)),
         duration=int(d.get("duration") or 0),
         interval=float(d.get("interval") or 1.0),
@@ -156,25 +166,51 @@ def push_desired(ue_id: str) -> None:
 
 
 def _seed_desired_locked(cur: dict, body: UeDeclare) -> None:
-    """Keep UI-set desired across reconnect; otherwise seed from declare."""
+    """Keep UI-set desired across reconnect; otherwise seed from live declare.
+
+    Never invent DL defaults over a live UL/TCP session — use the agent's
+    reported protocol / reverse / bandwidth / parallel when seeding.
+    """
     prev = cur.get("desired")
     if isinstance(prev, dict) and int(prev.get("generation") or 0) > 0:
         return
-    cur["desired"] = _desired_dict(
-        {
-            "protocol": normalize_protocol(body.protocol or "udp"),
-            "action": "start",
-            "server": body.server or "",
-            "port": int(body.port or 5210) or 5210,
-            "generation": 0,
-            "updated_at": _now(),
-        }
-    )
+    cached = _desired_cache.get(cur["id"])
+    if isinstance(cached, dict) and int(cached.get("generation") or 0) > 0:
+        cur["desired"] = _desired_dict(cached)
+        return
+    action = "start"
+    if body.status and str(body.status).strip().lower() in ("idle", "stopped"):
+        action = "stop"
+    seed: Dict[str, Any] = {
+        "protocol": normalize_protocol(body.protocol or "udp"),
+        "action": action,
+        "server": body.server or "",
+        "generation": 0,
+        "updated_at": _now(),
+    }
+    if body.bandwidth is not None and str(body.bandwidth).strip() != "":
+        seed["bandwidth"] = str(body.bandwidth).strip()
+    if body.parallel is not None and int(body.parallel) >= 1:
+        seed["parallel"] = int(body.parallel)
+    if body.tcp_bandwidth is not None:
+        seed["tcp_bandwidth"] = str(body.tcp_bandwidth)
+    if body.reverse is not None:
+        seed["reverse"] = bool(body.reverse)
+    cur["desired"] = _desired_dict(seed)
 
 
 def register(body: UeDeclare) -> UeOut:
     with _lock:
         cur = _ues.get(body.id) or {"id": body.id}
+        # Prefer cached UI desired over a gen-0 seed left from a prior session.
+        cached = _desired_cache.get(body.id)
+        prev_gen = int((cur.get("desired") or {}).get("generation") or 0)
+        if (
+            isinstance(cached, dict)
+            and int(cached.get("generation") or 0) > 0
+            and prev_gen <= 0
+        ):
+            cur["desired"] = dict(cached)
         cur.update(
             {
                 "id": body.id,
@@ -199,8 +235,13 @@ def register(body: UeDeclare) -> UeOut:
             }
         )
         _seed_desired_locked(cur, body)
+        # Refresh cache whenever we have a real desired.
+        des = cur.get("desired")
+        if isinstance(des, dict) and int(des.get("generation") or 0) > 0:
+            _desired_cache[body.id] = dict(des)
         _ues[body.id] = cur
         out = _to_out(cur)
+    # Always re-push desired on declare/reconnect so the agent re-syncs.
     push_desired(body.id)
     return out
 
@@ -288,9 +329,6 @@ def set_desired(body: UeDesiredRequest) -> UeDesiredOut:
             if body.server is not None
             else str(prev.get("server") or "")
         )
-        port = (
-            int(body.port) if body.port is not None else int(prev.get("port") or 5210)
-        )
         reverse = (
             bool(body.reverse)
             if body.reverse is not None
@@ -314,7 +352,6 @@ def set_desired(body: UeDesiredRequest) -> UeDesiredOut:
             "parallel": max(1, parallel),
             "tcp_bandwidth": tcp_bw,
             "server": server,
-            "port": max(1, min(65535, port)),
             "reverse": reverse,
             "duration": max(0, duration),
             "interval": max(0.1, min(60.0, interval)),
@@ -322,6 +359,7 @@ def set_desired(body: UeDesiredRequest) -> UeDesiredOut:
             "updated_at": _now(),
         }
         cur["desired"] = merged
+        _desired_cache[ue_id] = dict(merged)
         out = _desired_out(merged)
 
     push_desired(ue_id)
@@ -355,6 +393,7 @@ def get_ue(ue_id: str) -> UeOut:
 def delete_ue(ue_id: str) -> bool:
     with _lock:
         _ws.pop(ue_id, None)
+        _desired_cache.pop(ue_id, None)
         return _ues.pop(ue_id, None) is not None
 
 

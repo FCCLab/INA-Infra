@@ -348,8 +348,10 @@ export default function OperatorsPage() {
                 connects.
               </p>
               <p>
-                Set <code>INA_INFRA_API_URL</code> on{" "}
-                <code>oai-ran-operator</code> and restart if nothing shows up.
+                The pane is empty after an API reload until{" "}
+                <code>oai-ran-operator</code> reconnects (usually a few
+                seconds). If it stays empty, check{" "}
+                <code>INA_INFRA_API_URL</code> on that deployment.
               </p>
             </div>
           ) : (

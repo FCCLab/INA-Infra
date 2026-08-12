@@ -983,11 +983,11 @@ class BenchmarkUndeployResponse(BaseModel):
 class BenchmarkRunRequest(BaseModel):
     """CPU sweep on oai-benchmark (Operators agent apply per step)."""
 
-    min_cpu: str = Field("50m", description="Lowest CPU (request=limit) for step 1")
-    max_cpu: str = Field("1000m", description="Highest CPU; always included as last step")
+    min_cpu: str = Field("20m", description="Lowest CPU (request=limit) for step 1")
+    max_cpu: str = Field("600m", description="Highest CPU; always included as last step")
     cpu_step: str = Field(
-        "50m",
-        description="CPU increment (default 50m, 100m, … 1000m)",
+        "20m",
+        description="CPU increment (default 20m, 40m, … 600m)",
     )
     step_sec: float = Field(
         120.0, ge=0.1, description="Measure window length per step (seconds)"
@@ -1072,6 +1072,11 @@ class UeDeclare(BaseModel):
     status: str = "idle"
     server: str = ""
     port: int = 0
+    # Live runner snapshot — used to seed desired on reconnect without wiping UL/TCP.
+    bandwidth: Optional[str] = None
+    parallel: Optional[int] = Field(None, ge=1, le=64)
+    tcp_bandwidth: Optional[str] = None
+    reverse: Optional[bool] = None
     mbits_per_second: Optional[float] = None
     message: str = ""
 
@@ -1085,7 +1090,11 @@ class UeApplyReport(BaseModel):
 
 
 class UeDesiredRequest(BaseModel):
-    """HTTP control → pushed as WS ``desired`` to one connected UE."""
+    """HTTP control → pushed as WS ``desired`` to one connected UE.
+
+    Protocol is ``udp`` or ``tcp``. Port is not controlled here — the UE client
+    picks/fails over ports locally.
+    """
 
     id: str = Field(..., min_length=1, description="Target UE agent id (required)")
     protocol: Optional[str] = Field(None, description="udp or tcp")
@@ -1101,7 +1110,6 @@ class UeDesiredRequest(BaseModel):
     server: Optional[str] = Field(
         None, description="iperf3 server IP (UPF N3); omit = keep current"
     )
-    port: Optional[int] = Field(None, ge=1, le=65535, description="iperf3 -p")
     reverse: Optional[bool] = Field(
         None, description="True = DL (-R server→UE); False = UL"
     )
@@ -1120,7 +1128,6 @@ class UeDesiredOut(BaseModel):
     parallel: int = 5
     tcp_bandwidth: str = ""
     server: str = ""
-    port: int = 5210
     reverse: bool = True
     duration: int = 0
     interval: float = 1.0

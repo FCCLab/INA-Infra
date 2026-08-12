@@ -82,3 +82,51 @@ def test_register_and_list():
     ids = {u.id for u in listed.ues}
     assert "test-ue-1" in ids
     ues.delete_ue("test-ue-1")
+
+
+def test_desired_survives_prune_and_reconnect():
+    ues.register(
+        UeDeclare(
+            id="ue-keep",
+            protocol="udp",
+            status="running",
+            server="10.1.139.35",
+            reverse=False,
+            bandwidth="25M",
+            parallel=5,
+        )
+    )
+    d = ues.set_desired(
+        UeDesiredRequest(
+            id="ue-keep",
+            protocol="udp",
+            action="start",
+            reverse=False,
+            bandwidth="25M",
+            parallel=5,
+        )
+    )
+    assert d.generation == 1 and d.reverse is False
+    with ues._lock:
+        cur = ues._ues["ue-keep"]
+        cur["ws_connected"] = False
+        cur["last_seen"] = "2000-01-01T00:00:00+00:00"
+        ues._prune_stale_locked()
+    assert "ue-keep" not in ues._ues
+    # Reconnect declare reports DL defaults — cached UL desired must win.
+    out = ues.register(
+        UeDeclare(
+            id="ue-keep",
+            protocol="udp",
+            status="running",
+            server="10.1.139.35",
+            reverse=True,
+            bandwidth="50M",
+            parallel=5,
+        )
+    )
+    assert out.desired is not None
+    assert out.desired.generation == 1
+    assert out.desired.reverse is False
+    assert out.desired.bandwidth == "25M"
+    ues.delete_ue("ue-keep")

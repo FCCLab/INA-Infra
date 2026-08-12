@@ -168,7 +168,6 @@ export default function BenchmarkPage() {
   const [iperfParallel, setIperfParallel] = useState(5);
   const [iperfTcpBw, setIperfTcpBw] = useState("");
   const [iperfServer, setIperfServer] = useState("");
-  const [iperfPort, setIperfPort] = useState(5210);
   const [iperfReverse, setIperfReverse] = useState(true);
   const [iperfDuration, setIperfDuration] = useState(0);
   const [iperfInterval, setIperfInterval] = useState(1);
@@ -188,9 +187,9 @@ export default function BenchmarkPage() {
   const [clusterError, setClusterError] = useState<string | null>(null);
   const [clusterBusy, setClusterBusy] = useState(false);
 
-  const [minCpu, setMinCpu] = useState("50m");
-  const [maxCpu, setMaxCpu] = useState("1000m");
-  const [cpuStep, setCpuStep] = useState("50m");
+  const [minCpu, setMinCpu] = useState("20m");
+  const [maxCpu, setMaxCpu] = useState("600m");
+  const [cpuStep, setCpuStep] = useState("20m");
   const [stepSec, setStepSec] = useState(120);
   const [warmupSec, setWarmupSec] = useState(60);
   const [sweep, setSweep] = useState<BenchmarkRunStatusOut | null>(null);
@@ -232,7 +231,6 @@ export default function BenchmarkPage() {
     setIperfParallel(Number(d?.parallel) || 5);
     setIperfTcpBw(d?.tcp_bandwidth || "");
     setIperfServer(d?.server || u.server || "");
-    setIperfPort(Number(d?.port) || u.port || 5210);
     setIperfReverse(d?.reverse !== false);
     setIperfDuration(Number(d?.duration) || 0);
     setIperfInterval(Number(d?.interval) || 1);
@@ -283,30 +281,26 @@ export default function BenchmarkPage() {
   }, []);
 
   const applyIperfDesired = useCallback(
-    async (action: "start" | "stop" | "set", protocol?: "udp" | "tcp") => {
+    async (action: "start" | "stop" | "set") => {
       if (trafficBusyRef.current) return;
       const ueId = selectedUeIdRef.current;
       if (!ueId) {
         setTrafficError("Select a connected UE first");
         return;
       }
-      const nextProto = protocol ?? trafficProto;
-      const prev = trafficProto;
       trafficBusyRef.current = true;
       setTrafficBusy(true);
       setTrafficError(null);
       setTrafficMsg(null);
-      if (protocol) setTrafficProto(protocol);
       try {
         const out = await api.setUeDesired({
           id: ueId,
-          protocol: nextProto,
+          protocol: trafficProto,
           action,
           bandwidth: iperfBw.trim() || "50M",
           parallel: Number(iperfParallel) || 5,
           tcp_bandwidth: iperfTcpBw.trim(),
           server: iperfServer.trim() || null,
-          port: Number(iperfPort) || 5210,
           reverse: iperfReverse,
           duration: Number(iperfDuration) || 0,
           interval: Number(iperfInterval) || 1,
@@ -314,13 +308,12 @@ export default function BenchmarkPage() {
         setTrafficMsg(
           `${ueId}: ${out.action} ${out.protocol.toUpperCase()} -P${out.parallel} ` +
             `gen=${out.generation}` +
-            (out.server ? ` @${out.server}:${out.port}` : ` :${out.port}`),
+            (out.server ? ` @${out.server}` : ""),
         );
-        const live = (out.protocol || nextProto).toLowerCase();
+        const live = (out.protocol || trafficProto).toLowerCase();
         if (live === "tcp" || live === "udp") setTrafficProto(live);
         await refreshUes();
       } catch (e) {
-        if (protocol) setTrafficProto(prev);
         setTrafficError(e instanceof Error ? e.message : String(e));
       } finally {
         trafficBusyRef.current = false;
@@ -333,20 +326,11 @@ export default function BenchmarkPage() {
       iperfParallel,
       iperfTcpBw,
       iperfServer,
-      iperfPort,
       iperfReverse,
       iperfDuration,
       iperfInterval,
       refreshUes,
     ],
-  );
-
-  const onTrafficSelect = useCallback(
-    async (next: "udp" | "tcp") => {
-      if (next === trafficProto && !trafficError) return;
-      await applyIperfDesired("start", next);
-    },
-    [trafficProto, trafficError, applyIperfDesired],
   );
 
   const prbSliceKey = useCallback(
@@ -708,7 +692,7 @@ export default function BenchmarkPage() {
       const st = await api.benchmarkRunStart({
         min_cpu: minCpu.trim(),
         max_cpu: maxCpu.trim(),
-        cpu_step: cpuStep.trim() || "50m",
+        cpu_step: cpuStep.trim() || "20m",
         step_sec: Number(stepSec) || 1,
         warmup_sec: Number(warmupSec) || 0,
         operator_id: op.id,
@@ -991,66 +975,6 @@ export default function BenchmarkPage() {
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <div className="ue-iperf-head">
-                                  <div className="ue-iperf-head-left">
-                                    <div
-                                      className="place-chips ue-iperf-proto"
-                                      role="group"
-                                      aria-label="Traffic type"
-                                    >
-                                      <button
-                                        type="button"
-                                        className={
-                                          trafficProto === "udp"
-                                            ? "primary"
-                                            : undefined
-                                        }
-                                        aria-pressed={trafficProto === "udp"}
-                                        disabled={
-                                          busy ||
-                                          trafficBusy ||
-                                          sweepRunning ||
-                                          prbRunning
-                                        }
-                                        onClick={() =>
-                                          void onTrafficSelect("udp")
-                                        }
-                                        title="iperf3 UDP"
-                                      >
-                                        <BtnProgress
-                                          active={
-                                            trafficBusy && trafficProto === "udp"
-                                          }
-                                        />
-                                        UDP
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className={
-                                          trafficProto === "tcp"
-                                            ? "primary"
-                                            : undefined
-                                        }
-                                        aria-pressed={trafficProto === "tcp"}
-                                        disabled={
-                                          busy ||
-                                          trafficBusy ||
-                                          sweepRunning ||
-                                          prbRunning
-                                        }
-                                        onClick={() =>
-                                          void onTrafficSelect("tcp")
-                                        }
-                                        title="iperf3 TCP"
-                                      >
-                                        <BtnProgress
-                                          active={
-                                            trafficBusy && trafficProto === "tcp"
-                                          }
-                                        />
-                                        TCP
-                                      </button>
-                                    </div>
-                                  </div>
                                   <div className="actions">
                                     <button
                                       type="button"
@@ -1096,6 +1020,25 @@ export default function BenchmarkPage() {
                                   </div>
                                 </div>
                                 <div className="ue-iperf-grid">
+                                  <FieldHelp
+                                    label="Protocol"
+                                    help="iperf3 UDP (-u) or TCP."
+                                  >
+                                    <select
+                                      value={trafficProto}
+                                      disabled={busy || trafficBusy}
+                                      onChange={(e) =>
+                                        setTrafficProto(
+                                          e.target.value === "tcp"
+                                            ? "tcp"
+                                            : "udp",
+                                        )
+                                      }
+                                    >
+                                      <option value="udp">UDP</option>
+                                      <option value="tcp">TCP</option>
+                                    </select>
+                                  </FieldHelp>
                                   <FieldHelp
                                     label="Bandwidth"
                                     help="UDP -b per stream (ignored for unlimited TCP)."
@@ -1161,7 +1104,7 @@ export default function BenchmarkPage() {
                                   </FieldHelp>
                                   <FieldHelp
                                     label="Server"
-                                    help="iperf3 -c (UPF N3). Empty = keep current."
+                                    help="iperf3 -c (UPF N3). Empty = keep current. Port is chosen by the UE client."
                                   >
                                     <input
                                       value={iperfServer}
@@ -1169,18 +1112,6 @@ export default function BenchmarkPage() {
                                       disabled={busy || trafficBusy}
                                       onChange={(e) =>
                                         setIperfServer(e.target.value)
-                                      }
-                                    />
-                                  </FieldHelp>
-                                  <FieldHelp label="Port" help="iperf3 -p">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      max={65535}
-                                      value={iperfPort}
-                                      disabled={busy || trafficBusy}
-                                      onChange={(e) =>
-                                        setIperfPort(Number(e.target.value))
                                       }
                                     />
                                   </FieldHelp>
@@ -1274,14 +1205,14 @@ export default function BenchmarkPage() {
                 <code>logs/benchmark.log</code>.
               </p>
               <div className="profile-grid" style={{ marginTop: 12 }}>
-                <FieldHelp label="Min CPU" help="Lowest CPU for step 1 (default 50m).">
+                <FieldHelp label="Min CPU" help="Lowest CPU for step 1 (default 20m).">
                   <input
                     value={minCpu}
                     disabled={sweepRunning || sweepBusy || busy}
                     onChange={(e) => setMinCpu(e.target.value)}
                   />
                 </FieldHelp>
-                <FieldHelp label="Max CPU" help="Highest CPU; always included (default 1000m).">
+                <FieldHelp label="Max CPU" help="Highest CPU; always included (default 600m).">
                   <input
                     value={maxCpu}
                     disabled={sweepRunning || sweepBusy || busy}
@@ -1290,7 +1221,7 @@ export default function BenchmarkPage() {
                 </FieldHelp>
                 <FieldHelp
                   label="CPU step"
-                  help="Increment. Default 50m → 50m, 100m, 150m, … 1000m."
+                  help="Increment. Default 20m → 20m, 40m, … 600m."
                 >
                   <input
                     value={cpuStep}
