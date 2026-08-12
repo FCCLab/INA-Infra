@@ -10,8 +10,13 @@ import threading
 import time
 from typing import List, Optional, Tuple
 
-from app.schemas import BenchmarkPrbRunRequest, BenchmarkPrbRunStatusOut, BenchmarkPrbStopResponse
-from app.services import benchmark_log, benchmark_store, xapp_prb
+from app.schemas import (
+    BenchmarkPrbRunRequest,
+    BenchmarkPrbRunStatusOut,
+    BenchmarkPrbStopResponse,
+    UeDesiredRequest,
+)
+from app.services import benchmark_log, benchmark_store, ues, xapp_prb
 
 _lock = threading.Lock()
 _cancel = threading.Event()
@@ -40,6 +45,32 @@ def prb_steps(min_prb: float, max_prb: float, prb_step: float) -> List[float]:
 
 def _fmt(level: float) -> str:
     return f"{level:g}%"
+
+
+def normalize_direction(raw: str) -> str:
+    d = (raw or "dl").strip().lower()
+    if d not in ("dl", "ul"):
+        raise ValueError(f"direction must be dl or ul, got: {raw!r}")
+    return d
+
+
+def ensure_traffic_direction(direction: str) -> str:
+    """Align connected UE iperf reverse with PRB direction (dl→-R, ul→no -R)."""
+    direction = normalize_direction(direction)
+    reverse = direction == "dl"
+    listed = ues.list_ues()
+    online = [u for u in listed.ues if u.online]
+    if not online:
+        return "no UE online — leave traffic as-is"
+    notes: List[str] = []
+    for u in online:
+        d = ues.set_desired(
+            UeDesiredRequest(id=u.id, action="start", reverse=reverse)
+        )
+        notes.append(
+            f"{u.id} {direction} reverse={d.reverse} gen={d.generation}"
+        )
+    return "; ".join(notes)
 
 
 def _interruptible_sleep(seconds: float, cancel: threading.Event) -> bool:
@@ -163,6 +194,23 @@ def sample_throughput_mbps() -> Optional[float]:
 
 def _worker(run_id: int, req: BenchmarkPrbRunRequest, levels: List[float]) -> None:
     try:
+        try:
+            traffic_note = ensure_traffic_direction(req.direction)
+            benchmark_log.write(
+                f"prb run {run_id} traffic: {traffic_note}", source="prb"
+            )
+        except Exception as exc:  # noqa: BLE001
+            benchmark_log.write(
+                f"prb run {run_id} traffic direction failed: {exc}", source="prb"
+            )
+            benchmark_store.update_run(
+                run_id,
+                status="error",
+                message=f"traffic direction: {exc}",
+                finished=True,
+            )
+            return
+
         for i, level in enumerate(levels):
             if _cancel.is_set():
                 benchmark_store.update_step(
@@ -308,6 +356,8 @@ def _worker(run_id: int, req: BenchmarkPrbRunRequest, levels: List[float]) -> No
 
 def start_run(req: BenchmarkPrbRunRequest) -> BenchmarkPrbRunStatusOut:
     global _thread, _active_id
+    direction = normalize_direction(req.direction)
+    req = req.model_copy(update={"direction": direction})
     levels = prb_steps(req.sweep_min, req.sweep_max, req.prb_step)
     if req.dedicated > req.min_prb:
         raise ValueError("dedicated must be ≤ min_prb")
@@ -330,7 +380,7 @@ def start_run(req: BenchmarkPrbRunRequest) -> BenchmarkPrbRunStatusOut:
         _cancel.clear()
         run_id = benchmark_store.create_run(
             operator_id="nws-xapp",
-            nf=f"sst={req.sst}/sd={xapp_prb.normalize_sd(req.sd)}/{req.direction}",
+            nf=f"sst={req.sst}/sd={xapp_prb.normalize_sd(req.sd)}/{direction}",
             min_cpu=str(req.sweep_min),
             max_cpu=str(req.sweep_max),
             steps=len(levels),
@@ -350,7 +400,7 @@ def start_run(req: BenchmarkPrbRunRequest) -> BenchmarkPrbRunStatusOut:
     benchmark_log.write(
         f"prb run {run_id} start levels={','.join(labels)} "
         f"ded/min={req.dedicated:g}/{req.min_prb:g} "
-        f"sst={req.sst} sd={req.sd} dir={req.direction} "
+        f"sst={req.sst} sd={req.sd} dir={direction} "
         f"xapp={xapp_prb.xapp_base_url()}",
         source="prb",
     )

@@ -73,6 +73,17 @@ kubectl --context edge@edge -n oai-benchmark get cm oai-du-configmap -o jsonpath
 | Measure window | ~**120 s** per step (`timestamps_*.csv` Start/Stop) |
 | Control plane | UE → `INA_INFRA_API_URL` (`ws://…/api/v1/ues/ws`); CU-UP CPU → Operators WS |
 
+## PRB max% sweep
+
+Near-RT RIC xApp NS ratios (`dedicated` / `min` / `max` %). **Direction** is
+**dl** or **ul**:
+
+- Selects the matching xApp PRB policy entry
+- On Apply / Start, sets UE iperf **reverse** (`dl` → `-R`, `ul` → no reverse)
+
+Run DL and UL sweeps separately (pick Direction, then Start). Results tags are
+typically `dl_*` / `ul_*` under `results/prb-benchmark/`.
+
 ## Results pipeline
 
 ```text

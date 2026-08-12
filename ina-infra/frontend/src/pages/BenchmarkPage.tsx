@@ -204,9 +204,9 @@ export default function BenchmarkPage() {
   const [prbDedicated, setPrbDedicated] = useState(0);
   const [prbMin, setPrbMin] = useState(0);
   const [prbMax, setPrbMax] = useState(100);
-  const [prbSweepMin, setPrbSweepMin] = useState(10);
+  const [prbSweepMin, setPrbSweepMin] = useState(5);
   const [prbSweepMax, setPrbSweepMax] = useState(100);
-  const [prbStep, setPrbStep] = useState(10);
+  const [prbStep, setPrbStep] = useState(5);
   const [prbStepSec, setPrbStepSec] = useState(120);
   const [prbWarmupSec, setPrbWarmupSec] = useState(60);
   const [prbSweep, setPrbSweep] = useState<BenchmarkPrbRunStatusOut | null>(null);
@@ -352,9 +352,11 @@ export default function BenchmarkPage() {
   }, [prbLive, prbSliceKey, prbSelectedKey]);
 
   const applyPrbSliceToForm = useCallback((s: BenchmarkPrbSliceOut) => {
+    const d = s.direction === "ul" ? "ul" : "dl";
     setPrbSst(s.sst);
     setPrbSd(s.sd);
-    setPrbDir(s.direction === "ul" ? "ul" : "dl");
+    setPrbDir(d);
+    setIperfReverse(d === "dl");
     setPrbDedicated(Number(s.dedicated) || 0);
     setPrbMin(Number(s.min) || 0);
     setPrbMax(Number(s.max) || 0);
@@ -1402,7 +1404,9 @@ export default function BenchmarkPage() {
             ) : null}
             . Pick a slice below (defaults to first non-default DL), edit
             dedicated/min/max, then <strong>Apply</strong> once — or Start a max%
-            sweep (<code>dedicated ≤ min ≤ max</code>).
+            sweep (<code>dedicated ≤ min ≤ max</code>). <strong>Direction</strong>{" "}
+            selects the xApp DL/UL PRB entry <em>and</em> UE iperf (DL ={" "}
+            <code>-R</code>, UL = no reverse) so you can benchmark both.
           </p>
 
           <div className="panel-head" style={{ marginTop: 12 }}>
@@ -1544,17 +1548,22 @@ export default function BenchmarkPage() {
                 }}
               />
             </FieldHelp>
-            <FieldHelp label="Direction" help="DL or UL NS policy entry.">
+            <FieldHelp
+              label="Direction"
+              help="DL or UL: xApp NS PRB policy entry and UE iperf reverse (DL=-R, UL=no -R)."
+            >
               <select
                 value={prbDir}
                 disabled={prbRunning || prbBusy || busy}
                 onChange={(e) => {
-                  setPrbDir(e.target.value as "dl" | "ul");
+                  const d = e.target.value === "ul" ? "ul" : "dl";
+                  setPrbDir(d);
+                  setIperfReverse(d === "dl");
                   setPrbApplyMsg(null);
                 }}
               >
-                <option value="dl">dl</option>
-                <option value="ul">ul</option>
+                <option value="dl">DL (downlink)</option>
+                <option value="ul">UL (uplink)</option>
               </select>
             </FieldHelp>
             <FieldHelp
@@ -1639,8 +1648,28 @@ export default function BenchmarkPage() {
           </div>
           <p className="hint" style={{ marginTop: 0 }}>
             Walks <em>max</em> from sweep-min→max; dedicated/min stay as set above.
+            Uses the Direction above (DL or UL) for both the xApp PRB entry and
+            iperf traffic.
           </p>
           <div className="profile-grid" style={{ marginTop: 12 }}>
+            <FieldHelp
+              label="Direction"
+              help="Same as Manual apply: DL/UL xApp entry + UE iperf reverse."
+            >
+              <select
+                value={prbDir}
+                disabled={prbRunning || prbBusy || busy}
+                onChange={(e) => {
+                  const d = e.target.value === "ul" ? "ul" : "dl";
+                  setPrbDir(d);
+                  setIperfReverse(d === "dl");
+                  setPrbApplyMsg(null);
+                }}
+              >
+                <option value="dl">DL (downlink)</option>
+                <option value="ul">UL (uplink)</option>
+              </select>
+            </FieldHelp>
             <FieldHelp label="Sweep min (max%)" help="First max% step in Start sweep.">
               <input
                 type="number"

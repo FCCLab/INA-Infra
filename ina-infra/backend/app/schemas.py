@@ -1185,7 +1185,10 @@ class BenchmarkPrbApplyRequest(BaseModel):
 
     sst: int = Field(1, ge=0, le=255)
     sd: str = Field("0x000001", description="Slice differentiator (hex)")
-    direction: str = Field("dl", description="dl or ul")
+    direction: str = Field(
+        "dl",
+        description="dl or ul — xApp NS PRB entry and UE iperf reverse (dl=-R)",
+    )
     dedicated: float = Field(0.0, ge=0.0, le=100.0)
     min_prb: float = Field(0.0, ge=0.0, le=100.0)
     max_prb: float = Field(100.0, ge=0.0, le=100.0)
@@ -1203,12 +1206,15 @@ class BenchmarkPrbRunRequest(BaseModel):
 
     sst: int = Field(1, ge=0, le=255)
     sd: str = Field("0x000001")
-    direction: str = Field("dl")
+    direction: str = Field(
+        "dl",
+        description="dl or ul — sweeps that xApp entry and sets UE iperf reverse",
+    )
     dedicated: float = Field(0.0, ge=0.0, le=100.0)
     min_prb: float = Field(0.0, ge=0.0, le=100.0)
-    sweep_min: float = Field(10.0, ge=0.0, le=100.0, description="First max PRB%")
+    sweep_min: float = Field(5.0, ge=0.0, le=100.0, description="First max PRB%")
     sweep_max: float = Field(100.0, ge=0.0, le=100.0, description="Last max PRB%")
-    prb_step: float = Field(10.0, gt=0.0, le=100.0)
+    prb_step: float = Field(5.0, gt=0.0, le=100.0)
     step_sec: float = Field(120.0, ge=0.1)
     warmup_sec: float = Field(60.0, ge=0.0)
 

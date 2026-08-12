@@ -22,6 +22,16 @@ def test_prb_steps_includes_max():
     assert benchmark_prb_run.prb_steps(40, 40, 10) == [40.0]
 
 
+def test_normalize_direction():
+    assert benchmark_prb_run.normalize_direction("DL") == "dl"
+    assert benchmark_prb_run.normalize_direction("ul") == "ul"
+    try:
+        benchmark_prb_run.normalize_direction("sideways")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_normalize_sd():
     assert xapp_prb.normalize_sd("0x1") == "0x000001"
     assert xapp_prb.normalize_sd(2) == "0x000002"

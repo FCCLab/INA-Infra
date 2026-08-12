@@ -900,10 +900,11 @@ def benchmark_prb_slices():
 )
 def benchmark_prb_apply(body: BenchmarkPrbApplyRequest):
     try:
+        direction = benchmark_prb_run.normalize_direction(body.direction)
         raw = xapp_prb.set_prb(
             sst=body.sst,
             sd=body.sd,
-            direction=body.direction,
+            direction=direction,
             dedicated=body.dedicated,
             min_prb=body.min_prb,
             max_prb=body.max_prb,
@@ -912,18 +913,27 @@ def benchmark_prb_apply(body: BenchmarkPrbApplyRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    traffic_note = ""
+    try:
+        traffic_note = benchmark_prb_run.ensure_traffic_direction(direction)
+    except Exception as exc:  # noqa: BLE001
+        traffic_note = f"traffic sync failed: {exc}"
     benchmark_log.write(
-        f"prb apply sst={body.sst} sd={body.sd} dir={body.direction} "
-        f"d/m/M={body.dedicated:g}/{body.min_prb:g}/{body.max_prb:g}",
+        f"prb apply sst={body.sst} sd={body.sd} dir={direction} "
+        f"d/m/M={body.dedicated:g}/{body.min_prb:g}/{body.max_prb:g} "
+        f"({traffic_note})",
         source="prb",
     )
     return BenchmarkPrbApplyResponse(
         ok=True,
-        message="PATCH sent to xApp (confirm via GET /benchmark/prb/slices)",
+        message=(
+            "PATCH sent to xApp (confirm via GET /benchmark/prb/slices); "
+            f"traffic: {traffic_note}"
+        ),
         applied=BenchmarkPrbSliceOut(
             sst=body.sst,
             sd=xapp_prb.normalize_sd(body.sd),
-            direction=body.direction.lower(),
+            direction=direction,
             dedicated=body.dedicated,
             min=body.min_prb,
             max=body.max_prb,
