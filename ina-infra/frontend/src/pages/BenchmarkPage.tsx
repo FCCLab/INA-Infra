@@ -172,6 +172,10 @@ export default function BenchmarkPage() {
   const [iperfDuration, setIperfDuration] = useState(0);
   const [iperfInterval, setIperfInterval] = useState(1);
   const selectedUeIdRef = useRef<string | null>(null);
+  /** Online UE ids from last poll — form hydrate only on reconnect, not keepalive. */
+  const ueOnlineIdsRef = useRef<Set<string>>(new Set());
+  const uePollPrimedRef = useRef(false);
+
 
   const [consoleTitle, setConsoleTitle] = useState("Console");
   const [consoleText, setConsoleText] = useState("");
@@ -263,22 +267,37 @@ export default function BenchmarkPage() {
       setUes(list);
       setUesError(null);
 
+      const onlineNow = new Set(
+        list.filter((u) => u.online || u.ws_connected).map((u) => u.id),
+      );
+      const prevOnline = ueOnlineIdsRef.current;
+      // First poll only establishes baseline — do not treat everyone as reconnect.
+      const reconnected = uePollPrimedRef.current
+        ? [...onlineNow].filter((id) => !prevOnline.has(id))
+        : [];
+      ueOnlineIdsRef.current = onlineNow;
+      uePollPrimedRef.current = true;
+
       const sel = selectedUeIdRef.current;
       if (sel && !list.some((u) => u.id === sel)) {
         selectedUeIdRef.current = null;
         setSelectedUeId(null);
-      } else if (sel && !trafficBusyRef.current) {
+        return;
+      }
+      // Keepalive / status polls must not overwrite the editable form.
+      // Only re-seed from desired when this UE (re)connects.
+      if (
+        sel &&
+        reconnected.includes(sel) &&
+        !trafficBusyRef.current
+      ) {
         const u = list.find((x) => x.id === sel);
-        // Refresh live status only; keep form fields while editing.
-        if (u?.desired?.protocol) {
-          const p = u.desired.protocol.toLowerCase();
-          if (p === "tcp" || p === "udp") setTrafficProto(p);
-        }
+        if (u) loadUeDesiredForm(u);
       }
     } catch (e) {
       setUesError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [loadUeDesiredForm]);
 
   const applyIperfDesired = useCallback(
     async (action: "start" | "stop" | "set") => {
@@ -310,8 +329,7 @@ export default function BenchmarkPage() {
             `gen=${out.generation}` +
             (out.server ? ` @${out.server}` : ""),
         );
-        const live = (out.protocol || trafficProto).toLowerCase();
-        if (live === "tcp" || live === "udp") setTrafficProto(live);
+        // Do not re-seed form from list poll — keep what the user just applied.
         await refreshUes();
       } catch (e) {
         setTrafficError(e instanceof Error ? e.message : String(e));

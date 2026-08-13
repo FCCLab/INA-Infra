@@ -41,6 +41,24 @@ def list_plot_tags(tag: str) -> list[str]:
     return tags
 
 
+def traffic_label(tag: str) -> tuple[str, str, str]:
+    """``ul_tcp`` → (``UL TCP``, client legend, server legend)."""
+    parts = [p for p in (tag or "").lower().replace("-", "_").split("_") if p]
+    direction = "DL"
+    proto = ""
+    for p in parts:
+        if p in ("ul", "uplink"):
+            direction = "UL"
+        elif p in ("dl", "downlink"):
+            direction = "DL"
+        elif p in ("tcp", "udp"):
+            proto = p.upper()
+    kind = f"{direction} {proto}".strip()
+    if direction == "UL":
+        return kind, "client (UE send)", "server (UPF receive)"
+    return kind, "client (UE receive)", "server (UPF send)"
+
+
 def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -> int:
     if not summary.is_file():
         print(
@@ -51,16 +69,17 @@ def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -
 
     s = np.load(summary, allow_pickle=True)
     prb = np.asarray(s["prb_pct"], dtype=np.float64)
+    kind, client_leg, server_leg = traffic_label(tag)
     if metric == "mean":
         client = np.asarray(s["client_mean_mbps"], dtype=np.float64)
         server = np.asarray(s["server_mean_mbps"], dtype=np.float64)
         ylabel = "Average throughput (Mbps)"
-        title = f"NS max PRB% vs average DL throughput ({tag})"
+        title = f"NS max PRB% vs average {kind} throughput"
     else:
         client = np.asarray(s["client_p50_mbps"], dtype=np.float64)
         server = np.asarray(s["server_p50_mbps"], dtype=np.float64)
         ylabel = "Median throughput (Mbps)"
-        title = f"NS max PRB% vs median DL throughput ({tag})"
+        title = f"NS max PRB% vs median {kind} throughput"
 
     order = np.argsort(prb)
     prb = prb[order]
@@ -93,7 +112,7 @@ def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -
             markeredgewidth=1.4,
             linewidth=1.5,
             linestyle="--",
-            label="server (UPF send)",
+            label=server_leg,
             color=SERVER_COLOR,
             zorder=2,
         )
@@ -103,7 +122,7 @@ def plot_one(tag: str, summary: Path, out: Path, metric: str, no_server: bool) -
         marker="o",
         markersize=4.5,
         linewidth=1.8,
-        label="client (UE receive)",
+        label=client_leg,
         color=CLIENT_COLOR,
         zorder=3,
     )
