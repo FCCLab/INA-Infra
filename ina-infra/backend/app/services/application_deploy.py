@@ -1081,6 +1081,7 @@ def build_client_container(
 def build_client_metrics_container(
     profile_name: str,
     app_cfg: SliceApplicationConfig,
+    client_index: int = 1,
 ) -> dict:
     """Build metrics exporter sidecar container for client inside the UE pod."""
     sid = app_cfg.slice_id
@@ -1095,9 +1096,17 @@ def build_client_metrics_container(
     }.get(app_type, 9101)
     if "client_metrics_port" in p:
         m_port = int(p["client_metrics_port"])
+    elif app_type == "cctv" and client_index > 1:
+        m_port = 9100 + client_index
+
+    app_name = (
+        f"slice{sid}-{app_type}-client"
+        if client_index <= 1
+        else f"slice{sid}-{app_type}-client-{client_index}"
+    )
     return _influx_pusher_container(
         m_port,
-        f"slice{sid}-{app_type}-client",
+        app_name,
         sid,
         profile_name,
         app_type,
@@ -1379,7 +1388,9 @@ def deploy_application_stream(
                 client_ctr = build_client_container(
                     profile_name, app, server_ip=server_ip, client_index=c_idx
                 )
-                metrics_ctr = build_client_metrics_container(profile_name, app)
+                metrics_ctr = build_client_metrics_container(
+                    profile_name, app, client_index=c_idx
+                )
                 client_containers = [c for c in [client_ctr, metrics_ctr] if c]
 
                 if app.app_type == "cctv":
