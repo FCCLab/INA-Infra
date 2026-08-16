@@ -11,6 +11,7 @@ import { Bar, Doughnut } from "react-chartjs-2";
 import type { Metrics, NodeInfo } from "../api/client";
 import { fmtNum, finiteOrZero } from "../lib/format";
 import { bytesToGi, parseCpuCores, parseMemBytes } from "../lib/k8sUnits";
+import { findByNodeName } from "../lib/nodeNames";
 import { readThemeColors, type ThemeColors } from "../lib/theme";
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -154,8 +155,8 @@ export default function ResourceCharts({ metrics, focusNode, nodes = [] }: Props
           : res?.source || "n/a";
 
   if (focusNode) {
-    const nodeUsage = (res?.nodes || []).find((n) => n.name === focusNode);
-    const nodeInfo = nodes.find((n) => n.name === focusNode);
+    const nodeUsage = findByNodeName(res?.nodes, focusNode);
+    const nodeInfo = findByNodeName(nodes, focusNode);
     const cpuUsage = nodeUsage?.cpu_cores ?? 0;
     const memUsage = bytesToGi(nodeUsage?.memory_bytes);
     const cpuAlloc = parseCpuCores(nodeInfo?.allocatable.cpu || nodeInfo?.capacity.cpu);
@@ -164,7 +165,7 @@ export default function ResourceCharts({ metrics, focusNode, nodes = [] }: Props
     );
     const sampled =
       nodeUsage == null ? false : nodeUsage.sampled !== false;
-    const gpuNode = (res?.gpus?.nodes || []).find((n) => n.name === focusNode);
+    const gpuNode = findByNodeName(res?.gpus?.nodes, focusNode);
     const gpu0 = gpuNode?.gpus?.[0];
     const hasGpu = Boolean(gpu0) || (nodeInfo?.gpu_count || 0) > 0;
 

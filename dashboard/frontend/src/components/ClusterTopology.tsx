@@ -21,6 +21,7 @@ import {
 } from "../api/client";
 import { finiteOrZero } from "../lib/format";
 import { parseCpuCores, parseMemBytes } from "../lib/k8sUnits";
+import { findByNodeName } from "../lib/nodeNames";
 import { readThemeColors } from "../lib/theme";
 import ClusterNode from "./ClusterNode";
 import K8sNode, { K8S_NODE_H, K8S_NODE_H_GPU, type K8sNodeUsage } from "./K8sNode";
@@ -42,20 +43,12 @@ function pctOf(used: number, total: number): number | null {
 }
 
 function usageFromCluster(nodes: NodeInfo[], metrics: Metrics): Record<string, K8sNodeUsage> {
-  const usageByName = new Map((metrics.resources?.nodes || []).map((n) => [n.name, n]));
-  const gpuByName = new Map((metrics.resources?.gpus?.nodes || []).map((n) => [n.name, n]));
   const out: Record<string, K8sNodeUsage> = {};
 
-  const names = new Set<string>([
-    ...nodes.map((n) => n.name),
-    ...usageByName.keys(),
-    ...gpuByName.keys(),
-  ]);
-
-  for (const name of names) {
-    const info = nodes.find((n) => n.name === name);
-    const usage = usageByName.get(name);
-    const gpu0 = gpuByName.get(name)?.gpus?.[0];
+  for (const info of nodes) {
+    const name = info.name;
+    const usage = findByNodeName(metrics.resources?.nodes, name);
+    const gpu0 = findByNodeName(metrics.resources?.gpus?.nodes, name)?.gpus?.[0];
     const sampled = usage == null ? false : usage.sampled !== false;
     const cpuAlloc = parseCpuCores(info?.allocatable?.cpu || info?.capacity?.cpu);
     const memAlloc = parseMemBytes(info?.allocatable?.memory || info?.capacity?.memory);

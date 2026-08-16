@@ -22,8 +22,9 @@ from kubernetes.client.rest import ApiException
 
 from app.services.clusters import kube_context, kubeconfig_path, prometheus_base_url
 from app.services.k8s_client import close_quietly, core_v1, load_api_client, with_timeout
+from app.services.node_names import canonical_node_name
 
-_TIMEOUT_S = 4.0
+_TIMEOUT_S = 6.0
 _PROM_NS = "monitoring"
 _PROM_SVC = "prometheus"
 _PROM_PORT = 9090
@@ -182,13 +183,18 @@ def _query_with_fallback(
 
     base = prometheus_base_url(cluster)
     url = f"{base}{api_path}?{urllib.parse.urlencode(params)}"
-    body, err = _http_get_json(url, min(timeout, 1.5))
+    # Use the full timeout on NodePort. A 1.5s cap made range queries fail
+    # and fall through to a hanging apiserver proxy / port-forward.
+    body, err = _http_get_json(url, timeout)
     if body is not None:
         return _parse_prom_body(body)
     if err:
         errors.append(err)
+        # HTTP 4xx/5xx from Prom is a real answer — do not hang on fallbacks.
+        if "prometheus HTTP" in err:
+            return [], "; ".join(errors)
 
-    result, proxy_err = _query_via_apiserver(cluster, api_path, params, timeout)
+    result, proxy_err = _query_via_apiserver(cluster, api_path, params, min(timeout, 3.0))
     if result:
         return result, None
     if proxy_err:
@@ -239,7 +245,9 @@ def vector_by_label(
     out: Dict[str, float] = {}
     for sample in result:
         metric = sample.get("metric") or {}
-        key = metric.get(label) or metric.get("Hostname") or metric.get("hostname")
+        key = canonical_node_name(
+            metric.get(label) or metric.get("Hostname") or metric.get("hostname")
+        )
         if not key:
             continue
         value = sample.get("value")

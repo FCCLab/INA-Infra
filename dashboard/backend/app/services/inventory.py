@@ -20,6 +20,7 @@ from app.services.k8s_client import (
     load_api_client,
     with_timeout,
 )
+from app.services.node_names import canonical_node_name
 
 
 def _parse_cpu(val: Optional[str]) -> float:
@@ -382,14 +383,15 @@ def _fetch_prometheus_node_usage(
     if not cpu_by and not mem_by:
         return None, "; ".join(errors) if errors else "no node_exporter samples"
 
-    names = sorted(set(cpu_by) | set(mem_by) | set(node_names or []))
+    names = list(node_names) if node_names else sorted(set(cpu_by) | set(mem_by))
     per_node = []
     cpu_usage = 0.0
     mem_usage = 0.0
     for name in names:
-        sampled = name in cpu_by or name in mem_by
-        cpu = prom.finite(cpu_by.get(name)) or 0.0
-        mem = prom.finite(mem_by.get(name)) or 0.0
+        cname = canonical_node_name(name)
+        sampled = cname in cpu_by or name in cpu_by or cname in mem_by or name in mem_by
+        cpu = prom.finite(cpu_by.get(cname) or cpu_by.get(name)) or 0.0
+        mem = prom.finite(mem_by.get(cname) or mem_by.get(name)) or 0.0
         if sampled:
             cpu_usage += cpu
             mem_usage += mem
@@ -416,9 +418,9 @@ def _fetch_prometheus_gpus(cluster: str) -> Dict[str, Any]:
     still surface recent values. Prefer kubernetes_node / Hostname as node name.
     """
     # Look back far enough that a Prom restart / scrape outage still has series.
-    util_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_GPU_UTIL[14d]))"
-    used_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_USED[14d]))"
-    total_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_TOTAL[14d]))"
+    util_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_GPU_UTIL[30m]))"
+    used_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_USED[30m]))"
+    total_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_TOTAL[30m]))"
     util_res, util_err = prom.query(cluster, util_q)
     if util_err:
         return {"source": "prometheus", "nodes": [], "error": util_err}
@@ -440,7 +442,7 @@ def _fetch_prometheus_gpus(cluster: str) -> Dict[str, Any]:
             idx = int(float(idx_raw))
         except (TypeError, ValueError):
             idx = 0
-        return host, idx
+        return canonical_node_name(host), idx
 
     by_gpu: Dict[Tuple[str, int], Dict[str, Any]] = {}
     for sample in util_res:
@@ -630,16 +632,16 @@ def fetch_metrics(cluster: str) -> Dict[str, Any]:
             }
 
         gpu = _fetch_prometheus_gpus(cluster)
-        # Live DCGM scrape via port-forward when Prom→pod scrape is down (GH200).
-        try:
-            gpu_fb = fetch_cluster_gpu_metrics(cluster, api)
-            if gpu_fb.get("nodes"):
-                gpu = {**gpu_fb, "source": "dcgm-exporter"}
-            elif not gpu.get("nodes") and gpu_fb.get("error"):
-                gpu["error"] = gpu.get("error") or gpu_fb.get("error")
-        except Exception as exc:  # noqa: BLE001
-            if not gpu.get("nodes"):
-                gpu["error"] = f"{gpu.get('error') or 'prometheus'}; fallback: {exc}"
+        if not gpu.get("nodes"):
+            try:
+                gpu_fb = fetch_cluster_gpu_metrics(cluster, api)
+                if gpu_fb.get("nodes"):
+                    gpu = {**gpu_fb, "source": "dcgm-exporter"}
+                elif gpu_fb.get("error"):
+                    gpu["error"] = gpu.get("error") or gpu_fb.get("error")
+            except Exception as exc:  # noqa: BLE001
+                if not gpu.get("nodes"):
+                    gpu["error"] = f"{gpu.get('error') or 'prometheus'}; fallback: {exc}"
         resources["gpus"] = gpu
         if gpu.get("error") and not gpu.get("nodes"):
             if str(gpu["error"]).startswith("prometheus:"):

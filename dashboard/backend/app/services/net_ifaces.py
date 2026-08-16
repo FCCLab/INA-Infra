@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.services import prometheus as prom
+from app.services.node_names import canonical_node_name, prom_node_regex
 
 _HISTORY_SECONDS = 5 * 60
 _HISTORY_STEP = "15s"
@@ -45,10 +46,6 @@ def classify_iface(name: str) -> str:
     return "other"
 
 
-def _esc(label: str) -> str:
-    return label.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _mbps(v: Optional[float]) -> Optional[float]:
     x = prom.finite(v)
     if x is None:
@@ -64,11 +61,13 @@ def _bps_from_mbps(mbps: Optional[float]) -> Optional[float]:
 
 
 def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
-    node_esc = _esc(node)
-    # Bytes/s * 8 / 1e6 => Mbps. Prefer series labeled with kubernetes node name.
+    node = canonical_node_name(node)
+    node_re = prom_node_regex(node)
+    # Bytes/s * 8 / 1e6 => Mbps. Match current k8s name and rename aliases.
     # Prefer kubernetes-pods scrape job; fall back without job filter if empty.
     # Restrict to physically up NICs via node_network_up == 1 (operstate).
-    sel = f'node="{node_esc}",job="kubernetes-pods"'
+    sel = f'node=~"{node_re}",job="kubernetes-pods"'
+    sel_any = f'node=~"{node_re}"'
     up_q = f'max by (device) (node_network_up{{{sel}}} == 1)'
     rx_q = (
         f'(avg by (device) (rate(node_network_receive_bytes_total{{{sel}}}[5m]))'
@@ -101,6 +100,39 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
     rx_b_res, _ = prom.query(cluster, rx_bytes_q)
     tx_b_res, _ = prom.query(cluster, tx_bytes_q)
     up_res, _ = prom.query(cluster, up_q)
+    if not up_res and not rx_res:
+        sel = sel_any
+        up_q = f'max by (device) (node_network_up{{{sel}}} == 1)'
+        rx_q = (
+            f'(avg by (device) (rate(node_network_receive_bytes_total{{{sel}}}[5m]))'
+            f" and on(device) ({up_q})) * 8 / 1e6"
+        )
+        tx_q = (
+            f'(avg by (device) (rate(node_network_transmit_bytes_total{{{sel}}}[5m]))'
+            f" and on(device) ({up_q})) * 8 / 1e6"
+        )
+        rx_bytes_q = (
+            f'(max by (device) (node_network_receive_bytes_total{{{sel}}})'
+            f" and on(device) ({up_q}))"
+        )
+        tx_bytes_q = (
+            f'(max by (device) (node_network_transmit_bytes_total{{{sel}}})'
+            f" and on(device) ({up_q}))"
+        )
+        rx_res, rx_err = prom.query(cluster, rx_q)
+        if rx_err:
+            return {
+                "cluster": cluster,
+                "node": node,
+                "source": "prometheus",
+                "interfaces": [],
+                "history": {"labels": [], "series": {}},
+                "error": rx_err,
+            }
+        tx_res, tx_err = prom.query(cluster, tx_q)
+        rx_b_res, _ = prom.query(cluster, rx_bytes_q)
+        tx_b_res, _ = prom.query(cluster, tx_bytes_q)
+        up_res, _ = prom.query(cluster, up_q)
 
     up_devs = {
         (sample.get("metric") or {}).get("device")
@@ -170,8 +202,8 @@ def fetch_node_interfaces(cluster: str, node: str) -> Dict[str, Any]:
     # Range history for charts (physically up NICs only).
     end = time.time()
     start = end - _HISTORY_SECONDS
-    rx_hist, hist_err = prom.query_range(cluster, rx_q, start, end, step=_HISTORY_STEP)
-    tx_hist, _ = prom.query_range(cluster, tx_q, start, end, step=_HISTORY_STEP)
+    rx_hist, hist_err = prom.query_range(cluster, rx_q, start, end, step=_HISTORY_STEP, timeout=8.0)
+    tx_hist, _ = prom.query_range(cluster, tx_q, start, end, step=_HISTORY_STEP, timeout=8.0)
 
     # Align timestamps from first series.
     ts_set = set()

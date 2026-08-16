@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kubernetes.client.rest import ApiException
 
+from app.services.node_names import canonical_node_name
 from app.services.clusters import kube_context, kubeconfig_path
 from app.services.k8s_client import api_exc_message, core_v1, with_timeout
 
@@ -67,7 +68,7 @@ def _parse_dcgm_text(text: str) -> List[Dict[str, Any]]:
         ):
             continue
         labels = _parse_labels(m.group("labels"))
-        host = labels.get("Hostname") or labels.get("hostname") or ""
+        host = canonical_node_name(labels.get("Hostname") or labels.get("hostname") or "")
         if not host:
             continue
         try:
@@ -162,15 +163,15 @@ def _scrape_dcgm_pod(cluster: str, pod_name: str) -> str:
     )
     last_err: Optional[BaseException] = None
     try:
-        for _ in range(40):
+        for _ in range(15):
             if proc.poll() is not None:
                 err = (proc.stderr.read() if proc.stderr else b"").decode("utf-8", "replace")
                 raise RuntimeError(f"port-forward exited: {err.strip() or proc.returncode}")
-            time.sleep(0.15)
+            time.sleep(0.1)
             try:
                 with urllib.request.urlopen(
                     f"http://127.0.0.1:{local}/metrics",
-                    timeout=3,
+                    timeout=1,
                 ) as resp:
                     return resp.read().decode("utf-8", "replace")
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
@@ -204,7 +205,7 @@ def _dcgm_pods(v1) -> Dict[str, str]:
         phase = (p.status.phase if p.status else None) or ""
         if phase and phase != "Running":
             continue
-        out[spec.node_name] = meta.name
+        out[canonical_node_name(spec.node_name)] = meta.name
     return out
 
 
@@ -242,7 +243,11 @@ def fetch_cluster_gpu_metrics(cluster: str, api) -> Dict[str, Any]:
             text = _scrape_dcgm_pod(cluster, pod_name)
             parsed = _parse_dcgm_text(text)
             # Prefer Hostname match; else attach all samples from this exporter to its node.
-            matched = [g for g in parsed if g.get("node") == node_name]
+            matched = [
+                g
+                for g in parsed
+                if canonical_node_name(str(g.get("node") or "")) == node_name
+            ]
             use = matched or parsed
             cleaned = []
             for g in use:

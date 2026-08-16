@@ -11,6 +11,7 @@ import {
 import { Line } from "react-chartjs-2";
 import { api, type NodeInterface } from "../api/client";
 import { finiteOrNull, fmtNum, isFiniteNumber } from "../lib/format";
+import { canonicalNodeName } from "../lib/nodeNames";
 import { readThemeColors } from "../lib/theme";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
@@ -36,20 +37,21 @@ export default function InterfaceCharts({ cluster, node, refreshToken }: Props) 
   const [series, setSeries] = useState<
     Record<string, { rx_mbps?: (number | null)[]; tx_mbps?: (number | null)[] }>
   >({});
-  const targetRef = useRef(`${cluster}::${node}`);
+  const targetRef = useRef(`${cluster}::${canonicalNodeName(node)}`);
   const inFlight = useRef<string | null>(null);
 
   useEffect(() => {
-    targetRef.current = `${cluster}::${node}`;
+    targetRef.current = `${cluster}::${canonicalNodeName(node)}`;
   }, [cluster, node]);
 
   useEffect(() => {
-    const key = `${cluster}::${node}`;
+    const k8sNode = canonicalNodeName(node);
+    const key = `${cluster}::${k8sNode}`;
     if (inFlight.current === key) return;
     inFlight.current = key;
     (async () => {
       try {
-        const res = await api.nodeInterfaces(cluster, node);
+        const res = await api.nodeInterfaces(cluster, k8sNode);
         if (targetRef.current !== key) return;
         setError(res.error || null);
         const physical = (res.interfaces || []).filter((i) => i.kind === "physical");
