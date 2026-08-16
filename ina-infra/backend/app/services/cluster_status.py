@@ -618,8 +618,8 @@ def list_edge_nodes() -> Dict[str, Any]:
             "cluster": "edge",
             "nodes": [],
             "error": err or "kubectl returned empty",
-            "default_du": "usrp",
-            "default_ue": "usrp",
+            "default_du": "",
+            "default_ue": "",
         }
 
     nodes: List[Dict[str, Any]] = []
@@ -663,14 +663,15 @@ def list_edge_nodes() -> Dict[str, Any]:
             }
         )
 
-    # Prefer usrp for rfsim defaults; else first Ready non-control-plane worker.
+    # First Ready non-control-plane worker. Prefer a node named usrp when present
+    # (rfsim USRP box), otherwise whatever the cluster actually has.
     ready_names = [n["name"] for n in nodes if n["ready"]]
     workers = [
         n["name"]
         for n in nodes
         if n["ready"] and "control-plane" not in (n.get("roles") or [])
     ]
-    default = "usrp"
+    default = ""
     if "usrp" in ready_names:
         default = "usrp"
     elif workers:

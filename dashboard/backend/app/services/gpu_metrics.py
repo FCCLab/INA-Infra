@@ -216,7 +216,7 @@ def fetch_cluster_gpu_metrics(cluster: str, api) -> Dict[str, Any]:
         "source": "dcgm-exporter",
         "nodes": [
           {
-            "name": "usrp",
+            "name": "<k8s-node>",
             "gpu_count": 1,
             "gpus": [{index, model, util_pct, memory_used_mib, ...}],
           },

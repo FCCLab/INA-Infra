@@ -12,7 +12,6 @@ import {
   BenchmarkPrbSliceOut,
   BenchmarkRunStatusOut,
   ClusterDeployStatus,
-  EDGE_RF_NODES,
   EdgeNodeOut,
   ProfileClusterStatusOut,
   UeOut,
@@ -481,7 +480,7 @@ export default function BenchmarkPage() {
 
   const edgeRfOptions = useMemo(() => {
     const names = edgeNodes.map((n) => n.name);
-    const merged = names.length > 0 ? [...names] : [...EDGE_RF_NODES];
+    const merged = [...names];
     if (ranNode && !merged.includes(ranNode)) merged.push(ranNode);
     merged.sort((a, b) => a.localeCompare(b));
     return merged;

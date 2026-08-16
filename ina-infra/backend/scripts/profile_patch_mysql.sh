@@ -154,7 +154,7 @@ lines.append(
     f"(ueid, servingPlmnid, nssai) VALUES ('{UDR_UEID}', '{UDR_SERVING}', '{nssai}');"
 )
 
-MAX_CLIENTS = max(int(os.environ.get("INA_UE_CLIENTS", "8")), 1)
+MAX_CLIENTS = max(int(os.environ.get("INA_UE_CLIENTS", "99")), 1)
 
 for n in range(1, N + 1):
     dnn = f"oai{n}"
@@ -162,9 +162,9 @@ for n in range(1, N + 1):
     sd = str(n)
     conf = dnn_conf(dnn)
     for c in range(1, MAX_CLIENTS + 1):
-        msin = 100 + n + (c - 1) * 10
+        msin = n * 100 + c
         ue = f"001010000000{msin:03d}"
-        if c > 1:
+        if ue != "001010000000101":
             lines.append(
                 "INSERT INTO AuthenticationSubscription "
                 "(ueid, authenticationMethod, encPermanentKey, protectionParameterId, "
@@ -194,7 +194,7 @@ for n in range(1, N + 1):
             f"WHERE ueid='{ue}' AND servingPlmnid='{PLMN}');"
         )
 
-lines.append("DELETE FROM SmfRegistrations WHERE ueid LIKE '0010100000001%';")
+lines.append("DELETE FROM SmfRegistrations WHERE ueid LIKE '001010000000%';")
 lines.append("COMMIT;")
 print("\n".join(lines))
 PY

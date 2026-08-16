@@ -8,7 +8,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import yaml
 
@@ -21,38 +21,6 @@ from app.schemas import (
 )
 from app.services import cluster_status, cctv_videos, ip_allocator, multus_iface, profile_store, ran_workloads
 from app.services.cmd_stream import error_event, log_event, result_event, status_event
-
-SITE_NODES: Dict[str, List[str]] = {
-    "central": ["cpu-central-0", "cpu-central-1"],
-    "regional": ["cpu-regional-0", "cpu-regional-1"],
-    "edge": ["cpu-edge-0", "cpu-edge-1"],
-}
-# GH200 workers (arm64 vLLM / Physical AI).
-GPU_GH200_NODES: Dict[str, List[str]] = {
-    "central": ["gpu-gh81"],
-    "regional": ["gpu-gh82"],
-}
-
-
-def _hostname_affinity(node_names: Sequence[str]) -> dict:
-    return {
-        "nodeAffinity": {
-            "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                    {
-                        "matchExpressions": [
-                            {
-                                "key": "kubernetes.io/hostname",
-                                "operator": "In",
-                                "values": list(node_names),
-                            }
-                        ]
-                    }
-                ]
-            }
-        }
-    }
-
 
 def resolve_target_cluster(
     app_cfg: SliceApplicationConfig,
@@ -300,11 +268,7 @@ def generate_server_manifests(
     gw = "10.1.137.1"
 
     if app_type == "physical_ai":
-        master = (
-            multus_iface.detect_host_master("gpu-gh82")
-            or multus_iface.detect_host_master("gpu-gh81")
-            or "enP2s2f1np1"
-        )
+        master = multus_iface.detect_gpu_worker_master(target_cluster.lower())
     else:
         master = multus_iface.detect_cluster_master(target_cluster.lower())
 
@@ -434,8 +398,7 @@ def generate_server_manifests(
         ]
 
         pod_spec: dict = {
-            "nodeSelector": {"kubernetes.io/arch": "amd64"},
-            "affinity": _hostname_affinity(SITE_NODES.get(target_cluster.lower(), ["cpu-edge-0", "cpu-edge-1"])),
+            "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
             "volumes": [
                 {
                     "name": "code-volume",
@@ -541,11 +504,8 @@ def generate_server_manifests(
         )
 
         pod_spec = {
-            "nodeSelector": {"kubernetes.io/arch": "arm64"},
+            "nodeSelector": multus_iface.scheduling_node_selector("arm64", master),
             "runtimeClassName": "nvidia",
-            "affinity": _hostname_affinity(
-                GPU_GH200_NODES.get(target_cluster.lower(), GPU_GH200_NODES["regional"])
-            ),
             "containers": [
                 {
                     "name": "vllm",
@@ -627,8 +587,7 @@ def generate_server_manifests(
         )
 
         pod_spec = {
-            "nodeSelector": {"kubernetes.io/arch": "amd64"},
-            "affinity": _hostname_affinity(SITE_NODES.get(target_cluster.lower(), ["cpu-edge-0", "cpu-edge-1"])),
+            "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
             "containers": [
                 {
                     "name": "ott-server",
@@ -708,8 +667,7 @@ def generate_server_manifests(
         )
 
         pod_spec = {
-            "nodeSelector": {"kubernetes.io/arch": "amd64"},
-            "affinity": _hostname_affinity(SITE_NODES.get(target_cluster.lower(), ["cpu-edge-0", "cpu-edge-1"])),
+            "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
             "containers": [
                 {
                     "name": "edge",
@@ -816,8 +774,7 @@ def generate_server_manifests(
                         },
                     },
                     "spec": {
-                        "nodeSelector": {"kubernetes.io/arch": "amd64"},
-                        "affinity": _hostname_affinity(SITE_NODES.get(target_cluster.lower(), ["cpu-edge-0", "cpu-edge-1"])),
+                        "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
                         "containers": [
                             {
                                 "name": "app",

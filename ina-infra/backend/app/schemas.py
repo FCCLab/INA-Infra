@@ -15,9 +15,6 @@ _K8S_NS_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 # Edge RF node names are live-discovered from the edge cluster (see /clusters/edge/nodes).
-# Keep a soft default preference order for UI when the API is unreachable.
-EDGE_RF_NODE_FALLBACK = ("usrp", "cpu-edge-0", "cpu-edge-1", "gpu-a40")
-
 _K8S_NODE_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$", re.I)
 
 
@@ -71,8 +68,8 @@ class EdgeNodesOut(BaseModel):
     cluster: str = "edge"
     nodes: List[EdgeNodeOut] = Field(default_factory=list)
     error: Optional[str] = None
-    default_du: str = "usrp"
-    default_ue: str = "usrp"
+    default_du: str = ""
+    default_ue: str = ""
 
 class SliceIn(BaseModel):
     id: int

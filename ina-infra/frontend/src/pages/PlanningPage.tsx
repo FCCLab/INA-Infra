@@ -3,7 +3,6 @@ import {
   api,
   DEFAULT_PROFILE,
   DEFAULT_SLICES,
-  EDGE_RF_NODES,
   EdgeNodeOut,
   IpPlan,
   NetworkIn,
@@ -202,9 +201,8 @@ export default function PlanningPage() {
 
   const edgeRfOptions = useMemo(() => {
     const names = edgeNodes.map((n) => n.name);
-    const fallback = [...EDGE_RF_NODES];
-    const merged = names.length > 0 ? names : fallback;
-    // Keep current profile selection visible even if node went NotReady.
+    const merged = [...names];
+    // Keep current profile selection visible even if the node went NotReady.
     for (const cur of [profile.du_node, profile.ue_node]) {
       if (cur && !merged.includes(cur)) merged.push(cur);
     }
@@ -1310,12 +1308,12 @@ export default function PlanningPage() {
               <FieldHelp
                 className="field-help-wide"
                 label="RAN node (DU + UE)"
-                help="Per-profile edge worker for OAI DU + UEs (rfsim). usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
+                help="Per-profile edge worker for OAI DU + UEs (rfsim). The list is discovered from the live edge cluster. Multus parent NIC is detected on that node."
               >
                 <select
                   key={`ran-${selectedName}`}
                   className="ran-node-select"
-                  value={profile.du_node || profile.ue_node || "usrp"}
+                  value={profile.du_node || profile.ue_node || edgeRfOptions[0] || ""}
                   disabled={busy}
                   onChange={(e) => {
                     const n = e.target.value;

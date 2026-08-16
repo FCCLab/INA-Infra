@@ -322,7 +322,7 @@ def _fetch_prometheus_node_usage(
 
     Prefer a single scrape job (kubernetes-pods) so dual pod+endpoints discovery
     does not double-count CPUs. Always emit an entry for every known k8s node
-    name so the UI can resolve focus nodes like usrp even while rate() warms up.
+    name so the UI can resolve every live k8s node even while rate() warms up.
     """
     # job filter avoids double series from headless Service + pod annotations.
     cpu_q = (
@@ -427,9 +427,9 @@ def _fetch_prometheus_gpus(cluster: str) -> Dict[str, Any]:
 
     def _gpu_key(metric: Dict[str, str]) -> Tuple[str, int]:
         host = (
-            metric.get("Hostname")
-            or metric.get("kubernetes_node")
+            metric.get("kubernetes_node")
             or metric.get("node")
+            or metric.get("Hostname")
             or metric.get("hostname")
             or ""
         )

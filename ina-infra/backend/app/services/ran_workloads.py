@@ -9,37 +9,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 import yaml
 
 from app.schemas import IpPlan, PlacementOut, PlSolveResponse, Profile, SliceIps
-from app.services.multus_iface import detect_host_master
+from app.services.multus_iface import detect_cluster_master, detect_host_master, scheduling_node_selector
 
 SITE_TO_CLUSTER = {0: "edge", 1: "regional", 2: "central"}
-SITE_NODES: Dict[str, List[str]] = {
-    "central": ["cpu-central-0", "cpu-central-1"],
-    "regional": ["cpu-regional-0", "cpu-regional-1"],
-    "edge": ["cpu-edge-0", "cpu-edge-1"],
-}
 
-# OAI nws-v0.8-amd64 images — keep off arm64 GPU workers (gh81/gh82).
+# OAI nws-v0.8-amd64 images — keep off arm64 GPU workers via arch, not hostnames.
 ARCH_AMD64 = {"kubernetes.io/arch": "amd64"}
-
-
-def _hostname_affinity(node_names: Sequence[str]) -> dict:
-    return {
-        "nodeAffinity": {
-            "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                    {
-                        "matchExpressions": [
-                            {
-                                "key": "kubernetes.io/hostname",
-                                "operator": "In",
-                                "values": list(node_names),
-                            }
-                        ]
-                    }
-                ]
-            }
-        }
-    }
 
 from app.services.registry_service import resolve_oai_image
 
@@ -266,13 +241,16 @@ def _slice_sd_hex(n: int) -> str:
 
 
 def _imsi(n: int, client_index: int = 1) -> str:
-    """15-digit IMSI: slice-n primary is …10n; extra UEs are …1{n}{offset}.
+    """15-digit IMSI: slice n client k has MSIN n*100 + k.
 
-    Examples: slice 1 UE1 → 001010000000101, slice 1 UE2 → 001010000000111.
-    Extra IMSIs must be provisioned in UDR (see profile_patch_mysql.sh).
+    Examples:
+      Slice 1: 001010000000101 -> 001010000000199
+      Slice 2: 001010000000201 -> 001010000000299
+      Slice 3: 001010000000301 -> 001010000000399
+      Slice 4: 001010000000401 -> 001010000000499
     """
     idx = max(int(client_index), 1)
-    msin = 100 + int(n) + (idx - 1) * 10
+    msin = int(n) * 100 + idx
     return f"001010000000{msin:03d}"
 
 
@@ -614,8 +592,9 @@ def _write_edge_gnb(
                         "spec": {
                             "serviceAccountName": "oai-cu-cp-sa",
                             "terminationGracePeriodSeconds": 5,
-                            "nodeSelector": dict(ARCH_AMD64),
-                            "affinity": _hostname_affinity(SITE_NODES["edge"]),
+                            "nodeSelector": scheduling_node_selector(
+                                "amd64", detect_cluster_master("edge")
+                            ),
                             # Sequential bringup-* inits + order sidecar.
                             "initContainers": _cucp_bringup_inits(ip_plan),
                             "containers": [
@@ -850,10 +829,9 @@ def _write_edge_gnb(
                         },
                         "spec": {
                             "terminationGracePeriodSeconds": 5,
-                            "nodeSelector": {
-                                **ARCH_AMD64,
-                                "kubernetes.io/hostname": "edge-1",
-                            },
+                            "nodeSelector": scheduling_node_selector(
+                                "amd64", detect_cluster_master("edge")
+                            ),
                             "containers": [
                                 {
                                     "name": "flexric",
@@ -1254,7 +1232,7 @@ def _write_cuup(
         "edge": shared.gw_edge,
     }.get(cluster, shared.gw_central)
     n = sl.n
-    nodes = SITE_NODES.get(cluster, SITE_NODES["central"])
+    master = detect_cluster_master(cluster)
 
     write(
         ns_dir / f"36-serviceaccount-oai-cu-up-{n}-sa.yaml",
@@ -1325,8 +1303,7 @@ def _write_cuup(
                         "spec": {
                             "serviceAccountName": f"oai-cu-up-{n}-sa",
                             "terminationGracePeriodSeconds": 5,
-                            "nodeSelector": dict(ARCH_AMD64),
-                            "affinity": _hostname_affinity(nodes),
+                            "nodeSelector": scheduling_node_selector("amd64", master),
                             # No bringup-* init: CU-UP starts before CU-CP (E1 client).
                             "containers": [
                                 _bringup_order_sidecar(

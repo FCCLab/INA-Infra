@@ -732,10 +732,6 @@ export const DEFAULT_PROFILE: Profile = {
   ue_node: "usrp",
 };
 
-/** Edge nodes that can host rfsim DU / UEs. */
-/** @deprecated Prefer api.edgeNodes() — kept as offline fallback. */
-export const EDGE_RF_NODES = ["cpu-edge-0", "cpu-edge-1", "gpu-a40", "usrp"] as const;
-
 export type EdgeNodeOut = {
   name: string;
   ready: boolean;

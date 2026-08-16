@@ -1,29 +1,33 @@
 """Detect Multus macvlan parent NIC for NAD templates.
 
-Lab Multus parents are the site/k8s-node plane (typically ``10.1.137.0/24``):
-``enp7s0`` on VM workers, ``enp4s0f0`` on usrp. Detection SSHes to the node and
-finds the iface that carries that prefix (override via env).
+Lab Multus parents are the site/k8s-node plane (typically ``10.1.137.0/24``).
+Detection SSHes to the live Kubernetes node and finds the iface that carries
+that prefix (override via env). Node inventories come from kubectl, not a
+hardcoded hostname list.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
-# Fallbacks when detection is disabled or fails.
+# Fallbacks when detection is disabled or SSH fails.
 FALLBACK_DEFAULT = os.environ.get("INA_MULTUS_MASTER_DEFAULT", "enp7s0")
-FALLBACK_USRP = os.environ.get("INA_MULTUS_MASTER_USRP", "enp4s0f0")
 
 # Address prefix that marks the Multus / site L2 parent (kubelet --node-ip plane).
 DETECT_PREFIX = os.environ.get("INA_MULTUS_DETECT_PREFIX", "10.1.137.")
 
-CLUSTER_PROBE_HOST: Dict[str, str] = {
-    "central": "cpu-central-0",
-    "regional": "cpu-regional-0",
-    "edge": "cpu-edge-0",
+MULTUS_LABEL = "ina-infra.nephio.lab/multus-master"
+
+_CLUSTER_CTX = {
+    "mgmt": ("INA_MGMT_KUBECONFIG", "INA_MGMT_CONTEXT", "config", "mgmt@mgmt"),
+    "central": ("INA_CENTRAL_KUBECONFIG", "INA_CENTRAL_CONTEXT", "config-central", "central@central"),
+    "regional": ("INA_REGIONAL_KUBECONFIG", "INA_REGIONAL_CONTEXT", "config-regional", "regional@regional"),
+    "edge": ("INA_EDGE_KUBECONFIG", "INA_EDGE_CONTEXT", "config-edge", "edge@edge"),
 }
 
 _lock = threading.Lock()
@@ -50,22 +54,106 @@ def _force_master() -> Optional[str]:
     return v or None
 
 
-def _fallback_for_host(host: str) -> str:
-    h = (host or "").strip()
-    if h == "usrp":
-        return FALLBACK_USRP
-    # Bare-metal edge workers often use eno1 (see edge-2 / gpu-a40).
-    if h in ("edge-2", "gpu-a40", "edge-3") or (
-        h.startswith("edge-") and h not in ("edge-0", "edge-1", "cpu-edge-0", "cpu-edge-1")
-    ):
-        return os.environ.get("INA_MULTUS_MASTER_BAREMETAL", "eno1")
-    return FALLBACK_DEFAULT
+def scheduling_node_selector(arch: str, master: str) -> Dict[str, str]:
+    """Pin to arch + Multus parent label — not to a hostname list."""
+    sel: Dict[str, str] = {"kubernetes.io/arch": arch}
+    if master:
+        sel[MULTUS_LABEL] = master
+    return sel
+
+
+def _kubeconfig_for(cluster: str) -> Optional[str]:
+    spec = _CLUSTER_CTX.get(cluster)
+    if not spec:
+        return os.environ.get("KUBECONFIG")
+    env_key, _, default_name, _ = spec
+    explicit = os.environ.get(env_key)
+    if explicit:
+        return explicit
+    home = Path.home() / ".kube"
+    if cluster == "mgmt":
+        cand = home / "config"
+    else:
+        cand = home / default_name
+    if cand.is_file():
+        return str(cand)
+    return os.environ.get("KUBECONFIG")
+
+
+def _context_for(cluster: str) -> str:
+    spec = _CLUSTER_CTX.get(cluster)
+    if not spec:
+        return os.environ.get("KUBECTL_CONTEXT") or f"{cluster}@{cluster}"
+    _, ctx_env, _, default_ctx = spec
+    return os.environ.get(ctx_env) or default_ctx
+
+
+def list_cluster_nodes(cluster: str) -> List[Dict[str, Any]]:
+    """Live kubectl node inventory (name, roles, arch, gpu, ready)."""
+    cmd = ["kubectl", "--context", _context_for(cluster), "get", "nodes", "-o", "json"]
+    kc = _kubeconfig_for(cluster)
+    if kc:
+        cmd[1:1] = ["--kubeconfig", kc]
+    try:
+        raw = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=20)
+        data = json.loads(raw)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in data.get("items") or []:
+        md = item.get("metadata") or {}
+        name = md.get("name") or ""
+        if not name:
+            continue
+        labels = md.get("labels") or {}
+        status = item.get("status") or {}
+        roles = sorted(
+            k.replace("node-role.kubernetes.io/", "")
+            for k in labels
+            if k.startswith("node-role.kubernetes.io/")
+        )
+        ready = any(
+            c.get("type") == "Ready" and c.get("status") == "True"
+            for c in (status.get("conditions") or [])
+        )
+        alloc = status.get("allocatable") or {}
+        gpu = str(alloc.get("nvidia.com/gpu") or "0")
+        has_gpu = gpu not in ("", "0")
+        out.append(
+            {
+                "name": name,
+                "ready": ready,
+                "roles": roles,
+                "arch": labels.get("kubernetes.io/arch") or "",
+                "gpu": has_gpu,
+                "multus_master": labels.get(MULTUS_LABEL) or "",
+            }
+        )
+    return out
+
+
+def _probe_host(cluster: str) -> str:
+    """Pick a live node to SSH for cluster-scoped NAD parent detection."""
+    env_host = (os.environ.get(f"INA_MULTUS_PROBE_{cluster.upper()}") or "").strip()
+    if env_host:
+        return env_host
+    nodes = list_cluster_nodes(cluster)
+    cps = [n for n in nodes if n.get("ready") and "control-plane" in (n.get("roles") or [])]
+    if cps:
+        return cps[0]["name"]
+    ready = [n for n in nodes if n.get("ready")]
+    if ready:
+        return ready[0]["name"]
+    if nodes:
+        return nodes[0]["name"]
+    return cluster
 
 
 def _ssh_detect(host: str) -> Optional[str]:
     """Return iface carrying DETECT_PREFIX, or None on failure."""
+    if not host:
+        return None
     cfg = _ssh_cfg()
-    # Escape dots for awk regex (10.1.137. → 10\.1\.137\.).
     prefix_re = DETECT_PREFIX.replace(".", r"\.")
     remote = (
         "ip -4 -o addr show | "
@@ -93,7 +181,6 @@ def _ssh_detect(host: str) -> Optional[str]:
         ).strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return None
-    # Strip VLAN / @peer suffixes if any (e.g. enp7s0.100@enp7s0 → enp7s0.100).
     if not out:
         return None
     return out.split("@", 1)[0].split(":", 1)[0]
@@ -101,16 +188,18 @@ def _ssh_detect(host: str) -> Optional[str]:
 
 def detect_host_master(host: str, *, use_cache: bool = True) -> str:
     """Multus parent NIC for a specific SSH host / k8s node name."""
-    host = (host or "").strip() or "cpu-edge-0"
+    host = (host or "").strip()
     forced = _force_master()
     if forced:
         return forced
+    if not host:
+        return FALLBACK_DEFAULT
     if use_cache:
         with _lock:
             if host in _cache:
                 return _cache[host]
 
-    master = _fallback_for_host(host)
+    master = FALLBACK_DEFAULT
     if _detect_enabled():
         found = _ssh_detect(host)
         if found:
@@ -123,9 +212,25 @@ def detect_host_master(host: str, *, use_cache: bool = True) -> str:
 
 
 def detect_cluster_master(cluster: str, *, use_cache: bool = True) -> str:
-    """Multus parent for cluster-scoped NADs (probe the cluster control plane)."""
-    host = CLUSTER_PROBE_HOST.get(cluster, cluster)
-    return detect_host_master(host, use_cache=use_cache)
+    """Multus parent for cluster-scoped NADs (probe a live node on that cluster)."""
+    return detect_host_master(_probe_host(cluster), use_cache=use_cache)
+
+
+def detect_gpu_worker_master(
+    cluster: str,
+    *,
+    use_cache: bool = True,
+    arch: Optional[str] = "arm64",
+) -> str:
+    """Multus parent on a GPU worker. Default: arm64 (GH200); no hostname list."""
+    nodes = list_cluster_nodes(cluster)
+    for n in nodes:
+        if not (n.get("ready") and n.get("gpu")):
+            continue
+        if arch and n.get("arch") != arch:
+            continue
+        return detect_host_master(n["name"], use_cache=use_cache)
+    return detect_cluster_master(cluster, use_cache=use_cache)
 
 
 def detect_masters_for_profile(
@@ -180,7 +285,7 @@ def label_node_multus_master(
         "label",
         "node",
         node,
-        f"ina-infra.nephio.lab/multus-master={master}",
+        f"{MULTUS_LABEL}={master}",
         "--overwrite",
     ]
     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -192,29 +297,18 @@ def label_cluster_nodes_multus_master(
     context: Optional[str] = None,
     nodes: Optional[list[str]] = None,
 ) -> Dict[str, str]:
-    """Detect parent NIC per node and label them for UPF/AMF/SMF scheduling.
+    """Detect parent NIC per live node and label them for scheduling.
 
     Returns ``{node: master}``.
     """
-    # Default worker names in this lab when not provided.
-    defaults = {
-        "central": ["cpu-central-0", "cpu-central-1", "gpu-gh81"],
-        "regional": ["cpu-regional-0", "cpu-regional-1", "gpu-gh82"],
-        "edge": ["cpu-edge-0", "cpu-edge-1", "edge-2", "usrp", "gpu-a40"],
-    }
-    targets = nodes if nodes is not None else defaults.get(cluster, [CLUSTER_PROBE_HOST.get(cluster, cluster)])
-    # Prefer kube context name like edge@edge
-    ctx = context
-    if not ctx:
-        ctx = {
-            "central": "central@central",
-            "regional": "regional@regional",
-            "edge": "edge@edge",
-        }.get(cluster)
+    ctx = context or _context_for(cluster)
+    if nodes is not None:
+        targets = list(nodes)
+    else:
+        targets = [n["name"] for n in list_cluster_nodes(cluster)]
 
     out: Dict[str, str] = {}
     for node in targets:
-        # Skip nodes that are not Ready / don't exist — label will fail quietly.
         master = detect_host_master(node, use_cache=True)
         try:
             label_node_multus_master(node, master, context=ctx)
