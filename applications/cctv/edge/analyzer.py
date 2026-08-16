@@ -95,6 +95,8 @@ FRAMES_WITHOUT_TS = Counter(
     "Frames lacking a reference-timestamp meta (SR not yet received)",
 )
 FPS_GAUGE = Gauge("cctv_fps", "Frames per second (edge analyzer)")
+INGRESS_FPS_GAUGE = Gauge("application_ingress_fps", "Ingress frame rate at analyzer appsink")
+EGRESS_FPS_GAUGE = Gauge("application_egress_fps", "Egress processed frame rate after YOLO")
 CLOCK_OFFSET = Gauge(
     "cctv_clock_offset_seconds", "Absolute chrony clock offset (edge)"
 )
@@ -589,18 +591,28 @@ class CCTVAnalyzer:
             time.sleep(LOG_INTERVAL_S)
             now = time.monotonic()
             with GLOBAL_LOCK:
+                total_ingress_fps = 0.0
+                total_egress_fps = 0.0
                 for cid, ctx in list(self._stream_contexts.items()):
                     delta = ctx.decoded_count - ctx.last_decoded_count
+                    delta_analyzed = ctx.analyzed_count - ctx.last_analyzed_count
                     elapsed = now - ctx.last_report
                     fps = delta / elapsed if elapsed > 0 else 0.0
+                    egress_fps = delta_analyzed / elapsed if elapsed > 0 else 0.0
                     ctx.fps = fps
+                    ctx.egress_fps = egress_fps
                     ctx.last_decoded_count = ctx.decoded_count
+                    ctx.last_analyzed_count = ctx.analyzed_count
                     ctx.last_report = now
+                    total_ingress_fps += fps
+                    total_egress_fps += egress_fps
                     if cid == "slicea" or cid == "ue1" or len(self._stream_contexts) == 1:
                         FPS_GAUGE.set(fps)
                     ctx.net_samples = []
                     ctx.yolo_samples = []
                     ctx.e2e_samples = []
+                INGRESS_FPS_GAUGE.set(total_ingress_fps)
+                EGRESS_FPS_GAUGE.set(total_egress_fps)
             self._reap_idle_workers()
 
     def run(self) -> None:

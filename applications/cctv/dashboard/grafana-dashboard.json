@@ -7,134 +7,94 @@
     "links": [],
     "panels": [
       {
+        "collapsed": false,
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+        "id": 100,
+        "title": "Row 1: Latency Breakdown (Server Published)",
+        "type": "row"
+      },
+      {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+        "description": "5G Network & Transport Delay (camera capture to analyzer appsink ingest). Server published.",
         "fieldConfig": {
           "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#16E6A0", "value": null },
-              { "color": "#f5a623", "value": 150 },
-              { "color": "#e11d48", "value": 300 }
-            ]},
-            "unit": "ms"
+            "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
+            "min": 0, "unit": "ms"
           },
           "overrides": []
         },
-        "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
         "id": 1,
-        "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"e2e_delay_ms\" and r.cluster == \"regional\")\n  |> mean()", "refId": "A" }],
-        "title": "E2E delay — avg (ms)",
-        "type": "stat"
+        "options": {
+          "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+          "tooltip": { "mode": "multi", "sort": "desc" }
+        },
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"net_delay_ms\" or r._field == \"slicea_net_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Net Delay (ms)\" }))\n  |> yield(name: \"net_delay\")",
+          "refId": "A"
+        }],
+        "title": "5G Network Delay (net_delay_ms)",
+        "type": "timeseries"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+        "description": "YOLO neural network forward-pass inference time per frame. Server published.",
         "fieldConfig": {
           "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#00C2D4", "value": null },
-              { "color": "#f5a623", "value": 80 },
-              { "color": "#e11d48", "value": 150 }
-            ]},
-            "unit": "ms"
+            "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
+            "min": 0, "unit": "ms"
           },
           "overrides": []
         },
-        "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
         "id": 2,
-        "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"net_delay_ms\" and r.cluster == \"regional\")\n  |> mean()", "refId": "A" }],
-        "title": "5G net delay — avg (ms)",
-        "type": "stat"
+        "options": {
+          "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+          "tooltip": { "mode": "multi", "sort": "desc" }
+        },
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"yolo_delay_ms\" or r._field == \"slicea_yolo_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" YOLO Delay (ms)\" }))\n  |> yield(name: \"yolo_delay\")",
+          "refId": "A"
+        }],
+        "title": "YOLO AI Latency (yolo_delay_ms)",
+        "type": "timeseries"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+        "description": "End-to-End Latency from camera sensor capture to YOLO inference completion. Server published.",
         "fieldConfig": {
           "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#f5a623", "value": null },
-              { "color": "#f5a623", "value": 150 },
-              { "color": "#e11d48", "value": 300 }
-            ]},
-            "unit": "ms"
+            "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
+            "min": 0, "unit": "ms"
           },
           "overrides": []
         },
-        "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
         "id": 3,
-        "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"yolo_delay_ms\" and r.cluster == \"regional\")\n  |> mean()", "refId": "A" }],
-        "title": "YOLO AI latency — avg (ms)",
-        "type": "stat"
-      },
-      {
-        "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#e11d48", "value": null },
-              { "color": "#f5a623", "value": 4 },
-              { "color": "#00C2D4", "value": 16 }
-            ]},
-            "unit": "Mbits"
-          },
-          "overrides": []
+        "options": {
+          "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+          "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-        "id": 4,
-        "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"throughput_mbps\" and r.cluster == \"edge\")\n  |> aggregateWindow(every: 2s, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> last()", "refId": "A" }],
-        "title": "Total 8 UEs uplink (Mbps)",
-        "type": "stat"
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"e2e_delay_ms\" or r._field == \"slicea_e2e_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" E2E Delay (ms)\" }))\n  |> yield(name: \"e2e_delay\")",
+          "refId": "A"
+        }],
+        "title": "End-to-End Latency (e2e_delay_ms)",
+        "type": "timeseries"
+      },
+      {
+        "collapsed": false,
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+        "id": 200,
+        "title": "Row 2: Throughput (Client Publish vs Server Publish)",
+        "type": "row"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#e11d48", "value": null },
-              { "color": "#f5a623", "value": 15 },
-              { "color": "#16E6A0", "value": 24 }
-            ]},
-            "unit": "fps"
-          },
-          "overrides": []
-        },
-        "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
-        "id": 5,
-        "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"cctv_ue_fps\" or r._field == \"slicea_fps\") and r.cluster == \"edge\")\n  |> mean()", "refId": "A" }],
-        "title": "UE avg FPS (all 8 clients)",
-        "type": "stat"
-      },
-      {
-        "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "thresholds": { "mode": "absolute", "steps": [
-              { "color": "#e11d48", "value": null },
-              { "color": "#f5a623", "value": 15 },
-              { "color": "#16E6A0", "value": 24 }
-            ]},
-            "unit": "fps"
-          },
-          "overrides": []
-        },
-        "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
-        "id": 6,
-        "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "textMode": "auto" },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"cctv_fps\" or r._field == \"slicea_fps\") and r.cluster == \"regional\")\n  |> last()", "refId": "A" }],
-        "title": "Analyzer ingest FPS",
-        "type": "stat"
-      },
-      {
-        "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Per-UE uplink throughput across all 8 clients (edge) and analyzer aggregate ingest (regional).",
+        "description": "Client Uplink Throughput measured directly on the UE 5G PDU session interface (oaitun_ue). Client published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
@@ -142,39 +102,54 @@
           },
           "overrides": []
         },
-        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
-        "id": 7,
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+        "id": 4,
         "options": {
           "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"throughput_mbps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.cluster == \"edge\" then (r.app_name + \" (UE TX)\") else (r.app_name + \" (Analyzer RX)\") }))\n  |> yield(name: \"throughput\")", "refId": "A" }],
-        "title": "Throughput per UE (1 to 8) vs Analyzer (Mbps)",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"edge\" and r._field == \"throughput_mbps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Uplink (Mbps)\" }))\n  |> yield(name: \"client_tput\")",
+          "refId": "A"
+        }],
+        "title": "Client Uplink Throughput (throughput_client)",
         "type": "timeseries"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "net_delay = capture→appsink. yolo_delay = YOLO predict(). e2e_delay = full pipeline (E2E >= 5G + AI).",
+        "description": "Server Ingestion Throughput measured on the Regional Edge N6 network interface. Server published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
-            "min": 0, "unit": "ms", "max": 1000
+            "min": 0, "unit": "Mbits"
           },
           "overrides": []
         },
-        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
-        "id": 8,
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+        "id": 5,
         "options": {
           "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [{ "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"e2e_delay_ms\" or r._field == \"net_delay_ms\" or r._field == \"yolo_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" \" + r._field }))\n  |> yield(name: \"latency\")", "refId": "A" }],
-        "title": "Latency breakdown — YOLO vs 5G (ms)",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r._field == \"throughput_mbps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Ingest (Mbps)\" }))\n  |> yield(name: \"server_tput\")",
+          "refId": "A"
+        }],
+        "title": "Server Ingestion Throughput (throughput_server)",
         "type": "timeseries"
       },
       {
+        "collapsed": false,
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+        "id": 300,
+        "title": "Row 3: Application Frame Rates (Server Published Only)",
+        "type": "row"
+      },
+      {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Per-UE publisher FPS for up to 8 client UEs and analyzer ingest FPS as separate series.",
+        "description": "Application stream ingestion frame rate received and decoded at the analyzer appsink. Server published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
@@ -182,44 +157,54 @@
           },
           "overrides": []
         },
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
-        "id": 9,
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+        "id": 6,
         "options": {
           "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"cctv_ue_fps\" or r._field == \"slicea_fps\") and r.cluster == \"edge\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" FPS\" }))\n  |> yield(name: \"ue_fps\")", "refId": "A" },
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"cctv_fps\" or r._field == \"slicea_fps\") and r.cluster == \"regional\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"Analyzer Ingest FPS\" }))\n  |> yield(name: \"analyzer_fps\")", "refId": "B" }
-        ],
-        "title": "FPS — All 8 UE Publishers vs Analyzer",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"application_ingress_fps\" or r._field == \"cctv_fps\" or r._field == \"slicea_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Ingress FPS\" }))\n  |> yield(name: \"ingress_fps\")",
+          "refId": "A"
+        }],
+        "title": "Application Ingress FPS (application_ingress_fps)",
         "type": "timeseries"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Per-UE H.264 encode latency across all 8 clients. Detects individual UE CPU bottlenecks.",
+        "description": "Application processed stream frame rate after YOLO AI inference and remux. Server published.",
         "fieldConfig": {
           "defaults": {
-            "custom": { "drawStyle": "line", "fillOpacity": 8, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 4, "showPoints": "auto", "spanNulls": true },
-            "min": 0, "unit": "ms"
+            "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
+            "min": 0, "unit": "fps", "max": 40
           },
           "overrides": []
         },
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
-        "id": 10,
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+        "id": 7,
         "options": {
           "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and (r._field == \"cctv_ue_encode_seconds_sum\" or r._field == \"cctv_ue_encode_seconds\") and r.cluster == \"edge\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 1000.0, _field: r.app_name + \" encode ms\" }))\n  |> yield(name: \"encode_ms\")", "refId": "A" }
-        ],
-        "title": "UE Encode Latency per Client (1 to 8) (ms)",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"application_egress_fps\" or r._field == \"cctv_fps\" or r._field == \"slicea_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Egress FPS\" }))\n  |> yield(name: \"egress_fps\")",
+          "refId": "A"
+        }],
+        "title": "Application Egress FPS (application_egress_fps)",
         "type": "timeseries"
       },
       {
+        "collapsed": false,
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+        "id": 400,
+        "title": "Row 4: Clock Offset (Client vs Server)",
+        "type": "row"
+      },
+      {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "chrony clock offset for each of the 8 UEs and the analyzer. E2E accuracy is bounded by max offset.",
+        "description": "Chrony NTP clock offset for each UE client host relative to reference time source. Client published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 6, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 1, "pointSize": 3, "showPoints": "auto", "spanNulls": true },
@@ -227,40 +212,42 @@
           },
           "overrides": []
         },
-        "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
-        "id": 11,
+        "gridPos": { "h": 7, "w": 12, "x": 0, "y": 28 },
+        "id": 8,
         "options": {
           "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"cctv_ue_clock_offset_seconds\" and r.cluster == \"edge\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 1000.0, _field: r.app_name + \" offset ms\" }))\n  |> yield(name: \"ue_offset\")", "refId": "A" },
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"cctv_clock_offset_seconds\" and r.cluster == \"regional\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 1000.0, _field: \"Analyzer offset ms\" }))\n  |> yield(name: \"analyzer_offset\")", "refId": "B" }
-        ],
-        "title": "NTP Clock Offset — 8 UEs + Analyzer (ms)",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"edge\" and (r._field == \"cctv_ue_clock_offset_seconds\" or r._field == \"clock_offset_seconds\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 1000.0, _field: r.app_name + \" Offset (ms)\" }))\n  |> yield(name: \"ue_offset\")",
+          "refId": "A"
+        }],
+        "title": "UE Clock Offset (clock_offset_ue)",
         "type": "timeseries"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Dropped frames (cctv_frames_dropped_total) and frames missing NTP timestamp (cctv_frames_without_ts_total).",
+        "description": "Chrony NTP clock offset for Regional Edge Analyzer server host relative to reference time source. Server published.",
         "fieldConfig": {
           "defaults": {
-            "custom": { "drawStyle": "bars", "fillOpacity": 60, "gradientMode": "none", "lineWidth": 1, "pointSize": 3, "showPoints": "never", "spanNulls": false },
-            "min": 0, "unit": "short"
+            "custom": { "drawStyle": "line", "fillOpacity": 6, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 1, "pointSize": 3, "showPoints": "auto", "spanNulls": true },
+            "min": 0, "unit": "ms"
           },
           "overrides": []
         },
-        "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
-        "id": 12,
+        "gridPos": { "h": 7, "w": 12, "x": 12, "y": 28 },
+        "id": 9,
         "options": {
-          "legend": { "calcs": ["sum", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+          "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
           "tooltip": { "mode": "multi", "sort": "desc" }
         },
-        "targets": [
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"cctv_frames_dropped_total\" and r.cluster == \"regional\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"dropped/s\" }))\n  |> yield(name: \"dropped\")", "refId": "A" },
-          { "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" }, "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r._field == \"cctv_frames_without_ts_total\" and r.cluster == \"regional\")\n  |> derivative(unit: 1s, nonNegative: true)\n  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"no-ts/s\" }))\n  |> yield(name: \"no_ts\")", "refId": "B" }
-        ],
-        "title": "Analyzer frame drops + missing-TS rate",
+        "targets": [{
+          "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"cctv_clock_offset_seconds\" or r._field == \"clock_offset_seconds\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _value: r._value * 1000.0, _field: r.app_name + \" Server Offset (ms)\" }))\n  |> yield(name: \"server_offset\")",
+          "refId": "A"
+        }],
+        "title": "Server Clock Offset (clock_offset_server)",
         "type": "timeseries"
       }
     ],
@@ -273,8 +260,8 @@
     "timezone": "browser",
     "title": "CCTV Dashboard",
     "uid": "ffvbyfvl0i29sd",
-    "version": 22
+    "version": 23
   },
   "overwrite": true,
-  "message": "Support plotting up to 8 UEs per panel with distinct legend and series labels"
+  "message": "Structured 4-row layout: 3 latency plots (server), throughput (client vs server), application ingress/egress FPS (server), clock offset (UE vs server)"
 }

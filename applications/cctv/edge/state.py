@@ -17,12 +17,13 @@ class ClientStreamContext:
     def __init__(self, client_id: str):
         self.client_id = client_id
         self.name = f"Camera {client_id.upper()}"
-        self.decoded_count = 0
         self.analyzed_count = 0
         self.yolo_seq = 0
         self.last_decoded_count = 0
+        self.last_analyzed_count = 0
         self.last_report = time.monotonic()
         self.fps = 0.0
+        self.egress_fps = 0.0
         self.net_delay_ms = 0.0
         self.yolo_delay_ms = 0.0
         self.e2e_delay_ms = 0.0
