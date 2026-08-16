@@ -876,11 +876,7 @@ def build_client_container(
             app_cfg.client_image
             or "10.1.132.30:5000/slicea-publisher:nws-v0.6-amd64"
         )
-        app_name = (
-            f"slice{sid}-cctv-publisher"
-            if client_index <= 1
-            else f"slice{sid}-cctv-publisher-{client_index}"
-        )
+        app_name = f"slice{sid}-cctv-client-{client_index}"
         return {
             "name": client_name,
             "image": client_img,
@@ -1070,11 +1066,7 @@ def build_client_metrics_container(
     elif app_type == "cctv" and client_index > 1:
         m_port = 9100 + client_index
 
-    app_name = (
-        f"slice{sid}-{app_type}-client"
-        if client_index <= 1
-        else f"slice{sid}-{app_type}-client-{client_index}"
-    )
+    app_name = f"slice{sid}-{app_type}-client-{client_index}"
     return _influx_pusher_container(
         m_port,
         app_name,
