@@ -1,0 +1,40 @@
+# Cosmos3 Nano Reasoner (vLLM) — build on aarch64 (gh82 / GH200).
+# Matches setup.sh: vllm==0.21.0 + cu130 + vllm-cosmos3.
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    UV_SYSTEM_PYTHON=0 \
+    HF_HOME=/models \
+    HUGGINGFACE_HUB_CACHE=/models \
+    HF_HUB_CACHE=/models \
+    VLLM_USE_FLASHINFER_SAMPLER=0 \
+    PATH=/opt/venv/bin:/root/.local/bin:${PATH}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv, then a managed Python 3.12 venv (host image Python is older).
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv
+
+# gh82 host driver is 575.x / CUDA 12.9. vllm>=0.20 aarch64 wheels link
+# libcudart.so.13 (needs CUDA 13 driver). Use vllm 0.19.1 (cudart.so.12) which
+# still satisfies vllm-cosmos3's Requires-Dist: vllm>=0.19.
+ARG TORCH_BACKEND=cu128
+ARG VLLM_VERSION=0.19.1
+
+RUN /root/.local/bin/uv pip install --python /opt/venv --torch-backend="${TORCH_BACKEND}" \
+      "vllm==${VLLM_VERSION}" \
+      "vllm-cosmos3 @ git+https://github.com/NVIDIA/cosmos-framework.git#subdirectory=packages/vllm-cosmos3" \
+      openai
+
+WORKDIR /app
+COPY entrypoint-vllm.sh /app/entrypoint-vllm.sh
+RUN chmod +x /app/entrypoint-vllm.sh
+
+EXPOSE 8000
+VOLUME ["/models"]
+
+ENTRYPOINT ["/app/entrypoint-vllm.sh"]

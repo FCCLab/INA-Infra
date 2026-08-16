@@ -1,0 +1,107 @@
+# Slice D — Background IoT / best-effort load generator.
+#
+# Two services on two networks:
+#   * metrics_net : ens0-equivalent bridge. Prometheus scrapes /metrics here and
+#     chrony syncs over it. Metrics ports are also published to the host.
+#   * ota_net     : the 5G data-plane path. MQTT (broker :1883, client socket)
+#     rides this network only. Modelled here as a bridge so the whole slice runs
+#     on one host; in the real testbed replace it with the project's macvlan /
+#     external OTA network (see README) and set the *_OTA_IP / OTA_BIND_IP vars.
+#
+# Zero-config `docker compose up --build` works out of the box; every value has
+# an inline default and can be overridden via the environment or an .env file.
+services:
+  slice-d-edge:
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+    image: sliced-edge
+    container_name: sliced-edge
+    environment:
+      OTA_BIND_IP: ${EDGE_OTA_IP:-10.46.0.10}
+      METRICS_BIND_IP: ${METRICS_BIND_IP:-0.0.0.0}
+      METRICS_PORT: ${EDGE_METRICS_PORT:-9105}
+      DL_FAST_PERIOD_S: ${DL_FAST_PERIOD_S:-300}
+      DL_SLOW_PERIOD_S: ${DL_SLOW_PERIOD_S:-3600}
+      DL_PAYLOAD_BYTES: ${DL_PAYLOAD_BYTES:-256}
+      DEVICE_TTL_S: ${DEVICE_TTL_S:-7200}
+      MQTT_QOS: ${MQTT_QOS:-0}
+      LOG_INTERVAL_S: ${LOG_INTERVAL_S:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CHRONYC_HOST: ${CHRONYC_HOST:-}
+      CHRONY_MAX_OFFSET_MS: ${CHRONY_MAX_OFFSET_MS:-5}
+      OTA_IFACE: ${OTA_IFACE:-}
+      METRICS_IFACE: ${METRICS_IFACE:-}
+    ports:
+      - "${EDGE_METRICS_PORT:-9105}:${EDGE_METRICS_PORT:-9105}"
+    networks:
+      metrics_net: {}
+      ota_net:
+        ipv4_address: ${EDGE_OTA_IP:-10.46.0.10}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS http://localhost:${EDGE_METRICS_PORT:-9105}/metrics >/dev/null && mosquitto_sub -h 127.0.0.1 -p 1884 -C 1 -t '$$SYS/broker/uptime' -W 3 >/dev/null"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  slice-d-client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    image: sliced-client
+    container_name: sliced-client
+    depends_on:
+      - slice-d-edge
+    environment:
+      BROKER_HOST: ${BROKER_HOST:-10.46.0.10}
+      BROKER_PORT: ${BROKER_PORT:-1883}
+      OTA_BIND_IP: ${CLIENT_OTA_IP:-10.46.0.20}
+      METRICS_BIND_IP: ${METRICS_BIND_IP:-0.0.0.0}
+      METRICS_PORT: ${CLIENT_METRICS_PORT:-9104}
+      NUM_DEVICES: ${NUM_DEVICES:-5000}
+      FAST_PERIOD_S: ${FAST_PERIOD_S:-60}
+      MED_PERIOD_S: ${MED_PERIOD_S:-1800}
+      SLOW_PERIOD_S: ${SLOW_PERIOD_S:-3600}
+      PAYLOAD_BYTES_FAST: ${PAYLOAD_BYTES_FAST:-256}
+      PAYLOAD_BYTES_MED: ${PAYLOAD_BYTES_MED:-1024}
+      PAYLOAD_BYTES_SLOW: ${PAYLOAD_BYTES_SLOW:-4096}
+      MQTT_QOS: ${MQTT_QOS:-0}
+      LOG_INTERVAL_S: ${LOG_INTERVAL_S:-30}
+      JITTER_FRAC: ${JITTER_FRAC:-0.1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CHRONYC_HOST: ${CHRONYC_HOST:-}
+      CHRONY_MAX_OFFSET_MS: ${CHRONY_MAX_OFFSET_MS:-5}
+      OTA_IFACE: ${OTA_IFACE:-}
+      METRICS_IFACE: ${METRICS_IFACE:-}
+    ports:
+      - "${CLIENT_METRICS_PORT:-9104}:${CLIENT_METRICS_PORT:-9104}"
+    networks:
+      metrics_net: {}
+      ota_net:
+        ipv4_address: ${CLIENT_OTA_IP:-10.46.0.20}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${CLIENT_METRICS_PORT:-9104}/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  # Metrics/NTP plane (ens0-equivalent). Metrics ports are also host-published.
+  metrics_net:
+    driver: bridge
+  # OTA (5G data plane). Bridge for single-host runs; in the real testbed swap
+  # for the project's macvlan/external OTA network:
+  #   ota_net:
+  #     external: true
+  #     name: ota_net
+  ota_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${OTA_SUBNET:-10.46.0.0/24}

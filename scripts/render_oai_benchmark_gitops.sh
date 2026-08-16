@@ -384,7 +384,7 @@ def networks_annot(entries):
     return "".join(lines)
 
 
-def edge_node_affinity(hosts=("edge-0", "edge-1")):
+def edge_node_affinity(hosts=("cpu-edge-0", "cpu-edge-1")):
     return {
         "nodeAffinity": {
             "requiredDuringSchedulingIgnoredDuringExecution": {
@@ -524,7 +524,7 @@ def cn_executor_deployment(
         pod_meta["annotations"] = {"k8s.v1.cni.cncf.io/networks": networks}
     spec = {
         "serviceAccountName": name,
-        "nodeSelector": {"kubernetes.io/hostname": "central-0"},
+        "nodeSelector": {"kubernetes.io/hostname": "cpu-central-0"},
         "securityContext": {"runAsUser": 0, "runAsGroup": 0},
         "terminationGracePeriodSeconds": 5,
         "containers": [{
@@ -1508,7 +1508,7 @@ dump(
                 "spec": {
                     "terminationGracePeriodSeconds": 5,
                     # Opposite node from xApp (macvlan cannot hairpin).
-                    "nodeSelector": {"kubernetes.io/hostname": "edge-1"},
+                    "nodeSelector": {"kubernetes.io/hostname": "cpu-edge-1"},
                     "containers": [
                         {
                             "name": "flexric",
@@ -1573,7 +1573,7 @@ dump(
                 },
                 "spec": {
                     "terminationGracePeriodSeconds": 5,
-                    "nodeSelector": {"kubernetes.io/hostname": "edge-0"},
+                    "nodeSelector": {"kubernetes.io/hostname": "cpu-edge-0"},
                     "containers": [
                         {
                             "name": "xapp",

@@ -7,6 +7,8 @@ export type Profile = {
   du_node: string;
   /** Edge kubernetes.io/hostname for OAI UEs. */
   ue_node: string;
+  /** Custom OAI image overrides, or empty/latest for auto-discovery from registry. */
+  oai_images?: Record<string, string>;
 };
 
 export type SliceIn = {
@@ -73,6 +75,7 @@ export type SliceIps = {
   cuup_n3: string;
   ue_rf: string;
   dnn_cidr: string;
+  app_ip?: string;
   site_cu: string;
   site_upf: string;
   site_app: string;
@@ -136,16 +139,91 @@ export type NetworkOut = {
   locations: string[];
 };
 
+export type SliceAppType = "cctv" | "physical_ai" | "ott" | "iot" | "custom" | "none";
+
+export type SliceApplicationConfig = {
+  slice_id: number;
+  app_type: SliceAppType;
+  name: string;
+  enabled: boolean;
+  target_cluster: "auto" | "central" | "regional" | "edge" | string;
+  server_image: string;
+  client_image: string;
+  server_port: number;
+  metrics_port: number;
+  params: Record<string, any>;
+  deployed?: boolean;
+  deployed_at?: string | null;
+  last_error?: string | null;
+};
+
+export type AppDeployRequest = {
+  slice_id?: number | null;
+  profile?: Profile | null;
+  config?: SliceApplicationConfig | null;
+  applications?: Record<string, SliceApplicationConfig> | null;
+};
+
+export type UeDeployItem = {
+  name: string;
+  exists: boolean;
+  ready: number;
+  desired: number;
+  ready_text: string;
+  status: string;
+  ok: boolean;
+  client_sidecar: boolean;
+};
+
+export type UeSliceStatus = {
+  slice_id: number;
+  expected: number;
+  present: number;
+  client_ready: number;
+  overall: string;
+  summary: string;
+  deployments: UeDeployItem[];
+};
+
+export type UeClientStatusOut = {
+  namespace: string;
+  cluster?: string;
+  namespace_exists: boolean;
+  error?: string | null;
+  slices: Record<string, UeSliceStatus>;
+};
+
+export type AppDeployResponse = {
+  ok: boolean;
+  message: string;
+  deployed_apps: SliceApplicationConfig[];
+  profile?: ProfileRecord | null;
+};
+
+export type AppUndeployRequest = {
+  slice_id?: number | null;
+  profile?: Profile | null;
+};
+
+export type AppUndeployResponse = {
+  ok: boolean;
+  message: string;
+  undeployed_apps: number[];
+  profile?: ProfileRecord | null;
+};
+
 export type ProfileDefaultsOut = {
   profile: Profile;
   slices: SliceIn[];
   network: NetworkIn;
+  applications?: Record<string, SliceApplicationConfig>;
 };
 
 export type ProfileRecord = {
   profile: Profile;
   slices: SliceIn[];
   network: NetworkIn;
+  applications?: Record<string, SliceApplicationConfig>;
   pl_result?: PlSolveResponse | null;
   pl_result_file?: string | null;
   deployed?: boolean;
@@ -488,6 +566,24 @@ export type ProfileListOut = {
   names: string[];
 };
 
+export type OaiComponentStatus = {
+  key: string;
+  name: string;
+  repo: string;
+  latest_tag: string;
+  latest_image: string;
+  available_tags: string[];
+  fallback_tag: string;
+};
+
+export type OaiRegistryStatus = {
+  registry_host: string;
+  connected: boolean;
+  components: Record<string, OaiComponentStatus>;
+  defaults: Record<string, string>;
+  queried_at: string;
+};
+
 export type PmLoopParams = {
   interval_sec: number;
   demand_multiplier: number;
@@ -638,7 +734,7 @@ export const DEFAULT_PROFILE: Profile = {
 
 /** Edge nodes that can host rfsim DU / UEs. */
 /** @deprecated Prefer api.edgeNodes() — kept as offline fallback. */
-export const EDGE_RF_NODES = ["usrp", "edge-0", "edge-1", "edge-2"] as const;
+export const EDGE_RF_NODES = ["cpu-edge-0", "cpu-edge-1", "gpu-a40", "usrp"] as const;
 
 export type EdgeNodeOut = {
   name: string;
@@ -665,6 +761,84 @@ export const DEFAULT_SLICES: SliceIn[] = [
   { id: 3, t_bar: 40, d_bar: 50, h_s: 0, eta_t0: 2.5, slice_type: "OTT" },
   { id: 4, t_bar: 5, d_bar: 150, h_s: 0, eta_t0: 1.5, slice_type: "IoT" },
 ];
+
+export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
+  1: {
+    slice_id: 1,
+    app_type: "cctv",
+    name: "CCTV Vision Streaming",
+    enabled: true,
+    target_cluster: "auto",
+    server_image: "10.1.132.30:5000/slicea-analyzer:nws-v0.7-amd64",
+    client_image: "10.1.132.30:5000/slicea-publisher:nws-v0.6-amd64",
+    server_port: 8554,
+    metrics_port: 9102,
+    params: {
+      stream_path: "slicea",
+      yolo_model: "yolov8n.pt",
+      yolo_device: "cpu",
+      frame_skip: 1,
+      fps: 25,
+      bitrate_kbps: 4000,
+      rtsp_protocol: "tcp",
+    },
+  },
+  2: {
+    slice_id: 2,
+    app_type: "physical_ai",
+    name: "Physical AI (Cosmos3 VLM)",
+    enabled: true,
+    target_cluster: "auto",
+    server_image: "10.1.132.30:5000/cosmo3-vllm:nws-v0.5-arm64-cu128",
+    client_image: "10.1.132.30:5000/cosmo3-aiperf:nws-v0.5-amd64",
+    server_port: 8000,
+    metrics_port: 8002,
+    params: {
+      model: "nvidia/Cosmos-Nemotron-34B",
+      tensor_parallel_size: 1,
+      max_model_len: 4096,
+      gpu_arch: "arm64-gh200",
+      request_rate: 10,
+    },
+  },
+  3: {
+    slice_id: 3,
+    app_type: "ott",
+    name: "OTT HD Video Streaming",
+    enabled: true,
+    target_cluster: "auto",
+    server_image: "10.1.132.30:5000/hd-stream-server:hdstream-v2",
+    client_image: "10.1.132.30:5000/hd-stream-client:hdstream-v2",
+    server_port: 8554,
+    metrics_port: 9103,
+    params: {
+      stream_protocol: "rtsp",
+      stream_path: "live/hd",
+      bitrate_kbps: 6000,
+      resolution: "1080p",
+    },
+  },
+  4: {
+    slice_id: 4,
+    app_type: "iot",
+    name: "Background IoT (MQTT)",
+    enabled: true,
+    target_cluster: "auto",
+    server_image: "10.1.132.30:5000/sliced-edge:nws-v0.5-amd64",
+    client_image: "10.1.132.30:5000/sliced-client:nws-v0.5-amd64",
+    server_port: 1883,
+    metrics_port: 9105,
+    params: {
+      num_devices: 5,
+      fast_period_s: 60,
+      med_period_s: 1800,
+      slow_period_s: 3600,
+      dl_fast_period_s: 300,
+      dl_slow_period_s: 3600,
+      mqtt_qos: 0,
+    },
+  },
+};
 
 async function request<T>(
   path: string,
@@ -822,6 +996,8 @@ export const api = {
   defaults: () => request<SliceIn[]>("/api/v1/slices/defaults"),
   profileDefaults: () => request<ProfileDefaultsOut>("/api/v1/profiles/default"),
   listProfiles: () => request<ProfileListOut>("/api/v1/profiles"),
+  getOaiRegistryImages: (refresh = false) =>
+    request<OaiRegistryStatus>(`/api/v1/registry/oai-images${refresh ? "?refresh=true" : ""}`),
   getProfile: (name: string) =>
     request<ProfileRecord>(`/api/v1/profiles/${encodeURIComponent(name)}`),
   createProfile: (body: {
@@ -848,6 +1024,72 @@ export const api = {
     request<{ ok: boolean; deleted: string; remaining: string[] }>(
       `/api/v1/profiles/${encodeURIComponent(name)}`,
       { method: "DELETE" },
+    ),
+  getApplications: (profileName: string) =>
+    request<Record<string, SliceApplicationConfig>>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications`,
+    ),
+  saveApplications: (
+    profileName: string,
+    applications: Record<string, SliceApplicationConfig>,
+  ) =>
+    request<ProfileRecord>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications`,
+      {
+        method: "PUT",
+        body: JSON.stringify(applications),
+      },
+    ),
+  saveProfileApplications: (
+    profileName: string,
+    applications: Record<string, SliceApplicationConfig>,
+  ) =>
+    request<ProfileRecord>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications`,
+      {
+        method: "PUT",
+        body: JSON.stringify(applications),
+      },
+    ),
+  deployApp: (profileName: string, body: AppDeployRequest) =>
+    request<AppDeployResponse>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications/deploy`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
+  deployAppStream: (
+    profileName: string,
+    body: AppDeployRequest,
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<AppDeployResponse>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications/deploy/stream`,
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 300_000, signal: opts?.signal },
+    ),
+  undeployApp: (profileName: string, body: AppUndeployRequest) =>
+    request<AppUndeployResponse>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications/undeploy`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
+  undeployAppStream: (
+    profileName: string,
+    body: AppUndeployRequest,
+    handlers?: StreamHandlers,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ) =>
+    streamRequest<AppUndeployResponse>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/applications/undeploy/stream`,
+      body,
+      handlers,
+      { timeoutMs: opts?.timeoutMs ?? 300_000, signal: opts?.signal },
     ),
   network: () => request<NetworkOut>("/api/v1/network"),
   networkPreview: (network: NetworkIn) =>
@@ -929,6 +1171,10 @@ export const api = {
   clusterStatus: (name: string) =>
     request<ProfileClusterStatusOut>(
       `/api/v1/profiles/${encodeURIComponent(name)}/cluster-status`,
+    ),
+  ueClientStatus: (name: string) =>
+    request<UeClientStatusOut>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/ue-client-status`,
     ),
   edgeNodes: () => request<EdgeNodesOut>("/api/v1/clusters/edge/nodes"),
   profileRollout: (name: string, body: ProfileRolloutRequest = {}) =>
@@ -1151,4 +1397,21 @@ export const api = {
     }),
   benchmarkPrbRunStatus: () =>
     request<BenchmarkPrbRunStatusOut>("/api/v1/benchmark/prb/run/status"),
+
+  influxStatus: () =>
+    request<{ ok: boolean; url: string; org: string; bucket: string; status_code?: number; error?: string }>(
+      "/api/v1/influx/status"
+    ),
+  getApplicationMetrics: (name: string, sliceId?: number, rangeS = 300) =>
+    request<{ ok: boolean; profile: string; slice_id?: number; range_s: number; metrics: any[] }>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/applications/metrics?${sliceId !== undefined ? `slice_id=${sliceId}&` : ""}&range_s=${rangeS}`
+    ),
+  pushApplicationMetrics: (name: string, payload: { fields: Record<string, number>; tags?: Record<string, string>; slice?: number; app_type?: string }) =>
+    request<{ ok: boolean; profile: string; tags: Record<string, string>; fields: Record<string, number> }>(
+      `/api/v1/profiles/${encodeURIComponent(name)}/applications/metrics/push`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
 };

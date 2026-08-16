@@ -56,8 +56,8 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.140`–`.141` | *(retired ue cluster)* | formerly `ue-0`/`ue-1` |
 | **`.150`–`.159`** | **GPU bare-metal workers** | `GPU_WORKER_IP_FIRST` … `LAST` |
 | `.150` | — | Spare |
-| `.151` | `gh81` | edge cluster, GH200 arm64 |
-| `.152` | `gh82` | central cluster, GH200 arm64 |
+| `.151` | `gh81` | central cluster, GH200 arm64 |
+| `.152` | `gh82` | regional cluster, GH200 arm64 |
 | `.153`–`.159` | — | Spare |
 | **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC on `central-0`; ina-infra UPF N6 dhclient |
 
@@ -201,8 +201,8 @@ Bootstrap: [workloads/wl_setup_ssh_mgmt_ip.sh](../workloads/wl_setup_ssh_mgmt_ip
 | edge | `edge-2` | 10.1.101.18 | — | `eno1` | 10.1.137.132 | [55-k8s.yaml](../workloads/netplan/edge-2/55-k8s.yaml) |
 | edge | `edge-3` | 172.27.2.22 | — | `ens12f0` | 10.1.137.133 | [55-k8s.yaml](../workloads/netplan/edge-3/55-k8s.yaml) |
 | edge | `usrp` | 10.1.101.19 | — | `enp4s0f0` | 10.1.137.134 | [55-k8s.yaml](../workloads/netplan/usrp/55-k8s.yaml) |
-| central | `gh82` | 10.1.101.212 | `enP2s2f0np0` | `enP2s2f1np1` | 10.1.137.152 | [55-k8s.yaml](../workloads/netplan/gh82/55-k8s.yaml) |
-| edge | `gh81` | 10.1.101.211 | `aerial02` | `aerial03` | 10.1.137.151 | [55-k8s.yaml](../workloads/netplan/gh81/55-k8s.yaml) |
+| central | `gh81` | 10.1.101.211 | `aerial02` | `aerial03` | 10.1.137.151 | [55-k8s.yaml](../workloads/netplan/gh81/55-k8s.yaml) |
+| regional | `gh82` | 10.1.101.212 | `enP2s2f0np0` | `enP2s2f1np1` | 10.1.137.152 | [55-k8s.yaml](../workloads/netplan/gh82/55-k8s.yaml) |
 
 `usrp` site IP **`10.1.137.134`** is not hypervisor bridge **`10.1.137.13`** (`br-int-ue`). GPU workers use **`.150`–`.159`**, not bridge **`.10`–`.22`**.
 

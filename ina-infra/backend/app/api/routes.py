@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.schemas import (
+    AppDeployRequest,
+    AppDeployResponse,
+    AppUndeployRequest,
+    AppUndeployResponse,
     BenchmarkDeployRequest,
     BenchmarkPrbApplyRequest,
     BenchmarkPrbApplyResponse,
@@ -54,6 +58,7 @@ from app.schemas import (
     PmLoopStopResponse,
     PmSolveResponse,
     ProfileClusterStatusOut,
+    UeClientStatusOut,
     ProfileCreateRequest,
     ProfileDefaultsOut,
     ProfileListOut,
@@ -64,10 +69,13 @@ from app.schemas import (
     PsLoopRequest,
     PsLoopStatusOut,
     PsLoopStopResponse,
+    OaiRegistryStatusResponse,
     PsSolveResponse,
+    SliceApplicationConfig,
     SliceIn,
 )
 from app.services import (
+    application_deploy,
     benchmark,
     benchmark_log,
     benchmark_prb_run,
@@ -82,6 +90,8 @@ from app.services import (
     profile_rollout,
     profile_store,
     ps_loop,
+    registry_service,
+    influx_service,
     xapp_prb,
 )
 
@@ -190,6 +200,17 @@ def get_default_slices():
 )
 def get_profile_defaults():
     return pl_solver.profile_defaults()
+
+
+@router.get(
+    "/registry/oai-images",
+    response_model=OaiRegistryStatusResponse,
+    tags=["Profiles"],
+    summary="Query private registry for OAI container images",
+    description="Inspects the private Docker registry (10.1.132.30:5000) for available tags and latest resolved images.",
+)
+def get_oai_registry_images(refresh: bool = False):
+    return registry_service.get_oai_registry_status(force_refresh=refresh)
 
 
 @router.get(
@@ -341,6 +362,173 @@ def delete_profile(name: str):
     }
 
 
+# ── Applications ─────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/profiles/{name}/applications",
+    response_model=Dict[str, SliceApplicationConfig],
+    tags=["Applications"],
+    summary="Get slice application configs for a profile",
+)
+def get_profile_applications(name: str):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    return rec.applications or profile_store.default_applications(rec.slices)
+
+
+@router.put(
+    "/profiles/{name}/applications",
+    response_model=ProfileRecord,
+    tags=["Applications"],
+    summary="Save slice application configs for a profile",
+)
+def save_profile_applications(name: str, body: Dict[str, SliceApplicationConfig]):
+    try:
+        return profile_store.save_profile_applications(name, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/profiles/{name}/applications/deploy",
+    response_model=AppDeployResponse,
+    tags=["Applications"],
+    summary="Deploy slice application client UE(s)",
+)
+def deploy_applications(name: str, body: AppDeployRequest):
+    gen = application_deploy.deploy_application_stream(
+        name, slice_id=body.slice_id, config=body.config, applications=body.applications
+    )
+    last_res = None
+    for chunk in gen:
+        if chunk.startswith("event: result\n"):
+            payload = chunk.split("data: ", 1)[1].strip()
+            last_res = json.loads(payload)
+        elif chunk.startswith("event: error\n"):
+            payload = chunk.split("data: ", 1)[1].strip()
+            err_obj = json.loads(payload)
+            raise HTTPException(
+                status_code=400, detail=err_obj.get("message", "Deploy failed")
+            )
+    if last_res is not None:
+        return AppDeployResponse.model_validate(last_res)
+    raise HTTPException(status_code=500, detail="Deploy stream ended without result")
+
+
+@router.post(
+    "/profiles/{name}/applications/deploy/stream",
+    tags=["Applications"],
+    summary="Deploy slice application client UE(s) (SSE stream)",
+)
+def deploy_applications_stream(name: str, body: AppDeployRequest):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    return _sse_response(
+        application_deploy.deploy_application_stream(
+            name, slice_id=body.slice_id, config=body.config, applications=body.applications
+        )
+    )
+
+
+@router.post(
+    "/profiles/{name}/applications/undeploy",
+    response_model=AppUndeployResponse,
+    tags=["Applications"],
+    summary="Undeploy slice application client UE(s)",
+)
+def undeploy_applications(name: str, body: AppUndeployRequest):
+    gen = application_deploy.undeploy_application_stream(name, slice_id=body.slice_id)
+    last_res = None
+    for chunk in gen:
+        if chunk.startswith("event: result\n"):
+            payload = chunk.split("data: ", 1)[1].strip()
+            last_res = json.loads(payload)
+        elif chunk.startswith("event: error\n"):
+            payload = chunk.split("data: ", 1)[1].strip()
+            err_obj = json.loads(payload)
+            raise HTTPException(
+                status_code=400, detail=err_obj.get("message", "Undeploy failed")
+            )
+    if last_res is not None:
+        return AppUndeployResponse.model_validate(last_res)
+    raise HTTPException(status_code=500, detail="Undeploy stream ended without result")
+
+
+@router.post(
+    "/profiles/{name}/applications/undeploy/stream",
+    tags=["Applications"],
+    summary="Undeploy slice application client UE(s) (SSE stream)",
+)
+def undeploy_applications_stream(name: str, body: AppUndeployRequest):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    return _sse_response(
+        application_deploy.undeploy_application_stream(name, slice_id=body.slice_id)
+    )
+
+
+@router.get(
+    "/influx/status",
+    tags=["InfluxDB"],
+    summary="Check InfluxDB connection status",
+)
+def get_influx_status():
+    return influx_service.check_health()
+
+
+@router.get(
+    "/profiles/{name}/applications/metrics",
+    tags=["Applications"],
+    summary="Query recent application metrics from InfluxDB",
+)
+def get_application_metrics(
+    name: str,
+    slice_id: Optional[int] = None,
+    range_s: int = 300,
+):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    return {
+        "ok": True,
+        "profile": name,
+        "slice_id": slice_id,
+        "range_s": range_s,
+        "metrics": influx_service.query_application_metrics(
+            name, slice_id=slice_id, range_s=range_s
+        ),
+    }
+
+
+@router.post(
+    "/profiles/{name}/applications/metrics/push",
+    tags=["Applications"],
+    summary="Push application metrics point to InfluxDB",
+)
+def push_application_metrics(
+    name: str,
+    payload: Dict[str, Any],
+):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+
+    fields = payload.get("fields") or {}
+    tags = payload.get("tags") or {}
+    tags["profile"] = name
+    if "slice" in payload and "slice" not in tags:
+        tags["slice"] = str(payload["slice"])
+    if "app_type" in payload and "app_type" not in tags:
+        tags["app_type"] = str(payload["app_type"])
+
+    ok = influx_service.write_point(fields=fields, tags=tags)
+    return {"ok": ok, "profile": name, "tags": tags, "fields": fields}
+
+
 # ── Clusters ─────────────────────────────────────────────────────────────────
 
 
@@ -377,6 +565,23 @@ def get_profile_cluster_status(name: str):
     try:
         raw = cluster_status.profile_cluster_status(name)
         return ProfileClusterStatusOut.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{name}/ue-client-status",
+    response_model=UeClientStatusOut,
+    tags=["Applications"],
+    summary="Live edge status of on-demand client UE Deployments",
+)
+def get_profile_ue_client_status(name: str):
+    rec = profile_store.get_profile(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"profile not found: {name}")
+    try:
+        raw = cluster_status.profile_ue_client_status(name)
+        return UeClientStatusOut.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

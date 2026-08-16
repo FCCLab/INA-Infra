@@ -54,7 +54,7 @@ SLICEA_FRAME_SKIP="${SLICEA_FRAME_SKIP:-1}"
 SLICEA_UE_SLICE="${SLICEA_UE_SLICE:-1}"
 # Optional: pin the analyzer to a specific central node (e.g. central-0) — the
 # central workers are disk-constrained, so keep it off the full one. Empty = any.
-SLICEA_ANALYZER_NODE="${SLICEA_ANALYZER_NODE:-central-0}"
+SLICEA_ANALYZER_NODE="${SLICEA_ANALYZER_NODE:-cpu-central-0}"
 export SLICEA_PUBLISHER_IMAGE SLICEA_ANALYZER_IMAGE SLICEA_ANALYZER_EXTIP \
   SLICEA_RTSP_PORT SLICEA_STREAM_PATH SLICEA_RTSP_PROTOCOL SLICEA_PUB_METRICS_PORT \
   SLICEA_ANALYZER_METRICS_PORT SLICEA_PDU_IFACE SLICEA_YOLO_ENABLED SLICEA_YOLO_DEVICE \
@@ -300,9 +300,9 @@ SLICED = {
 repos = Path(repos_dir)
 REPO_NAME = {"central": "central-repo", "regional": "regional-repo", "edge": "edge-repo"}
 SITE_NODES = {
-    "central": ["central-0", "central-1"],
-    "regional": ["regional-0", "regional-1"],
-    "edge": ["edge-0", "edge-1"],
+    "central": ["cpu-central-0", "cpu-central-1"],
+    "regional": ["cpu-regional-0", "cpu-regional-1"],
+    "edge": ["cpu-edge-0", "cpu-edge-1"],
 }
 spec = importlib.util.spec_from_file_location("oai_debug_sidecar", debug_lib)
 oai_debug = importlib.util.module_from_spec(spec)
@@ -521,7 +521,7 @@ def emit_sliced_edge(out_dir: Path):
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": {
-                        # amd64 image; do not schedule on arm64 GPU workers (e.g. gh82)
+                        # amd64 image; do not schedule on arm64 GPU workers (e.g. gpu-gh82)
                         "nodeSelector": {"kubernetes.io/arch": "amd64"},
                         "containers": [
                             {
@@ -689,7 +689,7 @@ def ensure_upf_operator(site: str) -> None:
         ):
             if env.get("name") == "TESTING":
                 env["value"] = "yes"  # skip NRF initContainer off-central
-        # Controller images are amd64-only; keep off arm64 GPU workers (gh81/gh82).
+        # Controller images are amd64-only; keep off arm64 GPU workers (gpu-gh81/gpu-gh82).
         # On edge also pin off usrp (no enp7s0 for macvlan N3/N4/N6).
         spec = doc["spec"]["template"]["spec"]
         node_selector = spec.setdefault("nodeSelector", {})
@@ -704,7 +704,7 @@ def ensure_upf_operator(site: str) -> None:
                                     {
                                         "key": "kubernetes.io/hostname",
                                         "operator": "In",
-                                        "values": ["edge-0", "edge-1"],
+                                        "values": SITE_NODES["edge"],
                                     }
                                 ]
                             }
@@ -1444,7 +1444,7 @@ dump(
                                             {
                                                 "key": "kubernetes.io/hostname",
                                                 "operator": "In",
-                                                "values": ["edge-0", "edge-1"],
+                                                "values": SITE_NODES["edge"],
                                             }
                                         ]
                                     }
@@ -1817,9 +1817,9 @@ dump(
                 },
                 "spec": {
                     "terminationGracePeriodSeconds": 5,
-                    # Keep off usrp; pin to edge-1 so xApp on edge-0 can reach RIC
+                    # Keep off usrp; pin to cpu-edge-1 so xApp on cpu-edge-0 can reach RIC
                     # (same-node macvlan cannot hairpin).
-                    "nodeSelector": {"kubernetes.io/hostname": "edge-1"},
+                    "nodeSelector": {"kubernetes.io/hostname": "cpu-edge-1"},
                     "containers": [
                         {
                             "name": "flexric",
@@ -1882,7 +1882,7 @@ dump(
                 "spec": {
                     "terminationGracePeriodSeconds": 5,
                     # Opposite node from FlexRIC (macvlan hairpin); also hosts mgmt IP .230.
-                    "nodeSelector": {"kubernetes.io/hostname": "edge-0"},
+                    "nodeSelector": {"kubernetes.io/hostname": "cpu-edge-0"},
                     "containers": [
                         {
                             "name": "xapp",

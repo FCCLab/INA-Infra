@@ -36,7 +36,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SSH_CONFIG = REPO_ROOT / "utils" / "ssh_config" / "config"
-DEFAULT_EDGE_HOST = "edge-0"
+DEFAULT_EDGE_HOST = "cpu-edge-0"
 DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_COUNT = 5
 DEFAULT_HOST = os.environ.get("OAI_TEST_HOST", "10.1.132.200")  # mgmt-0

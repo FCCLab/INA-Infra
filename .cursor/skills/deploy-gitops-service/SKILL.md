@@ -5,6 +5,8 @@ description: >-
   GitOps (render → repos/ → Gitea → RootSync). Use when the user asks to deploy,
   add, update, or roll out a service, workload, app, operator, OAI NF, Prometheus,
   MetalLB, Multus, dashboard, or any GitOps manifest to mgmt/central/regional/edge.
+  After render, push with ./bringup/03_push_to_git_repos/push_git_repos.sh
+  (see skill push-gitops-repos).
 ---
 
 # Deploy GitOps Service
@@ -81,14 +83,12 @@ Respect order when stacking platform + OAI (see [reference.md](reference.md)).
 
 ## Step 4 — Push
 
+Use **`./bringup/03_push_to_git_repos/push_git_repos.sh`** (skill `push-gitops-repos`). Do not `git push` `repos/*` by hand.
+
 ```bash
-./bringup/03_push_to_git_repos/push_git_repos.sh [cluster ...]
-# optional: -m "message" | -p pull-only | -n dry-run
+./bringup/03_push_to_git_repos/push_git_repos.sh
+# optional: [cluster ...]  -m "message" | -p pull-only | -n dry-run
 ```
-
-Pulls each Gitea submodule first, then commits and pushes (never pushes before a successful pull/merge). Default with no args: all of mgmt, central, regional, edge.
-
-Gitea lab: `http://10.1.132.200:3000` (`nephio` / `secret`).
 
 ## Step 5 — Verify sync
 

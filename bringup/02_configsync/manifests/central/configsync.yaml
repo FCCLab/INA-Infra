@@ -14,7 +14,11 @@ spec:
       template:
         spec:
           nodeSelector:
-            kubernetes.io/hostname: central-0
+            kubernetes.io/hostname: cpu-central-0
+          tolerations:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
           volumes:
           - name: configs
             configMap:
@@ -28,4 +32,8 @@ spec:
       template:
         spec:
           nodeSelector:
-            kubernetes.io/hostname: central-0
+            kubernetes.io/hostname: cpu-central-0
+          tolerations:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule

@@ -79,6 +79,10 @@ def _rel(path: Path) -> str:
     return str(path)
 
 
+def _dump(doc: dict) -> str:
+    return yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
+
+
 def _write(path: Path, content: str, written: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -634,22 +638,28 @@ def render_profile(req: PlApplyRequest) -> Tuple[List[str], List[str], str]:
                         written,
                     )
 
-            if cluster == "edge":
-                _write(
-                    ns_dir / f"50-nad-ue{sl.n}-rf.yaml",
-                    _nad(
-                        env,
-                        namespace=ns,
-                        nad_name=f"ue{sl.n}-sim-rf",
-                        role="ue_rf",
-                        address=sl.ue_rf,
-                        gateway=gw,
-                        prefix_len=plen,
-                        master=ue_master,
-                        slice_n=sl.n,
-                    ),
-                    written,
-                )
+        # --- Render Application Servers on target cluster via GitOps ---
+        from app.services import application_deploy, profile_store
+        prof_rec = profile_store.get_profile(ns)
+        if prof_rec and prof_rec.applications:
+            for sl in ip_plan.slices:
+                app_cfg = prof_rec.applications.get(str(sl.n))
+                if app_cfg and app_cfg.enabled and app_cfg.app_type.lower() != "none":
+                    app_cluster = application_deploy.resolve_target_cluster(
+                        app_cfg, req.result
+                    )
+                    if cluster == app_cluster:
+                        srv_manifests = application_deploy.generate_server_manifests(
+                            ns, app_cfg, cluster, profile_subnet=ip_plan.subnet
+                        )
+                        for idx, doc in enumerate(srv_manifests):
+                            kind = doc.get("kind", "Manifest").lower()
+                            name = doc.get("metadata", {}).get("name", f"srv-{idx}")
+                            _write(
+                                ns_dir / f"60-app-{sl.n}-{name}-{kind}.yaml",
+                                _dump(doc),
+                                written,
+                            )
 
         if req.include_ran:
             ran_workloads.write_ran_for_cluster(

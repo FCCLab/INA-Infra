@@ -1,0 +1,10 @@
+# Keep the build context small and avoid busting pip/torch layers.
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+**/.vite
+.git
+data/*.mp4
+!data/example.mp4
+data/.gitkeep

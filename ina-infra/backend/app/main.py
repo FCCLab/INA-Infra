@@ -61,6 +61,13 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "Applications",
+        "description": (
+            "Application servers (profile / GitOps) and UE clients "
+            "mapped to network slices; client deploy/undeploy is on-demand K8s API."
+        ),
+    },
+    {
         "name": "Medium (PM)",
         "description": "Medium-term layer (stub — not implemented yet).",
     },

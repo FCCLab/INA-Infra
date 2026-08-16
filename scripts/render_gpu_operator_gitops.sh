@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render NVIDIA GPU Operator manifests into repos/ for Config Sync GitOps push.
-# GH200 nodes (gh81=edge, gh82=central) already have the host driver + container
+# GH200 nodes (gpu-gh81=central, gpu-gh82=regional) already have the host driver + container
 # toolkit installed, so the operator runs with driver.enabled=false and lets its
 # toolkit component configure containerd + advertise nvidia.com/gpu.
 set -euo pipefail
@@ -20,7 +20,7 @@ GPU_DRIVER_ENABLED="${GPU_DRIVER_ENABLED:-false}"
 GPU_TOOLKIT_ENABLED="${GPU_TOOLKIT_ENABLED:-true}"
 
 # Clusters whose worker set includes a GPU node. Only these get the operator.
-DEFAULT_GPU_CLUSTERS=(edge central)
+DEFAULT_GPU_CLUSTERS=(central regional)
 
 render_chart() {
   local out values
@@ -213,7 +213,7 @@ Splits helm output into cluster/ (CRDs, ClusterRole[Binding], ClusterPolicy) and
 namespaces/${GPU_OPERATOR_NS}/ (one file per resource). Helm hook resources are dropped.
 
 Default clusters: ${DEFAULT_GPU_CLUSTERS[*]} (the sites whose worker is a GH200 node:
-gh81=edge, gh82=central). Pass explicit clusters to override.
+gpu-gh81=central, gpu-gh82=regional). Pass explicit clusters to override.
 
 GH200 notes:
   driver.enabled=${GPU_DRIVER_ENABLED}   (host driver preinstalled; Grace 64k kernel)

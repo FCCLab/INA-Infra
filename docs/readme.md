@@ -14,6 +14,12 @@
 | [gitea.md](gitea.md) | Gitea on mgmt |
 | [new_cluster.md](new_cluster.md) | Legacy central kubeadm notes |
 
+## Applications
+
+| Doc | Topic |
+|-----|--------|
+| [cctv.md](cctv.md) | Slice-1 CCTV: MediaMTX pub/sub, FastAPI Swagger, dashboard, GitOps vs UE clients |
+
 ## OAI / network slicing
 
 | Doc | Topic |

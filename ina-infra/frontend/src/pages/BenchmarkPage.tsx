@@ -483,12 +483,7 @@ export default function BenchmarkPage() {
     const names = edgeNodes.map((n) => n.name);
     const merged = names.length > 0 ? [...names] : [...EDGE_RF_NODES];
     if (ranNode && !merged.includes(ranNode)) merged.push(ranNode);
-    // Prefer usrp at the top when present.
-    merged.sort((a, b) => {
-      if (a === DEFAULT_RAN_NODE) return -1;
-      if (b === DEFAULT_RAN_NODE) return 1;
-      return a.localeCompare(b);
-    });
+    merged.sort((a, b) => a.localeCompare(b));
     return merged;
   }, [edgeNodes, ranNode]);
 

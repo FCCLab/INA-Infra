@@ -1,3 +1,7 @@
 # vm-sw VM images (qcow2 / cloud-init seed); runtime path is /var/lib/libvirt/images/vm-sw
 testbed/vm-sw/images/
 __pycache__
+*.env
+!*.env.example
+.env
+

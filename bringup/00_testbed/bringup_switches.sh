@@ -38,8 +38,8 @@ BR_EXT_EU_IP="10.1.137.22"
 # GPU bare-metal K8s workers (site L2 on VLAN 137; not bridge addresses above)
 GPU_WORKER_IP_FIRST="10.1.137.150"
 GPU_WORKER_IP_LAST="10.1.137.159"
-GH82_SITE_IP="10.1.137.152"   # gh82 → central cluster
-GH81_SITE_IP="10.1.137.151"   # gh81 → edge cluster
+GH81_SITE_IP="10.1.137.151"   # gh81 → central cluster
+GH82_SITE_IP="10.1.137.152"   # gh82 → regional cluster
 GH82_MGMT_IP="10.1.101.212"   # SSH only (enP2s2f0np0); not site .137
 GH81_MGMT_IP="10.1.101.211"   # SSH only (aerial02); not site .137
 

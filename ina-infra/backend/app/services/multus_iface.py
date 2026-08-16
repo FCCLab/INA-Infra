@@ -21,9 +21,9 @@ FALLBACK_USRP = os.environ.get("INA_MULTUS_MASTER_USRP", "enp4s0f0")
 DETECT_PREFIX = os.environ.get("INA_MULTUS_DETECT_PREFIX", "10.1.137.")
 
 CLUSTER_PROBE_HOST: Dict[str, str] = {
-    "central": "central-0",
-    "regional": "regional-0",
-    "edge": "edge-0",
+    "central": "cpu-central-0",
+    "regional": "cpu-regional-0",
+    "edge": "cpu-edge-0",
 }
 
 _lock = threading.Lock()
@@ -54,8 +54,10 @@ def _fallback_for_host(host: str) -> str:
     h = (host or "").strip()
     if h == "usrp":
         return FALLBACK_USRP
-    # Bare-metal edge workers often use eno1 (see edge-2).
-    if h.startswith("edge-") and h not in ("edge-0", "edge-1"):
+    # Bare-metal edge workers often use eno1 (see edge-2 / gpu-a40).
+    if h in ("edge-2", "gpu-a40", "edge-3") or (
+        h.startswith("edge-") and h not in ("edge-0", "edge-1", "cpu-edge-0", "cpu-edge-1")
+    ):
         return os.environ.get("INA_MULTUS_MASTER_BAREMETAL", "eno1")
     return FALLBACK_DEFAULT
 
@@ -99,7 +101,7 @@ def _ssh_detect(host: str) -> Optional[str]:
 
 def detect_host_master(host: str, *, use_cache: bool = True) -> str:
     """Multus parent NIC for a specific SSH host / k8s node name."""
-    host = (host or "").strip() or "edge-0"
+    host = (host or "").strip() or "cpu-edge-0"
     forced = _force_master()
     if forced:
         return forced
@@ -196,9 +198,9 @@ def label_cluster_nodes_multus_master(
     """
     # Default worker names in this lab when not provided.
     defaults = {
-        "central": ["central-0", "central-1"],
-        "regional": ["regional-0", "regional-1"],
-        "edge": ["edge-0", "edge-1", "edge-2", "usrp"],
+        "central": ["cpu-central-0", "cpu-central-1", "gpu-gh81"],
+        "regional": ["cpu-regional-0", "cpu-regional-1", "gpu-gh82"],
+        "edge": ["cpu-edge-0", "cpu-edge-1", "edge-2", "usrp", "gpu-a40"],
     }
     targets = nodes if nodes is not None else defaults.get(cluster, [CLUSTER_PROBE_HOST.get(cluster, cluster)])
     # Prefer kube context name like edge@edge

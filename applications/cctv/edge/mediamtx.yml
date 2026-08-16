@@ -1,0 +1,40 @@
+# MediaMTX — annotated CCTV pub/sub (backend publishes, dashboard subscribes).
+# UE ingest stays on gst-rtsp-server :8554 (timestamp-preserving RECORD).
+# https://github.com/bluenviron/mediamtx
+
+logLevel: info
+logDestinations: [stdout]
+
+api: yes
+apiAddress: :9997
+
+metrics: no
+playback: no
+rtmp: no
+srt: no
+
+rtsp: yes
+rtspAddress: :8555
+protocols: [tcp]
+
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: "*"
+hlsAlwaysRemux: yes
+hlsVariant: lowLatency
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: "*"
+webrtcLocalUDPAddress: :8189
+webrtcICEServers2: []
+
+pathDefaults:
+  source: publisher
+  overridePublisher: yes
+
+paths:
+  all_others:

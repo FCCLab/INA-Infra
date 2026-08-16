@@ -1,0 +1,62 @@
+# Slice A client host (UE): the GStreamer publisher.
+# The publisher pushes the encoded stream to the edge analyzer's RTSP RECORD
+# server over the OTA interface (no relay), using a single OUTBOUND connection
+# so it works from behind the 5G UPF/N6 NAT. Absolute timestamps stay entirely
+# within GStreamer (RTCP SR + RFC 6051 NTP-64 header extension).
+services:
+  publisher:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    image: slicea-publisher
+    container_name: slicea-publisher
+    env_file: .env
+    environment:
+      VIDEO_SOURCE: ${VIDEO_SOURCE}
+      # Push target: the edge analyzer's RTSP server on its OTA address.
+      RTSP_TARGET_HOST: ${EDGE_OTA_IP}
+      RTSP_PORT: ${RTSP_PORT}
+      STREAM_PATH: ${STREAM_PATH}
+      RTSP_PROTOCOL: ${RTSP_PROTOCOL}
+      FPS: ${FPS}
+      WIDTH: ${WIDTH}
+      HEIGHT: ${HEIGHT}
+      BITRATE_KBPS: ${BITRATE_KBPS}
+      METRICS_PORT: ${CLIENT_METRICS_PORT}
+      METRICS_ADDR: ${METRICS_ADDR}
+      LOG_INTERVAL_S: ${LOG_INTERVAL_S}
+      OTA_IFACE: ${OTA_IFACE}
+      METRICS_IFACE: ${METRICS_IFACE}
+      CHRONYC_HOST: ${CHRONYC_HOST}
+      CHRONY_MAX_OFFSET_MS: ${CHRONY_MAX_OFFSET_MS}
+    volumes:
+      - ./data:/data:ro
+    ports:
+      # Metrics exposed on the host (ens0), off the OTA path.
+      - "${CLIENT_METRICS_PORT}:${CLIENT_METRICS_PORT}"
+    networks:
+      metrics: {}
+      ota:
+        ipv4_address: ${PUBLISHER_OTA_IP}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${CLIENT_METRICS_PORT}/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  # Metrics/NTP plane: a plain bridge exposed via host port mapping (ens0).
+  metrics:
+    driver: bridge
+  # OTA data plane: macvlan onto the 5G interface. Switch to `external: true`
+  # if the slicing setup already provisions this network.
+  ota:
+    driver: macvlan
+    driver_opts:
+      parent: ${OTA_PARENT_IFACE}
+    ipam:
+      config:
+        - subnet: ${OTA_SUBNET}
+          gateway: ${OTA_GATEWAY}

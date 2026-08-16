@@ -1,0 +1,105 @@
+# Slice A local test: analyzer (RTSP RECORD server) + publisher on a SINGLE host.
+#
+# The OTA (5G data plane) interface is SIMULATED with a plain Docker bridge
+# network named `ota` instead of a macvlan onto a real 5G NIC. This lets the
+# full chain run and be measured on one machine.
+#
+# UE-push model: the analyzer runs a gst-rtsp-server in RECORD mode and the
+# publisher (UE) pushes to it with rtspclientsink over a single OUTBOUND
+# connection. This mirrors real 5G, where the UE is behind the UPF/N6 NAT and
+# cannot accept an inbound connection from the edge. Absolute timestamps stay
+# within GStreamer (RTCP SR + RFC 6051 NTP-64 header extension carry wall clock).
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up --build
+# M1 timestamp proof (YOLO off):
+#   YOLO_ENABLED=false docker compose -f docker-compose.local.yml up
+# UDP transport instead of TCP-interleaved:
+#   RTSP_PROTOCOL=udp docker compose -f docker-compose.local.yml up
+services:
+  analyzer:
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+      args:
+        # CUDA 12.1 torch wheel; works with the host's 565 driver (CUDA 12.7).
+        TORCH_INDEX_URL: "${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
+    image: slicea-analyzer
+    container_name: slicea-analyzer
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+      RTSP_PORT: "8554"
+      STREAM_PATH: slicea
+      RTSP_LATENCY_MS: "0"
+      YOLO_ENABLED: "${YOLO_ENABLED:-true}"
+      YOLO_MODEL: yolov8n.pt
+      YOLO_DEVICE: "${YOLO_DEVICE:-cuda:0}"
+      FRAME_SKIP: "${FRAME_SKIP:-1}"
+      METRICS_PORT: "9102"
+      METRICS_ADDR: 0.0.0.0
+      LOG_INTERVAL_S: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9102:9102"
+    networks:
+      metrics: {}
+      ota: {}
+    restart: unless-stopped
+    deploy:
+      # resources:
+        # reservations:
+        #   devices:
+            # - driver: nvidia
+            #   count: all
+            #   capabilities: [gpu]
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS http://localhost:9102/metrics | grep -q slicea_frames_processed_total"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  publisher:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    image: slicea-publisher
+    container_name: slicea-publisher
+    environment:
+      VIDEO_SOURCE: /data/example.mp4
+      RTSP_TARGET_HOST: analyzer
+      RTSP_PORT: "8554"
+      STREAM_PATH: slicea
+      RTSP_PROTOCOL: "${RTSP_PROTOCOL:-tcp}"
+      FPS: "25"
+      WIDTH: "1280"
+      HEIGHT: "720"
+      BITRATE_KBPS: "4000"
+      METRICS_PORT: "9101"
+      METRICS_ADDR: 0.0.0.0
+      LOG_INTERVAL_S: "1"
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "9101:9101"
+    networks:
+      metrics: {}
+      ota: {}
+    depends_on:
+      - analyzer
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9101/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  metrics:
+    driver: bridge
+  ota:
+    driver: bridge

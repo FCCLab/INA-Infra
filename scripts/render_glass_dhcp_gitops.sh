@@ -15,7 +15,7 @@ GLASS_IMAGE="${GLASS_IMAGE:-${REGISTRY}/glass-isc-dhcp:${TAG}}"
 DHCPD_IMAGE="${DHCPD_IMAGE:-${REGISTRY}/networkboot/dhcpd:${TAG}}"
 DHCP_IFACE="${DHCP_IFACE:-enp7s0}"
 # Pin to CP so site L2 DHCP is authoritative from one node.
-NODE_NAME="${GLASS_DHCP_NODE:-central-0}"
+NODE_NAME="${GLASS_DHCP_NODE:-cpu-central-0}"
 DHCPD_CONF="${DHCPD_CONF:-$REPO_ROOT/services/glass-dhcp/dhcpd.conf}"
 GLASS_CONF="${GLASS_CONF:-$REPO_ROOT/services/glass-dhcp/glass_config.json}"
 

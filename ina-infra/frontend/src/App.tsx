@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import PlanningPage from "./pages/PlanningPage";
+import ApplicationsPage from "./pages/ApplicationsPage";
 import MediumPage from "./pages/MediumPage";
 import ShortPage from "./pages/ShortPage";
 import DocsPage from "./pages/DocsPage";
@@ -8,7 +9,14 @@ import BenchmarkPage from "./pages/BenchmarkPage";
 import AppShell, { type NavTab } from "./components/ui/AppShell";
 import { DialogProvider } from "./components/ui/Dialog";
 
-type Tab = "planning" | "medium" | "short" | "operators" | "benchmark" | "docs";
+type Tab =
+  | "planning"
+  | "applications"
+  | "medium"
+  | "short"
+  | "operators"
+  | "benchmark"
+  | "docs";
 
 const IconOverview = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -16,6 +24,15 @@ const IconOverview = (
     <rect x="14" y="3" width="7" height="7" rx="1.5" />
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
     <rect x="3" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+);
+
+const IconApps = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <rect x="3" y="4" width="7" height="7" rx="1.5" />
+    <rect x="14" y="4" width="7" height="7" rx="1.5" />
+    <rect x="3" y="15" width="7" height="7" rx="1.5" />
+    <path d="M17.5 15v7M14 18.5h7" strokeLinecap="round" />
   </svg>
 );
 
@@ -67,6 +84,7 @@ export default function App() {
   const tabs: NavTab[] = useMemo(
     () => [
       { id: "planning", label: "Planning", icon: IconOverview },
+      { id: "applications", label: "Applications", icon: IconApps },
       { id: "medium", label: "Medium", icon: IconClock },
       { id: "short", label: "Short", icon: IconSignal },
       { id: "operators", label: "Operators", icon: IconOperator },
@@ -79,19 +97,23 @@ export default function App() {
   const crumb =
     tab === "planning"
       ? "Planning (PL)"
-      : tab === "medium"
-        ? "Medium (PM)"
-        : tab === "short"
-          ? "Short (PS)"
-          : tab === "operators"
-            ? "Operator agents"
-            : tab === "benchmark"
-              ? "oai-benchmark"
-              : "Docs";
+      : tab === "applications"
+        ? "Applications"
+        : tab === "medium"
+          ? "Medium (PM)"
+          : tab === "short"
+            ? "Short (PS)"
+            : tab === "operators"
+              ? "Operator agents"
+              : tab === "benchmark"
+                ? "oai-benchmark"
+                : "Docs";
 
   let body: ReactNode = null;
   if (tab === "planning") {
     body = <PlanningPage />;
+  } else if (tab === "applications") {
+    body = <ApplicationsPage />;
   } else if (tab === "medium") {
     body = <MediumPage />;
   } else if (tab === "short") {

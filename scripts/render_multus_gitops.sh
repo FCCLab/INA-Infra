@@ -68,6 +68,13 @@ def write_docs(docs, directory):
     for doc in docs:
         kind = doc["kind"].lower()
         name = doc["metadata"]["name"]
+        if doc.get("kind") == "DaemonSet" and name == "kube-multus-ds":
+            for c in doc.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []):
+                if c.get("name") == "kube-multus":
+                    c["resources"] = {
+                        "requests": {"cpu": "100m", "memory": "100Mi"},
+                        "limits": {"cpu": "500m", "memory": "500Mi"},
+                    }
         (directory / f"{kind}-{name}.yaml").write_text(
             yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
         )

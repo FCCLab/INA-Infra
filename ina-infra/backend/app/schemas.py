@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -16,7 +16,7 @@ _K8S_NS_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 # Edge RF node names are live-discovered from the edge cluster (see /clusters/edge/nodes).
 # Keep a soft default preference order for UI when the API is unreachable.
-EDGE_RF_NODE_FALLBACK = ("usrp", "edge-0", "edge-1", "edge-2")
+EDGE_RF_NODE_FALLBACK = ("usrp", "cpu-edge-0", "cpu-edge-1", "gpu-a40")
 
 _K8S_NODE_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$", re.I)
 
@@ -35,6 +35,10 @@ class Profile(BaseModel):
     ue_node: str = Field(
         "usrp",
         description="Edge node hostname for OAI UEs (kubernetes.io/hostname)",
+    )
+    oai_images: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Custom OAI image overrides (e.g. {'mode': 'latest', 'cucp': '...'}); empty uses latest auto-discovered images from registry",
     )
 
     @field_validator("name")
@@ -183,6 +187,7 @@ class SliceIps(BaseModel):
     cuup_n3: str
     ue_rf: str
     dnn_cidr: str
+    app_ip: str = ""
     site_cu: str = ""
     site_upf: str = ""
     site_app: str = ""
@@ -294,6 +299,7 @@ class DeployStatusItem(BaseModel):
     ready_text: str = "—"
     status: str = "Missing"
     ok: bool = False
+    kind: str = ""  # core | ran | app | client | other
 
 
 class ConfigSyncStatus(BaseModel):
@@ -362,6 +368,35 @@ class ProfileClusterStatusOut(BaseModel):
     config_sync_summary: str = ""
 
 
+class UeDeployItem(BaseModel):
+    name: str
+    exists: bool = False
+    ready: int = 0
+    desired: int = 0
+    ready_text: str = "—"
+    status: str = "Missing"
+    ok: bool = False
+    client_sidecar: bool = False
+
+
+class UeSliceStatus(BaseModel):
+    slice_id: int
+    expected: int = 0
+    present: int = 0
+    client_ready: int = 0
+    overall: str = "missing"
+    summary: str = "Not on cluster"
+    deployments: List[UeDeployItem] = Field(default_factory=list)
+
+
+class UeClientStatusOut(BaseModel):
+    namespace: str
+    cluster: str = "edge"
+    namespace_exists: bool = False
+    error: Optional[str] = None
+    slices: Dict[str, UeSliceStatus] = Field(default_factory=dict)
+
+
 class NetworkOut(BaseModel):
     settings_text: str
     b_total: int
@@ -375,10 +410,55 @@ class NetworkOut(BaseModel):
     g_a_capacity: Dict[int, float]
 
 
+class SliceApplicationConfig(BaseModel):
+    slice_id: int
+    app_type: str = Field("none", description="cctv | physical_ai | ott | iot | custom | none")
+    name: str = Field("", description="Display name for the application")
+    enabled: bool = Field(True, description="Whether this app is active for the slice")
+    target_cluster: str = Field("auto", description="auto | central | regional | edge")
+    server_image: str = Field("", description="Container image for server/analyzer/broker")
+    client_image: str = Field("", description="Container image for client/publisher sidecar")
+    server_port: int = Field(0, description="Main service port")
+    metrics_port: int = Field(0, description="Prometheus metrics port")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Application specific parameters")
+    deployed: bool = Field(False, description="Whether application is currently deployed on cluster")
+    deployed_at: Optional[str] = Field(None, description="ISO timestamp of last deploy")
+    last_error: Optional[str] = Field(None, description="Last deployment error if any")
+
+
+class AppDeployRequest(BaseModel):
+    slice_id: Optional[int] = Field(None, description="Slice ID to deploy, or null to deploy all enabled apps")
+    profile: Optional[Profile] = None
+    config: Optional[SliceApplicationConfig] = None
+    applications: Optional[Dict[str, SliceApplicationConfig]] = Field(
+        None, description="Persist current client configs before deploy"
+    )
+
+
+class AppDeployResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    deployed_apps: List[SliceApplicationConfig] = Field(default_factory=list)
+    profile: Optional[ProfileRecord] = None
+
+
+class AppUndeployRequest(BaseModel):
+    slice_id: Optional[int] = Field(None, description="Slice ID to undeploy, or null to undeploy all")
+    profile: Optional[Profile] = None
+
+
+class AppUndeployResponse(BaseModel):
+    ok: bool
+    message: str = ""
+    undeployed_apps: List[int] = Field(default_factory=list)
+    profile: Optional[ProfileRecord] = None
+
+
 class ProfileDefaultsOut(BaseModel):
     profile: Profile
     slices: List[SliceIn]
     network: NetworkIn = Field(default_factory=NetworkIn)
+    applications: Dict[str, SliceApplicationConfig] = Field(default_factory=dict)
 
 
 class ProfileRecord(BaseModel):
@@ -387,6 +467,10 @@ class ProfileRecord(BaseModel):
     profile: Profile
     slices: List[SliceIn] = Field(default_factory=list)
     network: NetworkIn = Field(default_factory=NetworkIn)
+    applications: Dict[str, SliceApplicationConfig] = Field(
+        default_factory=dict,
+        description="Application workload configs keyed by slice_id string",
+    )
     pl_result: Optional[PlSolveResponse] = Field(
         None, description="Last successful PlanningLayer solve for this profile"
     )
@@ -480,6 +564,7 @@ class ProfileCreateRequest(BaseModel):
     profile: Profile
     slices: List[SliceIn] = Field(default_factory=list)
     network: Optional[NetworkIn] = None
+    applications: Optional[Dict[str, SliceApplicationConfig]] = None
     copy_from: Optional[str] = Field(
         None,
         description="If set, copy missing slices/network from this saved profile",
@@ -1241,3 +1326,21 @@ class BenchmarkPrbStopResponse(BaseModel):
     ok: bool
     message: str = ""
     status: Optional[BenchmarkPrbRunStatusOut] = None
+
+
+class OaiComponentStatus(BaseModel):
+    key: str
+    name: str
+    repo: str
+    latest_tag: str
+    latest_image: str
+    available_tags: List[str] = Field(default_factory=list)
+    fallback_tag: str
+
+
+class OaiRegistryStatusResponse(BaseModel):
+    registry_host: str
+    connected: bool
+    components: Dict[str, OaiComponentStatus] = Field(default_factory=dict)
+    defaults: Dict[str, str] = Field(default_factory=dict)
+    queried_at: str

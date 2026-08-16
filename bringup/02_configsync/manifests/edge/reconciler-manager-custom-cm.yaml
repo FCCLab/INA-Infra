@@ -36,7 +36,11 @@ data:
             cluster-autoscaler.kubernetes.io/safe-to-evict: "true" # this annotation is needed so that pods doesn't block scale down
         spec:
           nodeSelector:
-            kubernetes.io/hostname: edge-0
+            kubernetes.io/hostname: cpu-edge-0
+          tolerations:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
           serviceAccountName: # this field will be assigned dynamically by the reconciler-manager
           containers:
           - name: hydration-controller

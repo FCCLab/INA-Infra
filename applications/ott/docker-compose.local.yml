@@ -1,0 +1,83 @@
+# hd-stream local test: central PLAY server + UE pull client on a SINGLE host.
+#
+# The OTA (5G data plane) interface is SIMULATED with a plain Docker bridge
+# network named `ota`. Place a source clip at ./data/source.mp4 (or set
+# VIDEO_SOURCE / mount). For a ~10 min Big Buck Bunny download:
+#   ./scripts/fetch_source_video.sh
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up --build
+# UDP transport:
+#   RTSP_PROTOCOL=udp docker compose -f docker-compose.local.yml up
+services:
+  hd-stream-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: hd-stream-server
+    container_name: hd-stream-server
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+      RTSP_PORT: "8556"
+      STREAM_PATH: hdstream
+      VIDEO_SOURCE: /data/source.mp4
+      FPS: "25"
+      WIDTH: "1280"
+      HEIGHT: "720"
+      BITRATE_KBPS: "4000"
+      METRICS_PORT: "9112"
+      METRICS_ADDR: 0.0.0.0
+      LOG_INTERVAL_S: "1"
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "8556:8556"
+      - "9112:9112"
+    networks:
+      metrics: {}
+      ota: {}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS http://localhost:9112/metrics | grep -q hdstream_server_frames_sent_total"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  hd-stream-client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    image: hd-stream-client
+    container_name: hd-stream-client
+    environment:
+      RTSP_TARGET_HOST: hd-stream-server
+      RTSP_PORT: "8556"
+      STREAM_PATH: hdstream
+      RTSP_PROTOCOL: "${RTSP_PROTOCOL:-tcp}"
+      RTSP_LATENCY_MS: "0"
+      METRICS_PORT: "9111"
+      METRICS_ADDR: 0.0.0.0
+      LOG_INTERVAL_S: "1"
+    ports:
+      - "9111:9111"
+    networks:
+      metrics: {}
+      ota: {}
+    depends_on:
+      - hd-stream-server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9111/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  metrics:
+    driver: bridge
+  ota:
+    driver: bridge

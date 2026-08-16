@@ -40,6 +40,7 @@ SLICE_BASES: Dict[str, int] = {
     "cuup_f1u": 100,
     "cuup_n3": 120,
     "ue_rf": 140,
+    "app": 160,
 }
 
 SITE_TO_CLUSTER = {0: "edge", 1: "regional", 2: "central"}
@@ -190,6 +191,7 @@ def allocate_profile_ips(
                 cuup_n3=_host(prefix, SLICE_BASES["cuup_n3"] + idx),
                 ue_rf=_host(prefix, SLICE_BASES["ue_rf"] + idx),
                 dnn_cidr=f"{profile.dnn_prefix}.{idx}.0/24",
+                app_ip=_host(prefix, SLICE_BASES["app"] + idx),
                 site_cu=place.cu if place else "",
                 site_upf=place.upf if place else "",
                 site_app=place.app if place else "",

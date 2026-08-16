@@ -22,6 +22,7 @@ type Props = {
   networkCollapsed: boolean;
   sliceCount: number;
   maxSlices: number;
+  appServerCount?: number;
   plSolved: boolean;
   plMessage?: string | null;
   deployed?: boolean;
@@ -67,6 +68,7 @@ function syncTitle(cs: ConfigSyncStatus | null | undefined): string {
 function ClusterBlock({ st }: { st: ClusterDeployStatus }) {
   const title = st.cluster.charAt(0).toUpperCase() + st.cluster.slice(1);
   const cs = st.config_sync;
+  const deploys = st.deployments.filter((d) => !d.name.startsWith("oai-ue-"));
   const syncHint = cs
     ? [
         cs.name || "RootSync",
@@ -104,7 +106,7 @@ function ClusterBlock({ st }: { st: ClusterDeployStatus }) {
       </ul>
       {cs?.error && <p className="hint error">{cs.error}</p>}
       {st.error && <p className="hint error">{st.error}</p>}
-      {st.deployments.length === 0 ? (
+      {deploys.length === 0 ? (
         <p className="hint">
           {st.namespace_exists
             ? "No Deployments in namespace"
@@ -123,7 +125,7 @@ function ClusterBlock({ st }: { st: ClusterDeployStatus }) {
               </tr>
             </thead>
             <tbody>
-              {st.deployments.map((d) => (
+              {deploys.map((d) => (
                 <tr key={`${st.cluster}-${d.name}`}>
                   <td>
                     <code>{d.name}</code>
@@ -157,6 +159,7 @@ export default function StatusRail({
   networkCollapsed,
   sliceCount,
   maxSlices,
+  appServerCount = 0,
   plSolved,
   plMessage,
   deployed = false,
@@ -202,20 +205,17 @@ export default function StatusRail({
     },
   ];
 
-  const networkRows: Row[] = [
+  const sliceConfigRows: Row[] = [
     {
-      label: "Panel",
+      label: "Network",
       value: networkCollapsed ? "Collapsed" : "Editing",
       tone: "muted",
     },
     {
-      label: "Scope",
-      value: "Per-profile substrate",
-      tone: "ok",
+      label: "Servers",
+      value: `${appServerCount} / ${sliceCount}`,
+      tone: appServerCount > 0 ? "ok" : "muted",
     },
-  ];
-
-  const sliceRows: Row[] = [
     {
       label: "Slices",
       value: `${sliceCount} / ${maxSlices}`,
@@ -228,7 +228,7 @@ export default function StatusRail({
     },
   ];
   if (plSolved && plMessage) {
-    sliceRows.push({
+    sliceConfigRows.push({
       label: "Result",
       value: plMessage.length > 48 ? `${plMessage.slice(0, 48)}…` : plMessage,
       tone: "muted",
@@ -342,21 +342,9 @@ export default function StatusRail({
       </div>
 
       <div className="status-block">
-        <h3>Network settings</h3>
+        <h3>Slice config</h3>
         <ul className="status-rows">
-          {networkRows.map((r) => (
-            <li key={r.label}>
-              <span className="status-label">{r.label}</span>
-              <span className={toneClass(r.tone)}>{r.value}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="status-block">
-        <h3>Slice SLAs / PL</h3>
-        <ul className="status-rows">
-          {sliceRows.map((r) => (
+          {sliceConfigRows.map((r) => (
             <li key={r.label}>
               <span className="status-label">{r.label}</span>
               <span className={toneClass(r.tone)} title={r.value}>

@@ -3,6 +3,12 @@ import { SliceResultOut } from "../api/client";
 const SITES = ["Edge", "Regional", "Central"] as const;
 type Site = (typeof SITES)[number];
 
+const SITES_CONFIG: Record<Site, { tagClass: string; segClass: string }> = {
+  Edge: { tagClass: "tag-cluster-edge", segClass: "place-seg-edge" },
+  Regional: { tagClass: "tag-cluster-regional", segClass: "place-seg-regional" },
+  Central: { tagClass: "tag-cluster-central", segClass: "place-seg-central" },
+};
+
 const ROLES = [
   { key: "cu" as const, label: "CU-UP", tag: "tag-accent" },
   { key: "upf" as const, label: "UPF", tag: "tag-muted" },
@@ -43,7 +49,12 @@ export default function Topology({ slices }: Props) {
         <span className="place-site-axis-spacer" />
         {SITES.map((site) => (
           <span key={site} className="place-site-axis-label">
-            {site}
+            <span
+              className={`tag ${SITES_CONFIG[site].tagClass}`}
+              style={{ fontSize: 11, padding: "3px 10px", fontWeight: 700 }}
+            >
+              {site}
+            </span>
           </span>
         ))}
       </div>
@@ -65,11 +76,13 @@ export default function Topology({ slices }: Props) {
               {SITES.map((site) => {
                 const roles = rolesAtSite(s, site);
                 const hit = roles.length > 0;
+                const siteCfg = SITES_CONFIG[site];
                 return (
                   <div
                     key={site}
                     className={
-                      "place-bar-seg" + (hit ? " place-bar-seg-hit" : "")
+                      "place-bar-seg" +
+                      (hit ? ` place-bar-seg-hit ${siteCfg.segClass}` : "")
                     }
                   >
                     <span className="place-bar-seg-name">{site}</span>

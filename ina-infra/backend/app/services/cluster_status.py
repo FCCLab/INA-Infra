@@ -249,7 +249,41 @@ def _kubectl_json(
         return None, f"invalid kubectl json: {exc}"
 
 
-def _deploy_row(name: str, item: Optional[dict]) -> Dict[str, Any]:
+def _is_ue_deployment(name: str) -> bool:
+    """On-demand UE (and extra client UE) Deployments — omit from status bar."""
+    return str(name).startswith("oai-ue-")
+
+
+def _infer_kind(name: str, item: Optional[dict] = None) -> str:
+    labels = ((item or {}).get("metadata") or {}).get("labels") or {}
+    role = str(labels.get("ina.lab/role") or labels.get("ina-infra.nephio.lab/role") or "").lower()
+    if role in ("server", "app"):
+        return "app"
+    if role == "client":
+        return "client"
+    if role in ("ue_rf", "cu_cp", "du", "cu_up", "flexric"):
+        return "ran"
+    if name in CORE_DEPLOYMENTS:
+        return "core"
+    if name.startswith("oai-ue-") and "-client-" in name:
+        return "client"
+    if name.startswith(("oai-", "upf-slice-")):
+        return "ran"
+    if name == "cctv" or (
+        name.startswith("slice")
+        and (
+            "-physical-ai" in name
+            or "-ott-" in name
+            or "-iot-" in name
+            or "-custom-" in name
+        )
+    ):
+        return "app"
+    return "other"
+
+
+def _deploy_row(name: str, item: Optional[dict], kind: str = "") -> Dict[str, Any]:
+    kind = kind or _infer_kind(name, item)
     if item is None:
         return {
             "name": name,
@@ -261,6 +295,7 @@ def _deploy_row(name: str, item: Optional[dict]) -> Dict[str, Any]:
             "ready_text": "—",
             "status": "Missing",
             "ok": False,
+            "kind": kind,
         }
     status = item.get("status") or {}
     spec = item.get("spec") or {}
@@ -279,6 +314,7 @@ def _deploy_row(name: str, item: Optional[dict]) -> Dict[str, Any]:
         "ready_text": f"{ready}/{desired}",
         "status": "Running" if ok else ("Progressing" if ready > 0 else "NotReady"),
         "ok": ok,
+        "kind": kind or _infer_kind(name, item),
     }
 
 
@@ -325,13 +361,16 @@ def _status_one_cluster(
         elif list_err and "NotFound" in list_err:
             list_err = None
 
+    expected = [n for n in expected if not _is_ue_deployment(n)]
     ordered: List[Dict[str, Any]] = []
     seen = set()
     for name in expected:
+        if _is_ue_deployment(name):
+            continue
         ordered.append(_deploy_row(name, deploy_list.get(name)))
         seen.add(name)
     for name in sorted(deploy_list.keys()):
-        if name not in seen:
+        if name not in seen and not _is_ue_deployment(name):
             ordered.append(_deploy_row(name, deploy_list[name]))
 
     if not namespace_exists:
@@ -450,6 +489,12 @@ def profile_cluster_status(namespace: str) -> Dict[str, Any]:
                 include_core=True,
                 include_ran=True,
             )
+            if rec is not None:
+                from app.services import application_deploy
+
+                expected_by[c].extend(
+                    application_deploy.expected_app_deployments(c, rec)
+                )
 
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -633,19 +678,8 @@ def list_edge_nodes() -> Dict[str, Any]:
     elif ready_names:
         default = ready_names[0]
 
-    # Stable UI order: usrp first, then edge-* numeric, then others.
-    def _sort_key(n: Dict[str, Any]) -> tuple:
-        name = n["name"]
-        if name == "usrp":
-            return (0, name)
-        if name.startswith("edge-"):
-            try:
-                return (1, int(name.split("-", 1)[1]))
-            except ValueError:
-                return (1, name)
-        return (2, name)
-
-    nodes.sort(key=_sort_key)
+    # Sort cluster nodes in alphabetical order.
+    nodes.sort(key=lambda n: n["name"].lower())
 
     return {
         "cluster": "edge",
@@ -653,4 +687,177 @@ def list_edge_nodes() -> Dict[str, Any]:
         "error": None,
         "default_du": default,
         "default_ue": default,
+    }
+
+
+_CLIENT_SIDECAR_NAMES = {
+    "cctv-publisher",
+    "aiperf",
+    "ott-client",
+    "iot-client",
+    "custom-client",
+}
+
+
+def _ue_deploy_name(slice_id: int, client_index: int) -> str:
+    return f"oai-ue-slice-{int(slice_id)}-client-{int(client_index)}"
+
+
+def _parse_ue_slice_id(name: str) -> Optional[int]:
+    m = re.match(r"^oai-ue-slice-(\d+)", str(name))
+    if m:
+        return int(m.group(1))
+    m_legacy = re.match(r"^oai-ue-(\d+)", str(name))
+    if m_legacy:
+        return int(m_legacy.group(1))
+    return None
+
+
+def _has_client_sidecar(item: Optional[dict]) -> bool:
+    if not item:
+        return False
+    containers = (
+        ((item.get("spec") or {}).get("template") or {}).get("spec") or {}
+    ).get("containers") or []
+    names = {str(c.get("name") or "") for c in containers if isinstance(c, dict)}
+    return bool(names & _CLIENT_SIDECAR_NAMES)
+
+
+def _ue_item_row(name: str, item: Optional[dict]) -> Dict[str, Any]:
+    row = _deploy_row(name, item, kind="client")
+    sidecar = _has_client_sidecar(item)
+    return {
+        "name": name,
+        "exists": bool(row.get("exists")),
+        "ready": int(row.get("ready") or 0),
+        "desired": int(row.get("desired") or 0),
+        "ready_text": str(row.get("ready_text") or "—"),
+        "status": str(row.get("status") or "Missing"),
+        "ok": bool(row.get("ok")),
+        "client_sidecar": sidecar,
+    }
+
+
+def profile_ue_client_status(profile_name: str) -> Dict[str, Any]:
+    """Live edge status for on-demand oai-ue-* client Deployments (not the status bar)."""
+    from app.services import profile_store
+
+    rec = profile_store.get_profile(profile_name)
+    namespace = profile_name
+    ns_obj, ns_err = _kubectl_json("edge", ["get", "ns", namespace])
+    namespace_exists = ns_obj is not None and ns_err is None
+
+    live_by_name: Dict[str, dict] = {}
+    list_err: Optional[str] = None
+    if namespace_exists:
+        raw, list_err = _kubectl_json("edge", ["-n", namespace, "get", "deploy"])
+        if raw and isinstance(raw.get("items"), list):
+            for it in raw["items"]:
+                name = str(((it.get("metadata") or {}).get("name")) or "")
+                if _is_ue_deployment(name):
+                    live_by_name[name] = it
+
+    slice_ids: List[int] = []
+    apps: Dict[str, Any] = {}
+    if rec is not None:
+        apps = dict(rec.applications or {})
+        slice_ids = [int(s.id) for s in (rec.slices or [])]
+    for key in apps:
+        try:
+            sid = int(key)
+        except (TypeError, ValueError):
+            continue
+        if sid not in slice_ids:
+            slice_ids.append(sid)
+    for name in live_by_name:
+        sid = _parse_ue_slice_id(name)
+        if sid is not None and sid not in slice_ids:
+            slice_ids.append(sid)
+    slice_ids.sort()
+
+    slices_out: Dict[str, Any] = {}
+    for sid in slice_ids:
+        cfg = apps.get(str(sid))
+        params = {}
+        if cfg is not None:
+            params = getattr(cfg, "params", None) or {}
+            if not isinstance(params, dict):
+                params = {}
+        expected_n = int(params.get("client_count") or params.get("client_replicas") or 1)
+        enabled = True
+        app_type = "none"
+        if cfg is not None:
+            enabled = bool(getattr(cfg, "enabled", True))
+            app_type = str(getattr(cfg, "app_type", "") or "none").lower()
+        if not enabled or app_type == "none":
+            expected_n = 0
+        else:
+            live_clients = sum(
+                1
+                for n, it in live_by_name.items()
+                if _parse_ue_slice_id(n) == sid and _has_client_sidecar(it)
+            )
+            expected_n = max(expected_n, live_clients)
+
+        expected_names = [_ue_deploy_name(sid, i) for i in range(1, max(expected_n, 0) + 1)]
+        expected_set = set(expected_names)
+        extra_live = [
+            n
+            for n in live_by_name
+            if _parse_ue_slice_id(n) == sid and n not in expected_set
+        ]
+        ordered = list(expected_names) + sorted(extra_live)
+
+        deployments = [_ue_item_row(n, live_by_name.get(n)) for n in ordered]
+        present = sum(1 for d in deployments if d["exists"])
+        client_ready = sum(
+            1
+            for d in deployments
+            if d["name"] in expected_set
+            and d["exists"]
+            and d["client_sidecar"]
+            and d["ok"]
+        )
+        sidecar_present = sum(
+            1
+            for d in deployments
+            if d["name"] in expected_set and d["exists"] and d["client_sidecar"]
+        )
+        ran_up = any(d["exists"] and int(d["ready"] or 0) > 0 for d in deployments)
+
+        if expected_n <= 0:
+            overall = "idle"
+            summary = "No client UEs configured"
+        elif client_ready >= expected_n and expected_n > 0:
+            overall = "ready"
+            summary = f"{client_ready}/{expected_n} Ready"
+        elif sidecar_present > 0:
+            overall = "partial" if client_ready > 0 else "degraded"
+            summary = f"{client_ready}/{expected_n} Ready"
+        elif ran_up:
+            overall = "ran_only"
+            summary = "RAN UE up · client not applied"
+        elif present > 0:
+            overall = "degraded"
+            summary = f"{present} UE deploy(s) not ready"
+        else:
+            overall = "missing"
+            summary = "Not on cluster"
+
+        slices_out[str(sid)] = {
+            "slice_id": sid,
+            "expected": expected_n,
+            "present": present,
+            "client_ready": client_ready,
+            "overall": overall,
+            "summary": summary,
+            "deployments": deployments,
+        }
+
+    return {
+        "namespace": namespace,
+        "cluster": "edge",
+        "namespace_exists": namespace_exists,
+        "error": None if namespace_exists else (ns_err or list_err),
+        "slices": slices_out,
     }

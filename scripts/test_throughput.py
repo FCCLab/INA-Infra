@@ -41,9 +41,9 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SSH_CONFIG = REPO_ROOT / "utils" / "ssh_config" / "config"
-DEFAULT_EDGE_HOST = "edge-0"
-DEFAULT_CENTRAL_HOST = "central-0"
-DEFAULT_REGIONAL_HOST = "regional-0"
+DEFAULT_EDGE_HOST = "cpu-edge-0"
+DEFAULT_CENTRAL_HOST = "cpu-central-0"
+DEFAULT_REGIONAL_HOST = "cpu-regional-0"
 DEFAULT_MGMT_HOST = "mgmt-0"
 DEFAULT_UE_NS = "oai-slice-deployment"
 DEFAULT_UPF_NS = "oai-upf"

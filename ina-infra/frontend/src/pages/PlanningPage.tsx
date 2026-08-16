@@ -10,11 +10,16 @@ import {
   PlSolveResponse,
   Profile,
   ProfileRecord,
+  SliceApplicationConfig,
   SliceIn,
   StreamHandlers,
+  OaiRegistryStatus,
 } from "../api/client";
 import Topology from "../components/Topology";
+import ApplicationSettingsBox from "../components/ApplicationSettingsBox";
+import ApplicationServerSettingsBox from "../components/ApplicationServerSettingsBox";
 import NetworkSettingsForm from "../components/NetworkSettingsForm";
+import OaiImagesForm from "../components/OaiImagesForm";
 import FieldHelp from "../components/FieldHelp";
 import StatusRail from "../components/StatusRail";
 import Card from "../components/ui/Card";
@@ -41,6 +46,15 @@ function BtnProgress({ active }: { active: boolean }) {
       <span className="btn-progress-spin" />
     </span>
   );
+}
+
+function getClusterTagClass(cluster?: string | null): string {
+  if (!cluster) return "tag-cluster-auto";
+  const c = cluster.toLowerCase();
+  if (c.includes("edge")) return "tag-cluster-edge";
+  if (c.includes("regional")) return "tag-cluster-regional";
+  if (c.includes("central")) return "tag-cluster-central";
+  return "tag-cluster-auto";
 }
 
 const emptySlice = (id: number): SliceIn => ({
@@ -114,13 +128,20 @@ export default function PlanningPage() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [slices, setSlices] = useState<SliceIn[]>(DEFAULT_SLICES);
   const [networkIn, setNetworkIn] = useState<NetworkIn>(DEFAULT_NETWORK);
+  const [applications, setApplications] = useState<Record<string, SliceApplicationConfig>>({});
   const [profileNames, setProfileNames] = useState<string[]>([]);
   const [profileSubnets, setProfileSubnets] = useState<Record<string, string>>(
     {},
   );
   const [selectedName, setSelectedName] = useState<string>("");
   const [savedAt, setSavedAt] = useState<string>("");
+  const [showProfile, setShowProfile] = useState(true);
+  const [showSliceConfig, setShowSliceConfig] = useState(true);
   const [showNet, setShowNet] = useState(false);
+  const [showSlices, setShowSlices] = useState(true);
+  const [showPlResult, setShowPlResult] = useState(true);
+  const [registryStatus, setRegistryStatus] = useState<OaiRegistryStatus | null>(null);
+  const [registryLoading, setRegistryLoading] = useState(false);
   const [result, setResult] = useState<PlSolveResponse | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleTitle, setConsoleTitle] = useState("Console");
@@ -167,6 +188,18 @@ export default function PlanningPage() {
     }
   }
 
+  async function refreshRegistryImages(force = false) {
+    setRegistryLoading(true);
+    try {
+      const res = await api.getOaiRegistryImages(force);
+      setRegistryStatus(res);
+    } catch {
+      // ignore
+    } finally {
+      setRegistryLoading(false);
+    }
+  }
+
   const edgeRfOptions = useMemo(() => {
     const names = edgeNodes.map((n) => n.name);
     const fallback = [...EDGE_RF_NODES];
@@ -175,7 +208,7 @@ export default function PlanningPage() {
     for (const cur of [profile.du_node, profile.ue_node]) {
       if (cur && !merged.includes(cur)) merged.push(cur);
     }
-    return merged;
+    return merged.slice().sort((a, b) => a.localeCompare(b));
   }, [edgeNodes, profile.du_node, profile.ue_node]);
 
   const edgeNodeByName = useMemo(() => {
@@ -344,6 +377,7 @@ export default function PlanningPage() {
       ue_node: ranNode,
     });
     setSlices(rec.slices);
+    setApplications(rec.applications || {});
     const net =
       rec.network && Object.keys(rec.network).length
         ? normalizeNetwork(rec.network)
@@ -387,6 +421,7 @@ export default function PlanningPage() {
           applyRecord({ ...defs, updated_at: "" } as ProfileRecord);
         }
         await refreshEdgeNodes();
+        void refreshRegistryImages();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -520,7 +555,7 @@ export default function PlanningPage() {
         title: `Restore defaults for “${profile.name}”?`,
         message:
           "Resets subnet, max slices, DNN prefix, RAN node, network settings, " +
-          "and 4-slice SLAs. Deploy status is kept. Clears the PL result.",
+          "application servers, and 4-slice SLAs. Deploy status is kept. Clears the PL result.",
         confirmLabel: "Restore",
         danger: true,
       }))
@@ -594,6 +629,7 @@ export default function PlanningPage() {
         profile,
         slices,
         network: networkIn,
+        applications,
         updated_at: "",
       });
       applyRecord(rec);
@@ -1173,7 +1209,7 @@ export default function PlanningPage() {
 
       <Card className="tier">
         <div className="panel-head">
-          <SectionLabel kicker={savedAt ? savedAt.slice(0, 19) : undefined}>
+          <SectionLabel kicker={showProfile ? (savedAt ? savedAt.slice(0, 19) : undefined) : "collapsed"}>
             Profile
           </SectionLabel>
           <div className="actions">
@@ -1199,143 +1235,244 @@ export default function PlanningPage() {
             >
               Remove
             </button>
+            <button type="button" onClick={() => setShowProfile((v) => !v)}>
+              {showProfile ? "Hide" : "Show"}
+            </button>
           </div>
         </div>
-        <div className="profile-grid">
-          <FieldHelp
-            label="Saved profiles"
-            help="Select a profile loaded from the SQLite database on the API host."
-          >
-            <select
-              value={selectedName}
-              disabled={busy || profileNames.length === 0}
-              onChange={(e) => onSelectProfile(e.target.value)}
-            >
-              {profileNames.map((n) => (
-                <option key={n} value={n}>
-                  {profileSubnets[n] ? `${n} · ${profileSubnets[n]}` : n}
-                </option>
-              ))}
-            </select>
-          </FieldHelp>
-          <FieldHelp
-            label="Name (namespace)"
-            help="K8s namespace on central/regional/edge. Must be a DNS label (a-z0-9-)."
-          >
-            <input
-              key={`name-${selectedName}`}
-              value={profile.name}
-              onChange={(e) => updateProfile({ name: e.target.value.trim() })}
-            />
-          </FieldHelp>
-          <FieldHelp
-            className={currentSubnetConflict ? "field-conflict" : undefined}
-            label="Multus subnet"
-            help="Per-profile macvlan /24 (e.g. ina-infra → 10.1.140.0/24, next profile → 10.1.141.0/24). Add profile auto-picks a free /24. IPs use host = base[role] + n."
-          >
-            <input
-              key={`subnet-${selectedName}`}
-              value={profile.subnet}
-              onChange={(e) => updateProfile({ subnet: e.target.value.trim() })}
-              aria-invalid={Boolean(currentSubnetConflict)}
-            />
-          </FieldHelp>
-          <FieldHelp
-            label="Max slices"
-            help="Per-profile upper bound on Add slice (IP bands sized for this cap)."
-          >
-            <input
-              key={`max-${selectedName}`}
-              type="number"
-              min={1}
-              max={32}
-              value={profile.max_slices}
-              onChange={(e) =>
-                updateProfile({ max_slices: Math.max(1, Number(e.target.value) || 1) })
-              }
-            />
-          </FieldHelp>
-          <FieldHelp
-            label="DNN prefix"
-            help="Per-profile UE PDU pool prefix: {prefix}.{n}.0/24. Add profile auto-picks a free 10.14x when the copied prefix is taken (aligned with Multus 10.1.14x)."
-          >
-            <input
-              key={`dnn-${selectedName}`}
-              value={profile.dnn_prefix}
-              onChange={(e) => updateProfile({ dnn_prefix: e.target.value.trim() })}
-            />
-          </FieldHelp>
-          <FieldHelp
-            className="field-help-wide"
-            label="RAN node (DU + UE)"
-            help="Per-profile edge worker for OAI DU + UEs (rfsim). usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
-          >
-            <select
-              key={`ran-${selectedName}`}
-              className="ran-node-select"
-              value={profile.du_node || profile.ue_node || "usrp"}
-              disabled={busy}
-              onChange={(e) => {
-                const n = e.target.value;
-                updateProfile({ du_node: n, ue_node: n });
-              }}
-              onFocus={() => {
-                void refreshEdgeNodes();
-              }}
-            >
-              {edgeRfOptions.map((n) => (
-                <option key={n} value={n} title={edgeOptionDetail(n)}>
-                  {edgeOptionLabel(n)}
-                </option>
-              ))}
-            </select>
-          </FieldHelp>
-        </div>
-        {edgeNodesError && (
-          <p className="hint error">Edge nodes: {edgeNodesError}</p>
+
+        {showProfile ? (
+          <>
+            <div className="profile-grid">
+              <FieldHelp
+                label="Saved profiles"
+                help="Select a profile loaded from the SQLite database on the API host."
+              >
+                <select
+                  value={selectedName}
+                  disabled={busy || profileNames.length === 0}
+                  onChange={(e) => onSelectProfile(e.target.value)}
+                >
+                  {profileNames.map((n) => (
+                    <option key={n} value={n}>
+                      {profileSubnets[n] ? `${n} · ${profileSubnets[n]}` : n}
+                    </option>
+                  ))}
+                </select>
+              </FieldHelp>
+              <FieldHelp
+                label="Name (namespace)"
+                help="K8s namespace on central/regional/edge. Must be a DNS label (a-z0-9-)."
+              >
+                <input
+                  key={`name-${selectedName}`}
+                  value={profile.name}
+                  onChange={(e) => updateProfile({ name: e.target.value.trim() })}
+                />
+              </FieldHelp>
+              <FieldHelp
+                className={currentSubnetConflict ? "field-conflict" : undefined}
+                label="Multus subnet"
+                help="Per-profile macvlan /24 (e.g. ina-infra → 10.1.140.0/24, next profile → 10.1.141.0/24). Add profile auto-picks a free /24. IPs use host = base[role] + n."
+              >
+                <input
+                  key={`subnet-${selectedName}`}
+                  value={profile.subnet}
+                  onChange={(e) => updateProfile({ subnet: e.target.value.trim() })}
+                  aria-invalid={Boolean(currentSubnetConflict)}
+                />
+              </FieldHelp>
+              <FieldHelp
+                label="Max slices"
+                help="Per-profile upper bound on Add slice (IP bands sized for this cap)."
+              >
+                <input
+                  key={`max-${selectedName}`}
+                  type="number"
+                  min={1}
+                  max={32}
+                  value={profile.max_slices}
+                  onChange={(e) =>
+                    updateProfile({ max_slices: Math.max(1, Number(e.target.value) || 1) })
+                  }
+                />
+              </FieldHelp>
+              <FieldHelp
+                label="DNN prefix"
+                help="Per-profile UE PDU pool prefix: {prefix}.{n}.0/24. Add profile auto-picks a free 10.14x when the copied prefix is taken (aligned with Multus 10.1.14x)."
+              >
+                <input
+                  key={`dnn-${selectedName}`}
+                  value={profile.dnn_prefix}
+                  onChange={(e) => updateProfile({ dnn_prefix: e.target.value.trim() })}
+                />
+              </FieldHelp>
+              <FieldHelp
+                className="field-help-wide"
+                label="RAN node (DU + UE)"
+                help="Per-profile edge worker for OAI DU + UEs (rfsim). usrp → Multus enp4s0f0; VMs → enp7s0; bare-metal (edge-2) → eno1."
+              >
+                <select
+                  key={`ran-${selectedName}`}
+                  className="ran-node-select"
+                  value={profile.du_node || profile.ue_node || "usrp"}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const n = e.target.value;
+                    updateProfile({ du_node: n, ue_node: n });
+                  }}
+                  onFocus={() => {
+                    void refreshEdgeNodes();
+                  }}
+                >
+                  {edgeRfOptions.map((n) => (
+                    <option key={n} value={n} title={edgeOptionDetail(n)}>
+                      {edgeOptionLabel(n)}
+                    </option>
+                  ))}
+                </select>
+              </FieldHelp>
+            </div>
+
+            {edgeNodesError && (
+              <p className="hint error" style={{ marginTop: 12 }}>Edge nodes: {edgeNodesError}</p>
+            )}
+            {!edgeNodesError && edgeNodes.length > 0 && (
+              <div className="edge-nodes-strip" style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Discovered Edge Nodes ({edgeNodes.length})
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>· Multus master & IP mapping</span>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  {edgeNodes.map((n) => {
+                    const isSelected = (profile.du_node === n.name) || (profile.ue_node === n.name);
+                    return (
+                      <div
+                        key={n.name}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          padding: "6px 10px",
+                          borderRadius: 6,
+                          background: isSelected ? "rgba(192, 132, 252, 0.12)" : "rgba(15, 23, 42, 0.4)",
+                          border: isSelected
+                            ? "1px solid rgba(192, 132, 252, 0.4)"
+                            : "1px solid rgba(255, 255, 255, 0.08)",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                backgroundColor: n.ready ? "#22c55e" : "#ef4444",
+                              }}
+                            />
+                            <strong style={{ fontSize: 12, color: isSelected ? "#c084fc" : "var(--text)" }}>
+                              {n.name}
+                            </strong>
+                          </div>
+                          {isSelected && (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                padding: "1px 5px",
+                                borderRadius: 4,
+                                background: "rgba(192, 132, 252, 0.25)",
+                                color: "#c084fc",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Active RAN
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8", marginTop: 4, fontFamily: "monospace" }}>
+                          <span>{n.multus_master || "—"}</span>
+                          <span>{n.internal_ip || "—"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {profile.du_node &&
+              profile.ue_node &&
+              profile.du_node !== profile.ue_node && (
+                <p className="hint error">
+                  DU ({profile.du_node}) and UE ({profile.ue_node}) differ — pick a
+                  RAN node to co-locate them.
+                </p>
+              )}
+            {!profileOk && <p className="hint error">Invalid K8s namespace name.</p>}
+            {dirtyName && (
+              <p className="hint">
+                Name differs from loaded “{selectedName}” — Save will store under the new name
+                (upsert).
+              </p>
+            )}
+            {subnetConflicts.length > 0 && (
+              <p className="hint warn" role="status">
+                Warning: Multus subnet clash
+                {subnetConflicts.map((g) => (
+                  <span key={g.subnet}>
+                    {" — "}
+                    <code>{g.subnet}</code> used by {g.names.join(", ")}
+                  </span>
+                ))}
+                . Each profile needs its own /24.
+              </p>
+            )}
+            {savedAt && (
+              <p className="hint">
+                Last saved: <code>{savedAt}</code>
+              </p>
+            )}
+            {status && <p className="hint ok-inline">{status}</p>}
+          </>
+        ) : (
+          <p className="hint">Collapsed — Show to view or edit profile namespace, subnets, and RAN node.</p>
         )}
-        {!edgeNodesError && edgeNodes.length > 0 && (
-          <p className="hint">
-            Edge nodes ({edgeNodes.length}):{" "}
-            {edgeNodes.map((n) => edgeOptionDetail(n.name)).join(", ")}
-          </p>
-        )}
-        {profile.du_node &&
-          profile.ue_node &&
-          profile.du_node !== profile.ue_node && (
-            <p className="hint error">
-              DU ({profile.du_node}) and UE ({profile.ue_node}) differ — pick a
-              RAN node to co-locate them.
-            </p>
-          )}
-        {!profileOk && <p className="hint error">Invalid K8s namespace name.</p>}
-        {dirtyName && (
-          <p className="hint">
-            Name differs from loaded “{selectedName}” — Save will store under the new name
-            (upsert).
-          </p>
-        )}
-        {subnetConflicts.length > 0 && (
-          <p className="hint warn" role="status">
-            Warning: Multus subnet clash
-            {subnetConflicts.map((g) => (
-              <span key={g.subnet}>
-                {" — "}
-                <code>{g.subnet}</code> used by {g.names.join(", ")}
-              </span>
-            ))}
-            . Each profile needs its own /24.
-          </p>
-        )}
-        {savedAt && (
-          <p className="hint">
-            Last saved: <code>{savedAt}</code>
-          </p>
-        )}
-        {status && <p className="hint ok-inline">{status}</p>}
       </Card>
 
       <Card className="tier">
+        <div className="panel-head">
+          <SectionLabel kicker={`${slices.length} slices · images · network · servers`}>
+            Slice config
+          </SectionLabel>
+          <button type="button" onClick={() => setShowSliceConfig((v) => !v)}>
+            {showSliceConfig ? "Hide" : "Show"}
+          </button>
+        </div>
+        {showSliceConfig ? (
+          <>
+            <p className="hint">
+              Slice-level settings for this profile: container images, network substrate, application servers, and SLAs. Saved with Update; PL Solve uses network + SLAs; GitOps Deploy applies images and servers.
+            </p>
+            <div className="slice-config-sections">
+      <OaiImagesForm
+        value={profile.oai_images}
+        registryStatus={registryStatus}
+        loading={registryLoading}
+        onRefresh={() => void refreshRegistryImages(true)}
+        onChange={(oai_images) => updateProfile({ oai_images })}
+        disabled={busy}
+        embedded
+      />
+
+      <div className="slice-config-section">
         <div className="panel-head">
           <SectionLabel kicker={showNet ? "editing" : "collapsed"}>
             Network settings
@@ -1346,17 +1483,27 @@ export default function PlanningPage() {
         </div>
         {showNet ? (
           <>
-            <p className="hint">Part of profile · hover ? for help</p>
+            <p className="hint">Part of slice config · hover ? for help</p>
             <NetworkSettingsForm value={networkIn} onChange={updateNetwork} />
           </>
         ) : (
           <p className="hint">Collapsed — Show to edit substrate variables for this profile.</p>
         )}
-      </Card>
+      </div>
 
-      <Card className="tier">
+      <ApplicationServerSettingsBox
+        profile={profile}
+        slices={slices}
+        applications={applications}
+        plResult={result}
+        onChangeApplications={setApplications}
+        disabled={busy}
+        embedded
+      />
+
+      <div className="slice-config-section">
         <div className="panel-head">
-          <SectionLabel kicker={`N=${slices.length}/${profile.max_slices}`}>
+          <SectionLabel kicker={showSlices ? `N=${slices.length}/${profile.max_slices}` : "collapsed"}>
             Slice SLAs
           </SectionLabel>
           <div className="actions">
@@ -1383,116 +1530,154 @@ export default function PlanningPage() {
             >
               {busy ? "Working…" : "Solve PL"}
             </button>
+            <button type="button" onClick={() => setShowSlices((v) => !v)}>
+              {showSlices ? "Hide" : "Show"}
+            </button>
           </div>
         </div>
-        <div className="table-wrap">
-          <table className="dtable">
-            <thead>
-              <tr>
-                <th>
-                  ID{" "}
-                  <span className="help-q" title="Slice identifier used in PL and IP plan (n is row order 1..N)." role="img">?</span>
-                </th>
-                <th>
-                  Type{" "}
-                  <span className="help-q" title="Label only (eMBB / URLLC / mMTC / custom). Not used by the MILP." role="img">?</span>
-                </th>
-                <th>
-                  t_bar (Mbps){" "}
-                  <span className="help-q" title="Minimum throughput SLA (Mbps)." role="img">?</span>
-                </th>
-                <th>
-                  d_bar (ms){" "}
-                  <span className="help-q" title="Maximum end-to-end delay SLA (ms)." role="img">?</span>
-                </th>
-                <th>
-                  h_s{" "}
-                  <span className="help-q" title="Hard isolation: 1 = dedicated PRBs; 0 = shared." role="img">?</span>
-                </th>
-                <th>
-                  eta_t0{" "}
-                  <span className="help-q" title="Planning radio efficiency (Mbps per PRB)." role="img">?</span>
-                </th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {slices.map((s, i) => (
-                <tr key={`${s.id}-${i}`}>
-                  <td>
-                    <input
-                      type="number"
-                      value={s.id}
-                      onChange={(e) => updateSlice(i, { id: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={s.slice_type}
-                      onChange={(e) => updateSlice(i, { slice_type: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      step="1"
-                      value={s.t_bar}
-                      onChange={(e) => updateSlice(i, { t_bar: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      step="1"
-                      value={s.d_bar}
-                      onChange={(e) => updateSlice(i, { d_bar: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={s.h_s}
-                      onChange={(e) => updateSlice(i, { h_s: Number(e.target.value) })}
-                    >
-                      <option value={0}>0 shared</option>
-                      <option value={1}>1 dedicated</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={s.eta_t0}
-                      onChange={(e) => updateSlice(i, { eta_t0: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <button type="button" className="danger" onClick={() => removeSlice(i)}>
-                      Remove
-                    </button>
-                  </td>
+        {showSlices ? (
+          <div className="table-wrap">
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>
+                    ID{" "}
+                    <span className="help-q" title="Slice identifier used in PL and IP plan (n is row order 1..N)." role="img">?</span>
+                  </th>
+                  <th>
+                    Type{" "}
+                    <span className="help-q" title="Label only (eMBB / URLLC / mMTC / custom). Not used by the MILP." role="img">?</span>
+                  </th>
+                  <th>
+                    t_bar (Mbps){" "}
+                    <span className="help-q" title="Minimum throughput SLA (Mbps)." role="img">?</span>
+                  </th>
+                  <th>
+                    d_bar (ms){" "}
+                    <span className="help-q" title="Maximum end-to-end delay SLA (ms)." role="img">?</span>
+                  </th>
+                  <th>
+                    h_s{" "}
+                    <span className="help-q" title="Hard isolation: 1 = dedicated PRBs; 0 = shared." role="img">?</span>
+                  </th>
+                  <th>
+                    eta_t0{" "}
+                    <span className="help-q" title="Planning radio efficiency (Mbps per PRB)." role="img">?</span>
+                  </th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {slices.map((s, i) => (
+                  <tr key={s.id}>
+                    <td>
+                      <span className="badge badge-accent">S{s.id}</span>
+                    </td>
+                    <td>
+                      <input
+                        value={s.slice_type}
+                        onChange={(e) => updateSlice(i, { slice_type: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min={0.1}
+                        value={s.t_bar}
+                        onChange={(e) =>
+                          updateSlice(i, { t_bar: Number(e.target.value) })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="1"
+                        min={0.1}
+                        value={s.d_bar}
+                        onChange={(e) =>
+                          updateSlice(i, { d_bar: Number(e.target.value) })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={s.h_s}
+                        onChange={(e) =>
+                          updateSlice(i, { h_s: Number(e.target.value) })
+                        }
+                      >
+                        <option value={0}>0 (shared)</option>
+                        <option value={1}>1 (dedicated)</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min={0.01}
+                        value={s.eta_t0}
+                        onChange={(e) =>
+                          updateSlice(i, { eta_t0: Number(e.target.value) })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button type="button" className="danger" onClick={() => removeSlice(i)}>
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">Collapsed — Show to view or edit slice SLAs and requirements.</p>
+        )}
+      </div>
+            </div>
+          </>
+        ) : (
+          <p className="hint">Collapsed — Show to edit container images, network, application servers, and slice SLAs.</p>
+        )}
       </Card>
 
       {error && <div className="banner error">{error}</div>}
 
       {result?.ok && (
         <Card className="tier" glow>
-          <header className="result-title-block">
-            <div className="result-eyebrow">
-              <span className="status-dot dot-ok" />
-              <span className="result-eyebrow-text">PL result</span>
-              <span className="site-badge">{result.slices.length} slice(s)</span>
+          <header className="result-title-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div className="result-eyebrow">
+                <span className="status-dot dot-ok" />
+                <span className="result-eyebrow-text">PL result</span>
+                <span className="site-badge">{result.slices.length} slice(s)</span>
+              </div>
+              <h2 className="result-title">Optimal placement and IP plan</h2>
             </div>
-            <h2 className="result-title">Optimal placement and IP plan</h2>
+            <div className="actions">
+              <button type="button" onClick={() => setShowPlResult((v) => !v)}>
+                {showPlResult ? "Hide" : "Show"}
+              </button>
+            </div>
           </header>
+
+          {showPlResult ? (
+            <>
 
           <section className="result-section">
             <div className="result-section-head">
-              <SectionLabel kicker="Edge · Regional · Central">
+              <SectionLabel
+                kicker={
+                  <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <span className="tag tag-cluster-edge" style={{ fontSize: 9.5 }}>Edge</span>
+                    <span className="tag tag-cluster-regional" style={{ fontSize: 9.5 }}>Regional</span>
+                    <span className="tag tag-cluster-central" style={{ fontSize: 9.5 }}>Central</span>
+                  </span>
+                }
+              >
                 Placement
               </SectionLabel>
             </div>
@@ -1554,6 +1739,7 @@ export default function PlanningPage() {
                       <td>AMF N2</td>
                       <td>
                         <code>{ipPlan.shared.amf_n2}</code>
+                        <span className="tag tag-cluster-central" style={{ marginLeft: 8, fontSize: 9.5 }}>Central</span>
                       </td>
                     </tr>
                     <tr>
@@ -1565,12 +1751,14 @@ export default function PlanningPage() {
                               ? `${ipPlan.shared.amf_n2.replace(/\.\d+$/, ".11")}`
                               : "—")}
                         </code>
+                        <span className="tag tag-cluster-central" style={{ marginLeft: 8, fontSize: 9.5 }}>Central</span>
                       </td>
                     </tr>
                     <tr>
                       <td>SMF N4</td>
                       <td>
                         <code>{ipPlan.shared.smf_n4}</code>
+                        <span className="tag tag-cluster-central" style={{ marginLeft: 8, fontSize: 9.5 }}>Central</span>
                       </td>
                     </tr>
                     <tr>
@@ -1580,6 +1768,7 @@ export default function PlanningPage() {
                           {ipPlan.shared.cucp_n2} / {ipPlan.shared.cucp_f1c} /{" "}
                           {ipPlan.shared.cucp_e1}
                         </code>
+                        <span className="tag tag-cluster-edge" style={{ marginLeft: 8, fontSize: 9.5 }}>Edge</span>
                       </td>
                     </tr>
                     <tr>
@@ -1588,6 +1777,7 @@ export default function PlanningPage() {
                         <code>
                           {ipPlan.shared.du_f1} / {ipPlan.shared.du_rf}
                         </code>
+                        <span className="tag tag-cluster-edge" style={{ marginLeft: 8, fontSize: 9.5 }}>Edge</span>
                       </td>
                     </tr>
                     <tr>
@@ -1596,6 +1786,7 @@ export default function PlanningPage() {
                         <code>
                           {ipPlan.shared.flexric_e2} / {ipPlan.shared.xapp_e2}
                         </code>
+                        <span className="tag tag-cluster-edge" style={{ marginLeft: 8, fontSize: 9.5 }}>Edge</span>
                       </td>
                     </tr>
                   </tbody>
@@ -1645,8 +1836,24 @@ export default function PlanningPage() {
                         <td>
                           <code>{s.dnn_cidr}</code>
                         </td>
-                        <td className="muted">
-                          CU={s.site_cu} UPF={s.site_upf}
+                        <td>
+                          <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                            {s.site_cu && (
+                              <span className={`tag ${getClusterTagClass(s.site_cu)}`} style={{ fontSize: 9.5 }}>
+                                CU: {s.site_cu}
+                              </span>
+                            )}
+                            {s.site_upf && (
+                              <span className={`tag ${getClusterTagClass(s.site_upf)}`} style={{ fontSize: 9.5 }}>
+                                UPF: {s.site_upf}
+                              </span>
+                            )}
+                            {s.site_app && (
+                              <span className={`tag ${getClusterTagClass(s.site_app)}`} style={{ fontSize: 9.5 }}>
+                                APP: {s.site_app}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1823,8 +2030,44 @@ export default function PlanningPage() {
               <strong>Rollout</strong> is separate — staged NF restart only.
             </p>
           </div>
+            </>
+          ) : (
+            <p className="hint" style={{ marginTop: 10 }}>
+              Collapsed — Show to view optimal placement matrix, resources, and IP plan.
+            </p>
+          )}
         </Card>
       )}
+
+      <ApplicationSettingsBox
+        profile={profile}
+        slices={slices}
+        applications={applications}
+        onChangeApplications={setApplications}
+        disabled={busy}
+        onDeployStart={(title) => {
+          resetConsole(title);
+          appendConsole(`[${new Date().toLocaleTimeString()}] Starting: ${title}`);
+        }}
+        onDeployLog={(_stream, line) => {
+          appendConsole(line);
+        }}
+        onDeployStatus={(msg) => {
+          setStatus(msg);
+          appendConsole(`ℹ ${msg}`);
+        }}
+        onDeployDone={(msg) => {
+          setStatus(msg);
+          appendConsole(`✔ ${msg}`);
+          if (profile.name) {
+            void loadProfile(profile.name);
+          }
+        }}
+        onDeployError={(err) => {
+          setError(err);
+          appendConsole(`✖ Error: ${err}`);
+        }}
+      />
 
       {(consoleOpen || deployFiles.length > 0) && (
         <div ref={consolePanelRef}>
@@ -1935,6 +2178,7 @@ export default function PlanningPage() {
         networkCollapsed={!showNet}
         sliceCount={slices.length}
         maxSlices={profile.max_slices}
+        appServerCount={Object.values(applications).filter((a) => a.enabled && a.app_type !== "none").length}
         plSolved={Boolean(result?.ok)}
         plMessage={result?.ok ? result.message : null}
         deployed={deployed}

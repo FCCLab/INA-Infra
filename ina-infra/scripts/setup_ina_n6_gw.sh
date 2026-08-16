@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create per-site host macvlan N6 gateway for INA-Infra Multus (default 10.1.140.0/24).
 #
-#   central-0 → 10.1.140.1, regional-0 → 10.1.140.2, edge-0 → 10.1.140.3
+#   cpu-central-0 → 10.1.140.1, cpu-regional-0 → 10.1.140.2, cpu-edge-0 → 10.1.140.3
 #
 # Does not modify the OAI .139 shim (oai-n6-gw). Uses iface ina-n6-gw by default.
 set -euo pipefail
@@ -33,12 +33,12 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [host ...]
 
-On each site CP (default: central-0 regional-0 edge-0):
+On each site CP (default: cpu-central-0 cpu-regional-0 cpu-edge-0):
   Create ${SHIM}@${PARENT} with site GW on ${CIDR}, NAT toward ${MGMT_CIDR}.
 
 Examples:
   $(basename "$0")
-  INA_MACVLAN_PREFIX=10.1.140 $(basename "$0") central-0
+  INA_MACVLAN_PREFIX=10.1.140 $(basename "$0") cpu-central-0
 EOF
 }
 
@@ -46,9 +46,11 @@ ssh_cmd() { ssh -F "$SSH_CONFIG" "$@"; }
 
 site_from_host() {
   case "$1" in
-    central-*) printf 'central' ;;
-    regional-*) printf 'regional' ;;
-    edge-*) printf 'edge' ;;
+    cpu-central-*|central-*) printf 'central' ;;
+    cpu-regional-*|regional-*) printf 'regional' ;;
+    cpu-edge-*|edge-*|gpu-a40) printf 'edge' ;;
+    gpu-gh81|gh81) printf 'central' ;;
+    gpu-gh82|gh82) printf 'regional' ;;
     *) printf '' ;;
   esac
 }
@@ -163,7 +165,7 @@ main() {
   fi
   local hosts=("$@")
   if [[ ${#hosts[@]} -eq 0 ]]; then
-    hosts=(central-0 regional-0 edge-0)
+    hosts=(cpu-central-0 cpu-regional-0 cpu-edge-0)
   fi
   [[ -f "$SSH_CONFIG" ]] || { echo "error: missing $SSH_CONFIG" >&2; exit 1; }
   local failed=0 host

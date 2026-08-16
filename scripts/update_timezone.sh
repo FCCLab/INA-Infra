@@ -43,9 +43,9 @@ K8S_CONTEXTS="${K8S_CONTEXTS:-mgmt@mgmt central@central regional@regional edge@e
 # Default: every SSH-reachable node that is (or can be) a k8s worker/CP.
 DEFAULT_HOSTS=(
   mgmt-0 mgmt-1
-  central-0 central-1 gh82
-  regional-0 regional-1
-  edge-0 edge-1 edge-2 edge-3
+  cpu-central-0 cpu-central-1 "${GPU_GH81_HOST}"
+  cpu-regional-0 cpu-regional-1 "${GPU_GH82_HOST}"
+  cpu-edge-0 cpu-edge-1 edge-2 "${GPU_A40_HOST}"
   usrp
 )
 
@@ -122,13 +122,13 @@ resolve_targets() {
         out+=(mgmt-0 mgmt-1)
         ;;
       central)
-        out+=("${CLUSTER_CP_HOST[central]}" "${CLUSTER_WORKER_HOST[central]}" gh82)
+        out+=("${CLUSTER_CP_HOST[central]}" "${CLUSTER_WORKER_HOST[central]}" "${GPU_GH81_HOST}")
         ;;
       regional)
-        out+=("${CLUSTER_CP_HOST[regional]}" "${CLUSTER_WORKER_HOST[regional]}")
+        out+=("${CLUSTER_CP_HOST[regional]}" "${CLUSTER_WORKER_HOST[regional]}" "${GPU_GH82_HOST}")
         ;;
       edge)
-        out+=("${CLUSTER_CP_HOST[edge]}" "${CLUSTER_WORKER_HOST[edge]}" edge-2 edge-3 usrp)
+        out+=("${CLUSTER_CP_HOST[edge]}" "${CLUSTER_WORKER_HOST[edge]}" edge-2 "${GPU_A40_HOST}" usrp)
         ;;
       *)
         out+=("$arg")

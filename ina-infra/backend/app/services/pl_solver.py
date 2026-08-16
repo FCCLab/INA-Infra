@@ -142,10 +142,14 @@ def default_slices() -> list[SliceIn]:
 
 
 def profile_defaults() -> ProfileDefaultsOut:
+    from app.services import profile_store
+
+    slices = list(_DEFAULT_FOUR)
     return ProfileDefaultsOut(
         profile=ip_allocator.default_profile(),
-        slices=list(_DEFAULT_FOUR),
+        slices=slices,
         network=default_network_in(),
+        applications=profile_store.default_applications(slices),
     )
 
 

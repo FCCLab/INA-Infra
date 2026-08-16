@@ -14,10 +14,9 @@ SSH_PASSWORD="${SSH_PASSWORD:-}"
 
 ALL_HOSTS=(
   mgmt-0 mgmt-1
-  central-0 central-1
-  regional-0 regional-1
-  edge-0 edge-1
-
+  cpu-central-0 cpu-central-1
+  cpu-regional-0 cpu-regional-1
+  cpu-edge-0 cpu-edge-1
 )
 
 cleanup() {

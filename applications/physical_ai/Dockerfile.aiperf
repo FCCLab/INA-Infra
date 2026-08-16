@@ -1,0 +1,24 @@
+# AIPerf client for Cosmos3 — amd64 (usrp / edge UE sidecar).
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:/root/.local/bin:${PATH} \
+    HF_HOME=/tmp/hf-cache \
+    HUGGINGFACE_HUB_CACHE=/tmp/hf-cache \
+    HF_HUB_CACHE=/tmp/hf-cache
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl iproute2 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv \
+    && /root/.local/bin/uv pip install --python /opt/venv aiperf openai
+
+WORKDIR /app
+COPY entrypoint-aiperf.sh /app/entrypoint-aiperf.sh
+COPY aiperf_profile.sh /app/aiperf_profile.sh
+RUN chmod +x /app/entrypoint-aiperf.sh /app/aiperf_profile.sh
+
+ENTRYPOINT ["/app/entrypoint-aiperf.sh"]

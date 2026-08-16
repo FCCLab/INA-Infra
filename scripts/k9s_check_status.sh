@@ -14,19 +14,24 @@ STRICT="${STRICT:-0}"
 
 ALL_HOSTS=(
   mgmt-0 mgmt-1
-  central-0 central-1
-  regional-0 regional-1
-  edge-0 edge-1
-
+  cpu-central-0 cpu-central-1
+  cpu-regional-0 cpu-regional-1
+  cpu-edge-0 cpu-edge-1
 )
 
 declare -A HOST_CLUSTER=(
   [mgmt-0]=mgmt
   [mgmt-1]=mgmt
+  [cpu-central-0]=central
+  [cpu-central-1]=central
   [central-0]=central
   [central-1]=central
+  [cpu-regional-0]=regional
+  [cpu-regional-1]=regional
   [regional-0]=regional
   [regional-1]=regional
+  [cpu-edge-0]=edge
+  [cpu-edge-1]=edge
   [edge-0]=edge
   [edge-1]=edge
 )
@@ -54,7 +59,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") mgmt central
   $(basename "$0") --local
-  $(basename "$0") central-0 regional-0
+  $(basename "$0") cpu-central-0 cpu-regional-0
   STRICT=1 $(basename "$0")
 
 Clusters: mgmt, central, regional, edge

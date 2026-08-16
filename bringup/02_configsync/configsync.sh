@@ -499,9 +499,9 @@ pin_configsync_to_node0() {
   local node0
   case "$cluster" in
     mgmt) node0="node-0" ;;
-    central) node0="central-0" ;;
-    regional) node0="regional-0" ;;
-    edge) node0="edge-0" ;;
+    central) node0="cpu-central-0" ;;
+    regional) node0="cpu-regional-0" ;;
+    edge) node0="cpu-edge-0" ;;
     *) echo "Unknown cluster: $cluster" >&2; return 1 ;;
   esac
 

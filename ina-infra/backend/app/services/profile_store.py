@@ -8,9 +8,16 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
-from app.schemas import NetworkIn, PlSolveResponse, Profile, ProfileRecord, SliceIn
+from app.schemas import (
+    NetworkIn,
+    PlSolveResponse,
+    Profile,
+    ProfileRecord,
+    SliceApplicationConfig,
+    SliceIn,
+)
 from app.services import ip_allocator, pl_solver
 
 
@@ -52,6 +59,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE profiles ADD COLUMN network_json TEXT NOT NULL DEFAULT '{}'"
         )
+    if "applications_json" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN applications_json TEXT NOT NULL DEFAULT '{}'"
+        )
     if "pl_result_json" not in cols:
         conn.execute("ALTER TABLE profiles ADD COLUMN pl_result_json TEXT")
     if "pl_result_file" not in cols:
@@ -78,6 +89,144 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE profiles ADD COLUMN ue_node TEXT NOT NULL DEFAULT 'usrp'"
         )
+    if "oai_images_json" not in cols:
+        conn.execute(
+            "ALTER TABLE profiles ADD COLUMN oai_images_json TEXT NOT NULL DEFAULT '{}'"
+        )
+
+
+def default_applications(
+    slices: Optional[List[SliceIn]] = None,
+) -> Dict[str, SliceApplicationConfig]:
+    """Provide default application configs for slices (CCTV, Physical AI, OTT, IoT)."""
+    sl = slices if slices is not None else pl_solver.default_slices()
+    apps: Dict[str, SliceApplicationConfig] = {}
+    preset_configs: Dict[int, SliceApplicationConfig] = {
+        1: SliceApplicationConfig(
+            slice_id=1,
+            app_type="cctv",
+            name="CCTV Vision Streaming",
+            enabled=True,
+            target_cluster="auto",
+            server_image="10.1.132.30:5000/slicea-analyzer:nws-v0.7-amd64",
+            client_image="10.1.132.30:5000/slicea-publisher:nws-v0.6-amd64",
+            server_port=8554,
+            metrics_port=9102,
+            params={
+                "stream_path": "slicea",
+                "yolo_model": "yolov8n.pt",
+                "yolo_device": "cpu",
+                "frame_skip": 1,
+                "fps": 25,
+                "bitrate_kbps": 4000,
+                "rtsp_protocol": "tcp",
+                "client_count": 1,
+            },
+        ),
+        2: SliceApplicationConfig(
+            slice_id=2,
+            app_type="physical_ai",
+            name="Physical AI (Cosmos3 VLM)",
+            enabled=True,
+            target_cluster="auto",
+            server_image="10.1.132.30:5000/cosmo3-vllm:nws-v0.5-arm64-cu128",
+            client_image="10.1.132.30:5000/cosmo3-aiperf:nws-v0.5-amd64",
+            server_port=8000,
+            metrics_port=8002,
+            params={
+                "model": "nvidia/Cosmos-Nemotron-34B",
+                "tensor_parallel_size": 1,
+                "max_model_len": 4096,
+                "gpu_arch": "arm64-gh200",
+                "request_rate": 10,
+                "client_count": 1,
+            },
+        ),
+        3: SliceApplicationConfig(
+            slice_id=3,
+            app_type="ott",
+            name="OTT HD Video Streaming",
+            enabled=True,
+            target_cluster="auto",
+            server_image="10.1.132.30:5000/hd-stream-server:hdstream-v2",
+            client_image="10.1.132.30:5000/hd-stream-client:hdstream-v2",
+            server_port=8554,
+            metrics_port=9103,
+            params={
+                "stream_protocol": "rtsp",
+                "stream_path": "live/hd",
+                "bitrate_kbps": 6000,
+                "resolution": "1080p",
+                "client_count": 1,
+            },
+        ),
+        4: SliceApplicationConfig(
+            slice_id=4,
+            app_type="iot",
+            name="Background IoT (MQTT)",
+            enabled=True,
+            target_cluster="auto",
+            server_image="10.1.132.30:5000/sliced-edge:nws-v0.5-amd64",
+            client_image="10.1.132.30:5000/sliced-client:nws-v0.5-amd64",
+            server_port=1883,
+            metrics_port=9105,
+            params={
+                "num_devices": 5,
+                "fast_period_s": 60,
+                "med_period_s": 1800,
+                "slow_period_s": 3600,
+                "dl_fast_period_s": 300,
+                "dl_slow_period_s": 3600,
+                "mqtt_qos": 0,
+                "client_count": 1,
+            },
+        ),
+    }
+    for s in sl:
+        sid = s.id
+        if sid in preset_configs:
+            apps[str(sid)] = preset_configs[sid].model_copy()
+        else:
+            apps[str(sid)] = SliceApplicationConfig(
+                slice_id=sid,
+                app_type="none",
+                name=f"Slice {sid} Workload",
+                enabled=False,
+                target_cluster="auto",
+                server_image="",
+                client_image="",
+                server_port=8080,
+                metrics_port=9100 + sid,
+                params={},
+            )
+    return apps
+
+
+def _parse_applications(
+    raw: Any, slices: Optional[List[SliceIn]] = None
+) -> Dict[str, SliceApplicationConfig]:
+    defaults = default_applications(slices)
+    if raw is None or raw == "" or raw == "{}":
+        return defaults
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            data = {}
+    else:
+        data = raw
+    if not isinstance(data, dict):
+        return defaults
+    out: Dict[str, SliceApplicationConfig] = {}
+    for k, v in data.items():
+        try:
+            out[str(k)] = SliceApplicationConfig.model_validate(v)
+        except Exception:
+            continue
+    for k, v in defaults.items():
+        if k not in out:
+            out[k] = v
+    return out
 
 
 def init_db() -> Path:
@@ -92,6 +241,7 @@ def init_db() -> Path:
               dnn_prefix TEXT NOT NULL,
               slices_json TEXT NOT NULL,
               network_json TEXT NOT NULL DEFAULT '{}',
+              applications_json TEXT NOT NULL DEFAULT '{}',
               pl_result_json TEXT,
               pl_result_file TEXT,
               deployed INTEGER NOT NULL DEFAULT 0,
@@ -161,6 +311,7 @@ def _seed_record() -> ProfileRecord:
         profile=defs.profile,
         slices=defs.slices,
         network=defs.network,
+        applications=default_applications(defs.slices),
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -209,6 +360,9 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
     keys = row.keys()
     slices = [SliceIn.model_validate(s) for s in json.loads(row["slices_json"])]
     network = _parse_network(row["network_json"] if "network_json" in keys else "{}")
+    applications = _parse_applications(
+        row["applications_json"] if "applications_json" in keys else "{}", slices
+    )
     pl_result = _parse_pl_result(
         row["pl_result_json"] if "pl_result_json" in keys else None
     )
@@ -236,6 +390,13 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
     ue_node = (
         str(row["ue_node"]) if "ue_node" in keys and row["ue_node"] else "usrp"
     )
+    oai_images = {}
+    if "oai_images_json" in keys and row["oai_images_json"]:
+        try:
+            oai_images = json.loads(row["oai_images_json"]) if isinstance(row["oai_images_json"], str) else row["oai_images_json"]
+        except Exception:
+            oai_images = {}
+
     # Heal stale identity columns from the last successful PL result.
     if pl_result is not None and getattr(pl_result, "ok", False):
         plan_subnet = None
@@ -253,6 +414,8 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
                 du_node = str(pl_prof.du_node)
             if pl_prof.ue_node:
                 ue_node = str(pl_prof.ue_node)
+            if getattr(pl_prof, "oai_images", None):
+                oai_images = pl_prof.oai_images
         if plan_subnet and plan_subnet != subnet:
             try:
                 subnet = ip_allocator.normalize_multus_subnet(plan_subnet)
@@ -266,11 +429,13 @@ def _row_to_record(row: sqlite3.Row) -> ProfileRecord:
         dnn_prefix=dnn_prefix,
         du_node=du_node,
         ue_node=ue_node,
+        oai_images=oai_images,
     )
     return ProfileRecord(
         profile=profile,
         slices=slices,
         network=network,
+        applications=applications,
         pl_result=pl_result,
         pl_result_file=pl_result_file,
         deployed=deployed,
@@ -285,6 +450,7 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
     Profile.model_validate(rec.profile.model_dump())
     now = datetime.now(timezone.utc).isoformat()
     network = rec.network or pl_solver.default_network_in()
+    applications = rec.applications or default_applications(rec.slices)
 
     existing = conn.execute(
         "SELECT * FROM profiles WHERE name = ?",
@@ -307,20 +473,10 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
 
     # Deploy fields: caller may set them; otherwise preserve existing.
     if existing is not None:
-        # If deploy_files explicitly provided (including empty after undeploy via
-        # save_deploy_state), use rec values. Heuristic: always use rec when
-        # save_profile is called with full record from get+update.
         deployed = int(bool(rec.deployed))
         deployed_at = rec.deployed_at
         deploy_files_json = json.dumps(list(rec.deploy_files))
         deploy_clusters_json = json.dumps(list(rec.deploy_clusters))
-        # Preserve deploy state when UI Save only sends defaults (deployed=False,
-        # empty files) and prior state was deployed — detect "omit" via sentinel:
-        # if rec has empty deploy_files AND not deployed AND existing was deployed
-        # AND rec.deployed_at is None, keep existing unless undeploy cleared it.
-        # Simpler approach: save_profile from UI doesn't touch deploy_*; use
-        # dedicated save_deploy_state. For save_profile from UI with default
-        # deployed=False, preserve existing deploy columns.
         if (
             not rec.deployed
             and not rec.deploy_files
@@ -337,16 +493,19 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
         deploy_files_json = json.dumps(list(rec.deploy_files))
         deploy_clusters_json = json.dumps(list(rec.deploy_clusters))
 
+    apps_json = json.dumps({k: v.model_dump() for k, v in applications.items()})
+    oai_images_json = json.dumps(rec.profile.oai_images or {})
+
     conn.execute(
         """
         INSERT INTO profiles (
           name, subnet, max_slices, dnn_prefix, du_node, ue_node,
-          slices_json, network_json,
+          slices_json, network_json, applications_json, oai_images_json,
           pl_result_json, pl_result_file,
           deployed, deployed_at, deploy_files_json, deploy_clusters_json,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
           subnet=excluded.subnet,
           max_slices=excluded.max_slices,
@@ -355,6 +514,8 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
           ue_node=excluded.ue_node,
           slices_json=excluded.slices_json,
           network_json=excluded.network_json,
+          applications_json=excluded.applications_json,
+          oai_images_json=excluded.oai_images_json,
           pl_result_json=excluded.pl_result_json,
           pl_result_file=excluded.pl_result_file,
           deployed=excluded.deployed,
@@ -372,6 +533,8 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
             rec.profile.ue_node,
             json.dumps([s.model_dump() for s in rec.slices]),
             json.dumps(network.model_dump(exclude_none=True)),
+            apps_json,
+            oai_images_json,
             pl_json,
             pl_file,
             deployed,
@@ -420,13 +583,14 @@ def save_profile(rec: ProfileRecord) -> ProfileRecord:
 
 
 def restore_profile_defaults(name: str) -> ProfileRecord:
-    """Reset identity (except name), slices, and network to builtins; clear PL result."""
+    """Reset identity (except name), slices, network, and apps to builtins; clear PL result."""
     init_db()
     existing = get_profile(name)
     if existing is None:
         raise ValueError(f"profile not found: {name}")
     defs = pl_solver.profile_defaults()
     network = defs.network or pl_solver.default_network_in()
+    apps = default_applications(defs.slices)
     now = datetime.now(timezone.utc).isoformat()
     with _db() as conn:
         conn.execute(
@@ -439,6 +603,7 @@ def restore_profile_defaults(name: str) -> ProfileRecord:
               ue_node = ?,
               slices_json = ?,
               network_json = ?,
+              applications_json = ?,
               pl_result_json = NULL,
               pl_result_file = NULL,
               updated_at = ?
@@ -452,6 +617,7 @@ def restore_profile_defaults(name: str) -> ProfileRecord:
                 defs.profile.ue_node,
                 json.dumps([s.model_dump() for s in defs.slices]),
                 json.dumps(network.model_dump(exclude_none=True)),
+                json.dumps({k: v.model_dump() for k, v in apps.items()}),
                 now,
                 name,
             ),
@@ -461,6 +627,43 @@ def restore_profile_defaults(name: str) -> ProfileRecord:
         ).fetchone()
     assert row is not None
     return _row_to_record(row)
+
+
+def save_profile_applications(
+    name: str, applications: Dict[str, SliceApplicationConfig]
+) -> ProfileRecord:
+    """Update application configurations for a profile."""
+    rec = get_profile(name)
+    if rec is None:
+        raise ValueError(f"profile not found: {name}")
+    return save_profile(rec.model_copy(update={"applications": applications}))
+
+
+def update_application_deploy_status(
+    profile_name: str,
+    slice_id: int,
+    *,
+    deployed: bool,
+    deployed_at: Optional[str] = None,
+    last_error: Optional[str] = None,
+) -> Optional[ProfileRecord]:
+    """Update single application deployment status."""
+    rec = get_profile(profile_name)
+    if rec is None:
+        return None
+    apps = dict(rec.applications or {})
+    sid_str = str(slice_id)
+    if sid_str in apps:
+        app_cfg = apps[sid_str].model_copy(
+            update={
+                "deployed": deployed,
+                "deployed_at": deployed_at,
+                "last_error": last_error,
+            }
+        )
+        apps[sid_str] = app_cfg
+        return save_profile(rec.model_copy(update={"applications": apps}))
+    return rec
 
 
 def save_pl_result(

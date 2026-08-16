@@ -1,0 +1,72 @@
+# Slice A edge host: the analyzer (YOLO). Runs the RTSP RECORD server that the
+# client publisher (UE) pushes to over OTA -- no relay. The server binds on
+# EDGE_OTA_IP; set that (and the client's PUBLISHER_OTA_IP) in .env.
+services:
+  analyzer:
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+      args:
+        # Default to a CUDA 12.1 torch wheel for GPU edges. Override with
+        # TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu for CPU-only hosts.
+        TORCH_INDEX_URL: "${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
+    image: slicea-analyzer
+    container_name: slicea-analyzer
+    env_file: .env
+    environment:
+      # Bind the RTSP server on the OTA address so it stays off the metrics plane.
+      BIND_ADDRESS: ${EDGE_OTA_IP}
+      RTSP_PORT: ${RTSP_PORT}
+      STREAM_PATH: ${STREAM_PATH}
+      RTSP_LATENCY_MS: ${RTSP_LATENCY_MS}
+      YOLO_ENABLED: ${YOLO_ENABLED}
+      YOLO_MODEL: ${YOLO_MODEL}
+      YOLO_DEVICE: ${YOLO_DEVICE}
+      YOLO_PROCESS_PER_CLIENT: ${YOLO_PROCESS_PER_CLIENT:-true}
+      FRAME_SKIP: ${FRAME_SKIP}
+      METRICS_PORT: ${EDGE_METRICS_PORT}
+      METRICS_ADDR: ${METRICS_ADDR}
+      LOG_INTERVAL_S: ${LOG_INTERVAL_S}
+      OTA_IFACE: ${OTA_IFACE}
+      METRICS_IFACE: ${METRICS_IFACE}
+      CHRONYC_HOST: ${CHRONYC_HOST}
+      CHRONY_MAX_OFFSET_MS: ${CHRONY_MAX_OFFSET_MS}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "${EDGE_METRICS_PORT}:${EDGE_METRICS_PORT}"
+      - "${HTTP_PORT:-8080}:8080"
+    networks:
+      metrics: {}
+      ota:
+        ipv4_address: ${EDGE_OTA_IP}
+    restart: unless-stopped
+    # Requires nvidia-container-toolkit on the edge host. Drop this block for
+    # CPU-only hosts (also set YOLO_DEVICE=cpu and TORCH_INDEX_URL=.../cpu).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS http://localhost:${EDGE_METRICS_PORT}/metrics | grep -q 'cctv_frames_processed_total'"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+networks:
+  metrics:
+    driver: bridge
+  ota:
+    driver: macvlan
+    driver_opts:
+      parent: ${OTA_PARENT_IFACE}
+    ipam:
+      config:
+        - subnet: ${OTA_SUBNET}
+          gateway: ${OTA_GATEWAY}

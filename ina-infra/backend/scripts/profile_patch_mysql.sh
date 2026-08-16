@@ -154,28 +154,47 @@ lines.append(
     f"(ueid, servingPlmnid, nssai) VALUES ('{UDR_UEID}', '{UDR_SERVING}', '{nssai}');"
 )
 
+MAX_CLIENTS = max(int(os.environ.get("INA_UE_CLIENTS", "8")), 1)
+
 for n in range(1, N + 1):
-    ue = f"00101000000010{n}"
     dnn = f"oai{n}"
     # SMF/UDM query uses sd "1" (not zero-padded); UDR returns null on mismatch.
     sd = str(n)
     conf = dnn_conf(dnn)
-    lines.append(
-        "UPDATE SessionManagementSubscriptionData "
-        f"SET singleNssai='{{\"sst\": 1, \"sd\": \"{sd}\"}}', "
-        f"dnnConfigurations='{conf}' "
-        f"WHERE ueid='{ue}' AND servingPlmnid='{PLMN}';"
-    )
-    lines.append(
-        "INSERT INTO SessionManagementSubscriptionData "
-        f"(ueid, servingPlmnid, singleNssai, dnnConfigurations) "
-        f"SELECT '{ue}', '{PLMN}', '{{\"sst\": 1, \"sd\": \"{sd}\"}}', '{conf}' "
-        f"FROM DUAL WHERE NOT EXISTS ("
-        f"SELECT 1 FROM SessionManagementSubscriptionData "
-        f"WHERE ueid='{ue}' AND servingPlmnid='{PLMN}');"
-    )
+    for c in range(1, MAX_CLIENTS + 1):
+        msin = 100 + n + (c - 1) * 10
+        ue = f"001010000000{msin:03d}"
+        if c > 1:
+            lines.append(
+                "INSERT INTO AuthenticationSubscription "
+                "(ueid, authenticationMethod, encPermanentKey, protectionParameterId, "
+                "sequenceNumber, authenticationManagementField, algorithmId, encOpcKey, "
+                "encTopcKey, vectorGenerationInHss, n5gcAuthMethod, "
+                "rgAuthenticationInd, supi) "
+                f"SELECT '{ue}', authenticationMethod, encPermanentKey, "
+                "protectionParameterId, sequenceNumber, authenticationManagementField, "
+                "algorithmId, encOpcKey, encTopcKey, vectorGenerationInHss, "
+                f"n5gcAuthMethod, rgAuthenticationInd, '{ue}' "
+                "FROM AuthenticationSubscription WHERE ueid='001010000000101' "
+                f"AND NOT EXISTS (SELECT 1 FROM AuthenticationSubscription WHERE ueid='{ue}') "
+                "LIMIT 1;"
+            )
+        lines.append(
+            "UPDATE SessionManagementSubscriptionData "
+            f"SET singleNssai='{{\"sst\": 1, \"sd\": \"{sd}\"}}', "
+            f"dnnConfigurations='{conf}' "
+            f"WHERE ueid='{ue}' AND servingPlmnid='{PLMN}';"
+        )
+        lines.append(
+            "INSERT INTO SessionManagementSubscriptionData "
+            f"(ueid, servingPlmnid, singleNssai, dnnConfigurations) "
+            f"SELECT '{ue}', '{PLMN}', '{{\"sst\": 1, \"sd\": \"{sd}\"}}', '{conf}' "
+            f"FROM DUAL WHERE NOT EXISTS ("
+            f"SELECT 1 FROM SessionManagementSubscriptionData "
+            f"WHERE ueid='{ue}' AND servingPlmnid='{PLMN}');"
+        )
 
-lines.append("DELETE FROM SmfRegistrations WHERE ueid LIKE '00101000000010%';")
+lines.append("DELETE FROM SmfRegistrations WHERE ueid LIKE '0010100000001%';")
 lines.append("COMMIT;")
 print("\n".join(lines))
 PY

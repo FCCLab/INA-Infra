@@ -6,16 +6,21 @@ MGMT_IFACE="${MGMT_IFACE:-enp1s0}"
 # usrp worker (edge cluster) uses a different NIC name for the site L2
 USRP_SITE_IFACE="${USRP_SITE_IFACE:-enp4s0f0}"
 
+# Canonical k8s / SSH names: cpu-* VMs, gpu-* accelerators.
+# Legacy aliases (central-0, gh81, edge-3, …) remain in utils/ssh_config/config.
 declare -A CLUSTER_CP_HOST=(
-  [central]=central-0
-  [regional]=regional-0
-  [edge]=edge-0
+  [central]=cpu-central-0
+  [regional]=cpu-regional-0
+  [edge]=cpu-edge-0
 )
 declare -A CLUSTER_WORKER_HOST=(
-  [central]=central-1
-  [regional]=regional-1
-  [edge]=edge-1
+  [central]=cpu-central-1
+  [regional]=cpu-regional-1
+  [edge]=cpu-edge-1
 )
+GPU_GH81_HOST="${GPU_GH81_HOST:-gpu-gh81}"   # formerly gh81 (central)
+GPU_GH82_HOST="${GPU_GH82_HOST:-gpu-gh82}"   # formerly gh82 (regional)
+GPU_A40_HOST="${GPU_A40_HOST:-gpu-a40}"      # formerly edge-3 (edge)
 # SSH / operator access (enp1s0, 10.1.132.0/24)
 declare -A CLUSTER_MGMT_IP=(
   [central]=10.1.132.210
@@ -53,9 +58,9 @@ declare -A CLUSTER_OPENSPEEDTEST_VIP=(
   [edge]=10.1.137.103
 )
 declare -A CLUSTER_OPENSPEEDTEST_NODE=(
-  [central]=central-0
-  [regional]=regional-1
-  [edge]=edge-0
+  [central]=cpu-central-0
+  [regional]=cpu-regional-1
+  [edge]=cpu-edge-0
 )
 # InfluxDB on site L2 (10.1.137). Multus macvlan on CLUSTER_INFLUXDB_NODE
 # (pod IP = VIP/24 on enp7s0; no hostPort / host /32 — N6 peers on same L2).
@@ -63,7 +68,7 @@ declare -A CLUSTER_INFLUXDB_VIP=(
   [edge]=10.1.137.104
 )
 declare -A CLUSTER_INFLUXDB_NODE=(
-  [edge]=edge-0
+  [edge]=cpu-edge-0
 )
 # Grafana on site L2 (10.1.137). Multus macvlan on CLUSTER_GRAFANA_NODE
 # (same pattern as InfluxDB).
@@ -71,7 +76,7 @@ declare -A CLUSTER_GRAFANA_VIP=(
   [edge]=10.1.137.105
 )
 declare -A CLUSTER_GRAFANA_NODE=(
-  [edge]=edge-0
+  [edge]=cpu-edge-0
 )
 # DynDNS (benjaminbear/docker-ddns-server) on site L2. DNS 53 + Web UI hostPort
 # on CLUSTER_DDNS_NODE with a /32 secondary (same pattern as OST/Influx/Grafana).
@@ -79,7 +84,7 @@ declare -A CLUSTER_DDNS_VIP=(
   [central]=10.1.137.106
 )
 declare -A CLUSTER_DDNS_NODE=(
-  [central]=central-0
+  [central]=cpu-central-0
 )
 # OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
@@ -128,6 +133,22 @@ ALL_OPENSPEEDTEST_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 ALL_METALLB_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 ALL_BRINGUP_CLUSTERS=(mgmt "${ALL_CLUSTERS[@]}")
 
+# Map legacy SSH / hostname aliases to canonical cpu-* / gpu-* names.
+canonicalize_node_host() {
+  case "$1" in
+    central-0) printf 'cpu-central-0' ;;
+    central-1) printf 'cpu-central-1' ;;
+    regional-0) printf 'cpu-regional-0' ;;
+    regional-1) printf 'cpu-regional-1' ;;
+    edge-0) printf 'cpu-edge-0' ;;
+    edge-1) printf 'cpu-edge-1' ;;
+    gh81) printf '%s' "$GPU_GH81_HOST" ;;
+    gh82) printf '%s' "$GPU_GH82_HOST" ;;
+    edge-3) printf '%s' "$GPU_A40_HOST" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 cluster_cp_host() {
   local cluster="$1"
   if [[ "$cluster" == "mgmt" ]]; then
@@ -140,6 +161,7 @@ cluster_cp_host() {
 cluster_mgmt_ip() {
   local host="$1"
   local cluster
+  host="$(canonicalize_node_host "$host")"
   if [[ "$host" == "$MGMT_CP_HOST" || "$host" == mgmt-0 ]]; then
     printf '%s' "$MGMT_API_IP"
     return
@@ -165,6 +187,7 @@ cluster_mgmt_ip() {
 cluster_k8s_node_ip() {
   local host="$1"
   local cluster
+  host="$(canonicalize_node_host "$host")"
   if [[ "$host" == "$MGMT_CP_HOST" || "$host" == mgmt-0 ]]; then
     printf '%s' "$MGMT_API_IP"
     return 0
@@ -223,7 +246,7 @@ metallb_l2_interface_for_cluster() {
   local cluster="$1"
   # METALLB_L2_IFACE overrides (single name, or "any" to omit filter).
   # Do not reuse SITE_IFACE — that defaults to enp7s0 for Flannel/netplan, but
-  # bare-metal workers (usrp/gh82/edge-2) use different NIC names for .137.
+  # bare-metal workers (usrp/gpu-gh82/edge-2) use different NIC names for .137.
   if [[ -n "${METALLB_L2_IFACE:-}" ]]; then
     printf '%s' "$METALLB_L2_IFACE"
   elif [[ "$cluster" == "mgmt" ]]; then

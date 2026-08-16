@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 import yaml
 
-from app.schemas import IpPlan, PlacementOut, PlSolveResponse, SliceIps
+from app.schemas import IpPlan, PlacementOut, PlSolveResponse, Profile, SliceIps
+from app.services.multus_iface import detect_host_master
 
 SITE_TO_CLUSTER = {0: "edge", 1: "regional", 2: "central"}
 SITE_NODES: Dict[str, List[str]] = {
-    "central": ["central-0", "central-1"],
-    "regional": ["regional-0", "regional-1"],
-    "edge": ["edge-0", "edge-1"],
+    "central": ["cpu-central-0", "cpu-central-1"],
+    "regional": ["cpu-regional-0", "cpu-regional-1"],
+    "edge": ["cpu-edge-0", "cpu-edge-1"],
 }
 
 # OAI nws-v0.8-amd64 images — keep off arm64 GPU workers (gh81/gh82).
@@ -39,12 +41,19 @@ def _hostname_affinity(node_names: Sequence[str]) -> dict:
         }
     }
 
-IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.8-amd64"
-IMAGE_CUUP = "10.1.132.30:5000/oai-nr-cuup:nws-v0.8-amd64"
-IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.8-amd64"
-IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.8-amd64"
-IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.8-amd64"
+from app.services.registry_service import resolve_oai_image
+
+IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.8.3-amd64"
+IMAGE_CUUP = "10.1.132.30:5000/oai-nr-cuup:nws-v0.8.2-amd64"
+IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.8.3-amd64"
+IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64"
+IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.8.2-amd64"
 IMAGE_DEBUG = "docker.io/nicolaka/netshoot"
+
+
+def _get_image(component: str, profile: Optional[Profile] = None) -> str:
+    override = profile.oai_images.get(component) if profile and profile.oai_images else None
+    return resolve_oai_image(component, override=override)
 
 UE_KEY = "fec86ba6eb707ed08905757b1bb44b8f"
 UE_OPC = "C42449363BBAD02B66D16BC975D77CC1"
@@ -256,8 +265,25 @@ def _slice_sd_hex(n: int) -> str:
     return f"{n:06x}"
 
 
-def _imsi(n: int) -> str:
-    return f"00101000000010{n}"
+def _imsi(n: int, client_index: int = 1) -> str:
+    """15-digit IMSI: slice-n primary is …10n; extra UEs are …1{n}{offset}.
+
+    Examples: slice 1 UE1 → 001010000000101, slice 1 UE2 → 001010000000111.
+    Extra IMSIs must be provisioned in UDR (see profile_patch_mysql.sh).
+    """
+    idx = max(int(client_index), 1)
+    msin = 100 + int(n) + (idx - 1) * 10
+    return f"001010000000{msin:03d}"
+
+
+def _ue_rf_for_client(sl: SliceIps, client_index: int) -> str:
+    """Unique macvlan IP per UE. Primary keeps slice ue_rf; extras use 21x."""
+    idx = max(int(client_index), 1)
+    if idx <= 1:
+        return sl.ue_rf
+    prefix = ".".join(str(sl.ue_rf).split(".")[:3])
+    octet = 210 + (int(sl.n) - 1) * 10 + idx
+    return f"{prefix}.{octet}"
 
 
 def _dnn(n: int) -> str:
@@ -465,10 +491,10 @@ ngap_log_level                        ="info";
 """
 
 
-def _ue_conf(sl: SliceIps, du_rf: str) -> str:
+def _ue_conf(sl: SliceIps, du_rf: str, client_index: int = 1) -> str:
     n = sl.n
     return f"""uicc0 = {{
-  imsi = "{_imsi(n)}";
+  imsi = "{_imsi(n, client_index)}";
   key = "{UE_KEY}";
   opc = "{UE_OPC}";
   dnn = "{_dnn(n)}";
@@ -603,7 +629,7 @@ def _write_edge_gnb(
                                 ),
                                 {
                                     "name": "cucp",
-                                    "image": IMAGE_CUCP,
+                                    "image": _get_image("cucp", ip_plan.profile if ip_plan else None),
                                     "imagePullPolicy": "IfNotPresent",
                                     "securityContext": {"privileged": True},
                                     "env": [
@@ -728,7 +754,7 @@ def _write_edge_gnb(
                                 ),
                                 {
                                     "name": "du",
-                                    "image": IMAGE_DU,
+                                    "image": _get_image("du", ip_plan.profile if ip_plan else None),
                                     "imagePullPolicy": "IfNotPresent",
                                     "securityContext": {"privileged": True},
                                     "env": [
@@ -831,7 +857,7 @@ def _write_edge_gnb(
                             "containers": [
                                 {
                                     "name": "flexric",
-                                    "image": IMAGE_FLEXRIC,
+                                    "image": _get_image("flexric", ip_plan.profile if ip_plan else None),
                                     "imagePullPolicy": "IfNotPresent",
                                     "workingDir": "/tmp",
                                     "securityContext": {
@@ -867,121 +893,185 @@ def _write_edge_gnb(
         written,
     )
 
-    for sl in ip_plan.slices:
-        n = sl.n
-        write(
-            ns_dir / f"50-serviceaccount-oai-ue-{n}-sa.yaml",
-            _dump(_sa(f"oai-ue-{n}-sa", namespace)),
-            written,
-        )
-        write(
-            ns_dir / f"51-configmap-oai-ue-{n}-configmap.yaml",
-            _dump(
+def generate_ue_manifests(
+    namespace: str,
+    sl: SliceIps,
+    shared: SharedIps,
+    ip_plan: IpPlan,
+    ue_node: str = "usrp",
+    client_containers: Optional[List[dict]] = None,
+    client_volumes: Optional[List[dict]] = None,
+    client_index: int = 1,
+) -> List[dict]:
+    """Generate on-demand UE manifests for direct Kubernetes deployment via API."""
+    n = sl.n
+    plen = shared.prefix_len
+    gw = shared.gw_edge
+    idx = max(int(client_index), 1)
+    ue_name = f"oai-ue-slice-{n}-client-{idx}"
+    sa_name = f"{ue_name}-sa"
+    cm_name = f"{ue_name}-configmap"
+    nad_name = f"ue-slice-{n}-client-{idx}-sim-rf"
+    ue_rf = _ue_rf_for_client(sl, idx)
+    master = detect_host_master(ue_node)
+
+    nad_doc = {
+        "apiVersion": "k8s.cni.cncf.io/v1",
+        "kind": "NetworkAttachmentDefinition",
+        "metadata": {
+            "name": nad_name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/part-of": "ina-infra",
+                "ina.lab/role": "ue_rf",
+                "ina.lab/slice": str(n),
+                "ina-infra.nephio.lab/multus-master": master,
+            },
+        },
+        "spec": {
+            "config": json.dumps(
                 {
-                    "apiVersion": "v1",
-                    "kind": "ConfigMap",
-                    "metadata": {
-                        "name": f"oai-ue-{n}-configmap",
-                        "namespace": namespace,
-                        "labels": {
-                            "app.kubernetes.io/part-of": "ina-infra",
-                            "ina-infra.nephio.lab/slice": str(n),
-                        },
-                    },
-                    "data": {"ue.conf": _ue_conf(sl, shared.du_rf)},
-                }
-            ),
-            written,
-        )
-        write(
-            ns_dir / f"52-deployment-oai-ue-{n}.yaml",
-            _dump(
-                {
-                    "apiVersion": "apps/v1",
-                    "kind": "Deployment",
-                    "metadata": {
-                        "name": f"oai-ue-{n}",
-                        "namespace": namespace,
-                        "labels": {
-                            "app.kubernetes.io/name": f"oai-ue-{n}",
-                            "app.kubernetes.io/part-of": "ina-infra",
-                            "slice": str(n),
-                        },
-                    },
-                    "spec": {
-                        "replicas": 1,
-                        "strategy": {"type": "Recreate"},
-                        "selector": {
-                            "matchLabels": {"app.kubernetes.io/name": f"oai-ue-{n}"}
-                        },
-                        "template": {
-                            "metadata": {
-                                "labels": {
-                                    "app": f"oai-ue-{n}",
-                                    "app.kubernetes.io/name": f"oai-ue-{n}",
-                                    "slice": str(n),
-                                },
-                                "annotations": {
-                                    "k8s.v1.cni.cncf.io/networks": _networks_annot(
-                                        [(f"ue{n}-sim-rf", "rf", sl.ue_rf)],
-                                        gw,
-                                        plen,
-                                    )
-                                },
-                            },
-                            "spec": {
-                                "serviceAccountName": f"oai-ue-{n}-sa",
-                                "terminationGracePeriodSeconds": 5,
-                                "nodeSelector": {
-                                    **ARCH_AMD64,
-                                    "kubernetes.io/hostname": ue_node,
-                                },
-                                "initContainers": _ue_bringup_inits(shared),
-                                "containers": [
-                                    _bringup_order_sidecar(
-                                        f"ue-{n}",
-                                        ["DU rfsim TCP :4043"],
-                                    ),
-                                    {
-                                        "name": "ue",
-                                        "image": IMAGE_UE,
-                                        "imagePullPolicy": "IfNotPresent",
-                                        "securityContext": {"privileged": True},
-                                        "env": [
-                                            {
-                                                "name": "USE_ADDITIONAL_OPTIONS",
-                                                "value": (
-                                                    "-r 133 --numerology 1 -C 3325620000 "
-                                                    "--ssb 144 --rfsim "
-                                                    "--log_config.global_log_options level,nocolor,time "
-                                                    f"--rfsimulator.serveraddr {shared.du_rf}"
-                                                ),
-                                            },
-                                            {"name": "TZ", "value": "Europe/Paris"},
-                                        ],
-                                        "volumeMounts": [
-                                            {
-                                                "name": "configuration",
-                                                "mountPath": "/opt/oai-nr-ue/etc/nr-ue.conf",
-                                                "subPath": "ue.conf",
-                                            }
-                                        ],
-                                    },
-                                    _debug_sidecar(),
-                                ],
-                                "volumes": [
-                                    {
-                                        "name": "configuration",
-                                        "configMap": {"name": f"oai-ue-{n}-configmap"},
-                                    }
+                    "cniVersion": "0.3.1",
+                    "name": nad_name,
+                    "plugins": [
+                        {
+                            "type": "macvlan",
+                            "capabilities": {"ips": True},
+                            "master": master,
+                            "mode": "bridge",
+                            "ipam": {
+                                "type": "static",
+                                "addresses": [
+                                    {"address": f"{ue_rf}/{plen}", "gateway": gw}
                                 ],
                             },
                         },
-                    },
+                        {
+                            "type": "tuning",
+                            "capabilities": {"mac": True},
+                            "ipam": {},
+                            "sysctl": {
+                                "net.ipv4.conf.IFNAME.arp_ignore": "1",
+                                "net.ipv4.conf.IFNAME.arp_announce": "2",
+                            },
+                        },
+                    ],
                 }
-            ),
-            written,
-        )
+            )
+        },
+    }
+
+    sa_doc = _sa(sa_name, namespace)
+    cm_doc = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": cm_name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/part-of": "ina-infra",
+                "ina-infra.nephio.lab/slice": str(n),
+            },
+        },
+        "data": {"ue.conf": _ue_conf(sl, shared.du_rf, client_index=idx)},
+    }
+
+    containers = [
+        _bringup_order_sidecar(
+            f"ue-{n}",
+            ["DU rfsim TCP :4043"],
+        ),
+        {
+            "name": "ue",
+            "image": _get_image("ue", ip_plan.profile if ip_plan else None),
+            "imagePullPolicy": "IfNotPresent",
+            "securityContext": {"privileged": True},
+            "env": [
+                {
+                    "name": "USE_ADDITIONAL_OPTIONS",
+                    "value": (
+                        "-r 133 --numerology 1 -C 3325620000 "
+                        "--ssb 144 --rfsim "
+                        "--log_config.global_log_options level,nocolor,time "
+                        f"--rfsimulator.serveraddr {shared.du_rf}"
+                    ),
+                },
+                {"name": "TZ", "value": "Europe/Paris"},
+            ],
+            "volumeMounts": [
+                {
+                    "name": "configuration",
+                    "mountPath": "/opt/oai-nr-ue/etc/nr-ue.conf",
+                    "subPath": "ue.conf",
+                }
+            ],
+        },
+        _debug_sidecar(),
+    ]
+    if client_containers:
+        containers.extend(client_containers)
+
+    volumes = [
+        {
+            "name": "configuration",
+            "configMap": {"name": cm_name},
+        }
+    ]
+    if client_volumes:
+        volumes.extend(client_volumes)
+
+    deploy_doc = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": ue_name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/name": ue_name,
+                "app.kubernetes.io/part-of": "ina-infra",
+                "slice": str(n),
+                "ina.lab/role": "client",
+                "ina.lab/slice": str(n),
+            },
+        },
+        "spec": {
+            "replicas": 1,
+            "strategy": {"type": "Recreate"},
+            "selector": {
+                "matchLabels": {"app.kubernetes.io/name": ue_name}
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": ue_name,
+                        "app.kubernetes.io/name": ue_name,
+                        "slice": str(n),
+                        "ina.lab/role": "client",
+                        "ina.lab/slice": str(n),
+                    },
+                    "annotations": {
+                        "k8s.v1.cni.cncf.io/networks": _networks_annot(
+                            [(nad_name, "rf", ue_rf)],
+                            gw,
+                            plen,
+                        )
+                    },
+                },
+                "spec": {
+                    "serviceAccountName": sa_name,
+                    "terminationGracePeriodSeconds": 5,
+                    "nodeSelector": {
+                        **ARCH_AMD64,
+                        "kubernetes.io/hostname": ue_node,
+                    },
+                    "initContainers": _ue_bringup_inits(shared),
+                    "containers": containers,
+                    "volumes": volumes,
+                },
+            },
+        },
+    }
+    return [nad_doc, sa_doc, cm_doc, deploy_doc]
 
 
 def _write_upf(
@@ -1248,7 +1338,7 @@ def _write_cuup(
                                 ),
                                 {
                                     "name": "cuup",
-                                    "image": IMAGE_CUUP,
+                                    "image": _get_image("cuup", ip_plan.profile if ip_plan else None),
                                     "imagePullPolicy": "IfNotPresent",
                                     "securityContext": {"privileged": True},
                                     "env": [
@@ -1390,8 +1480,6 @@ def expected_deployments(
 
     if cluster == "edge":
         names.extend(["oai-cu-cp", "oai-du", "oai-flexric"])
-        for n in range(1, n_slices + 1):
-            names.append(f"oai-ue-{n}")
 
     dm = deploy_map or {}
     for n in range(1, n_slices + 1):

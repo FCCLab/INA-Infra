@@ -39,7 +39,9 @@ Namespaces: `influxdb`, `grafana` under `repos/edge-repo/namespaces/`.
 
 PVC: InfluxDB **1900Gi** on `edge-0`’s 2T `local-path` disk (`INFLUX_PVC_SIZE`; leaves headroom for Grafana/Prometheus).
 
-Do **not** add `.104`/`.105` as host secondaries — Multus owns those addresses on the pod `site` interface. Pods get a route `10.1.132.0/24 via 10.1.137.1` so mgmt-plane clients can get replies (flannel stays the default route).
+## Dashboards
+
+CCTV YOLO / e2e delay: [http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv) — see [cctv.md](cctv.md).
 
 ## Verify
 
