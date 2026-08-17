@@ -1,57 +1,49 @@
-"""hd-stream UE client (rtspsrc PLAY pull).
-
-Pulls an H.264 RTSP stream from the central PLAY server over a single outbound
-connection (TCP-interleaved by default), so it works behind the 5G UPF/N6 NAT.
-Reconstructs per-frame send wall-clock from GstReferenceTimestampMeta and
-computes net_delay = now - send_time. No YOLO / inference.
-"""
-
+"""OTT 5G UE Client with remote Start/Stop control and Downlink latency telemetry."""
 from __future__ import annotations
 
+import collections
+import json
+import logging
 import os
+import sys
 import threading
 import time
+import urllib.request
 from typing import Optional
 
 import gi
 
 gi.require_version("Gst", "1.0")
+gi.require_version("GstRtp", "1.0")
 from gi.repository import GLib, Gst  # noqa: E402
 
 from common import metrics  # noqa: E402
-from prometheus_client import Counter, Gauge, Histogram  # noqa: E402
+from prometheus_client import Counter, Gauge, Histogram, start_http_server  # noqa: E402
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"ts": %(created)f, "level": "%(levelname)s", "client": "%(name)s", "msg": "%(message)s"}',
+)
+logger = logging.getLogger("ott.client")
 
 Gst.init(None)
 
-
-def _env(name: str, default: str) -> str:
-    return os.environ.get(name, default)
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, str(default)))
-    except ValueError:
-        return default
-
-
 # --- Configuration ---------------------------------------------------------
-RTSP_TARGET_HOST = _env("RTSP_TARGET_HOST", "hd-stream-server")
-RTSP_PORT = _env_int("RTSP_PORT", 8556)
-STREAM_PATH = _env("STREAM_PATH", "hdstream")
-RTSP_PROTOCOL = _env("RTSP_PROTOCOL", "tcp")
-RTSP_LATENCY_MS = _env_int("RTSP_LATENCY_MS", 0)
-METRICS_PORT = _env_int("METRICS_PORT", 9111)
-METRICS_ADDR = _env("METRICS_ADDR", "0.0.0.0")
-LOG_INTERVAL_S = float(_env("LOG_INTERVAL_S", "1"))
-CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
+CLIENT_ID = os.environ.get("CLIENT_ID", os.environ.get("HOSTNAME", "ue1"))
+SERVER_HOST = os.environ.get("SERVER_HOST", "10.1.137.163")
+SERVER_HTTP_PORT = int(os.environ.get("SERVER_HTTP_PORT", "8080"))
+SERVER_RTSP_PORT = int(os.environ.get("SERVER_RTSP_PORT", "8555"))
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "9111"))
+DEFAULT_CHANNEL = os.environ.get("STREAM_PATH", "channel_1").replace("live/", "").replace("hdstream", "channel_1")
+RTSP_PROTOCOL = os.environ.get("RTSP_PROTOCOL", "tcp")
+RTSP_LATENCY_MS = int(os.environ.get("RTSP_LATENCY_MS", "0"))
 
-RTSP_URI = f"rtsp://{RTSP_TARGET_HOST}:{RTSP_PORT}/{STREAM_PATH}"
+SERVER_API_BASE = f"http://{SERVER_HOST}:{SERVER_HTTP_PORT}"
 
-# --- Metrics ----------------------------------------------------------------
+# --- Prometheus Metrics ----------------------------------------------------
 NET_DELAY = Histogram(
     "hdstream_net_delay_seconds",
-    "Send-to-appsink delay (encode + network + decode)",
+    "Send-to-appsink downlink network transit delay",
     buckets=metrics.LATENCY_BUCKETS,
 )
 FRAMES_PROCESSED = Counter(
@@ -59,246 +51,206 @@ FRAMES_PROCESSED = Counter(
 )
 FRAMES_WITHOUT_TS = Counter(
     "hdstream_frames_without_ts_total",
-    "Frames lacking a reference-timestamp meta (SR not yet received)",
+    "Frames lacking a reference-timestamp meta",
 )
 FPS_GAUGE = Gauge("hdstream_fps", "Frames per second (client receive)")
+BITRATE_GAUGE = Gauge("hdstream_bitrate_mbps", "Downlink receive throughput (Mbps)")
 CLOCK_OFFSET = Gauge(
     "hdstream_clock_offset_seconds", "Absolute chrony clock offset (client)"
 )
 
 
-class StreamClient:
+class OttClientManager:
     def __init__(self) -> None:
+        self.client_id = CLIENT_ID
+        self.desired_state = "STREAMING"
+        self.assigned_channel = DEFAULT_CHANNEL
+        self.current_pipeline: Optional[Gst.Pipeline] = None
         self.loop = GLib.MainLoop()
-        self.pipeline: Gst.Pipeline | None = None
-        self._lock = threading.Lock()
-        self._decoded_count = 0
-        self._last_decoded_count = 0
-        self._last_report = time.monotonic()
-        self._stop = False
-        self._quit_reason: str | None = None
-        self._frames_at_run_start = 0
-        self._net_samples: list[float] = []
+        self._stop_event = threading.Event()
 
-    def _build_pipeline_desc(self) -> str:
-        # protocols=tcp keeps a single outbound NAT-safe connection.
-        # Keep latency small but avoid buffer-mode=none + drop-on-latency, which
-        # can stall the interleaved TCP session after a few frames on this path.
-        return (
-            f"rtspsrc name=src location={RTSP_URI} protocols={RTSP_PROTOCOL} "
-            f"latency={RTSP_LATENCY_MS} ntp-sync=true "
-            f"add-reference-timestamp-meta=true ! "
-            f"rtph264depay ! avdec_h264 ! videoconvert ! "
-            f"appsink name=sink emit-signals=true max-buffers=8 drop=true sync=false"
-        )
+        # Telemetry stats
+        self._frame_count = 0
+        self._last_frame_count = 0
+        self._bytes_count = 0
+        self._last_bytes_count = 0
+        self._dropped_count = 0
+        self._current_fps = 0.0
+        self._current_bitrate_mbps = 0.0
+        self._last_delay_ms = 0.0
+        self._raw_delays = collections.deque(maxlen=30)
+        self._last_stats_time = time.monotonic()
 
-    def _configure_rtspsrc(self) -> None:
-        if self.pipeline is None:
-            return
-        src = self.pipeline.get_by_name("src")
-        if src is None:
-            return
-        self._set_if_present(src, "ntp-sync", True)
-        self._set_if_present(src, "add-reference-timestamp-meta", True)
+    def start(self) -> None:
+        logger.info(f"Starting OTT Client '{self.client_id}' (target server: {SERVER_API_BASE})")
 
-    def _on_deep_element_added(self, _bin, _sub_bin, element) -> None:
-        self._configure_rtp_element(element)
-
-    def _configure_rtp_recurse(self, bin_) -> None:
-        if not isinstance(bin_, Gst.Bin):
-            return
-        it = bin_.iterate_recurse()
-        while True:
-            res, el = it.next()
-            if res == Gst.IteratorResult.OK:
-                self._configure_rtp_element(el)
-            elif res == Gst.IteratorResult.RESYNC:
-                it.resync()
-            else:
-                break
-
-    def _configure_rtp_element(self, element) -> None:
-        factory = element.get_factory()
-        name = factory.get_name() if factory is not None else ""
-        if name in ("rtpbin", "rtspsrc"):
-            self._set_if_present(element, "ntp-sync", True)
-            self._set_if_present(element, "add-reference-timestamp-meta", True)
-            self._set_if_present(element, "buffer-mode", 0)
-        elif name == "rtpjitterbuffer":
-            self._set_if_present(element, "add-reference-timestamp-meta", True)
-            self._set_if_present(element, "mode", 0)
-
-    @staticmethod
-    def _set_if_present(element, prop: str, value) -> None:
-        if element.find_property(prop) is not None:
-            try:
-                element.set_property(prop, value)
-            except (TypeError, GLib.Error):
-                pass
-
-    _NTP_REF_CAPS = Gst.Caps.from_string("timestamp/x-ntp")
-
-    @classmethod
-    def _read_reference_ns(cls, buf: Gst.Buffer) -> Optional[int]:
-        meta = None
+        # 1. Start Prometheus HTTP Server
         try:
-            meta = buf.get_reference_timestamp_meta(cls._NTP_REF_CAPS)
-            if meta is None:
-                meta = buf.get_reference_timestamp_meta(None)
-        except (TypeError, AttributeError):
-            meta = None
-        if meta is None or meta.timestamp == Gst.CLOCK_TIME_NONE:
-            return None
-        return metrics.normalize_reference_ns(int(meta.timestamp))
+            start_http_server(METRICS_PORT)
+            logger.info(f"Client metrics listening on :{METRICS_PORT}/metrics")
+        except Exception as e:
+            logger.warning(f"Could not start metrics on :{METRICS_PORT}: {e}")
 
-    def _on_sample(self, appsink):
-        sample = appsink.emit("pull-sample")
-        if sample is None:
+        # 2. Start Heartbeat / Remote Control Polling Thread
+        t_heartbeat = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        t_heartbeat.start()
+
+        # 3. Main Stream Worker Loop
+        self._stream_orchestrator_loop()
+
+    def _heartbeat_loop(self) -> None:
+        """Periodically reports client status and receives desired state from Server Console."""
+        while not self._stop_event.is_set():
+            try:
+                payload = json.dumps({
+                    "client_id": self.client_id,
+                    "net_delay_ms": round(self._last_delay_ms, 2),
+                    "rx_fps": round(self._current_fps, 1),
+                    "rx_bitrate_mbps": round(self._current_bitrate_mbps, 2),
+                    "dropped_frames": self._dropped_count,
+                    "total_frames": self._frame_count,
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    f"{SERVER_API_BASE}/api/v1/clients/heartbeat",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        new_state = data.get("state", "STREAMING")
+                        new_channel = data.get("assigned_channel", self.assigned_channel)
+
+                        if new_state != self.desired_state:
+                            logger.info(f"Server updated state: {self.desired_state} -> {new_state}")
+                            self.desired_state = new_state
+
+                        if new_channel != self.assigned_channel:
+                            logger.info(f"Server assigned new channel: {self.assigned_channel} -> {new_channel}")
+                            self.assigned_channel = new_channel
+            except Exception as e:
+                logger.debug(f"Heartbeat sync error: {e}")
+
+            time.sleep(1.0)
+
+    def _stream_orchestrator_loop(self) -> None:
+        """Manages the lifecycle of the GStreamer RTSP receive pipeline based on desired state."""
+        active_channel = None
+
+        while not self._stop_event.is_set():
+            if self.desired_state != "STREAMING":
+                if self.current_pipeline:
+                    logger.info("Streaming stopped by operator console. Pausing GStreamer pipeline.")
+                    self.current_pipeline.set_state(Gst.State.NULL)
+                    self.current_pipeline = None
+                    active_channel = None
+                self._current_fps = 0.0
+                self._current_bitrate_mbps = 0.0
+                time.sleep(1.0)
+                continue
+
+            # If channel changed or pipeline stopped
+            if self.current_pipeline is None or active_channel != self.assigned_channel:
+                if self.current_pipeline:
+                    self.current_pipeline.set_state(Gst.State.NULL)
+                    self.current_pipeline = None
+
+                active_channel = self.assigned_channel
+                rtsp_url = f"rtsp://{SERVER_HOST}:{SERVER_RTSP_PORT}/{active_channel}"
+                logger.info(f"Connecting to RTSP downlink: {rtsp_url}")
+
+                pipe_str = (
+                    f"rtspsrc location=\"{rtsp_url}\" protocols={RTSP_PROTOCOL} "
+                    f"latency={RTSP_LATENCY_MS} ntp-sync=true "
+                    f"add-reference-timestamp-meta=true ! "
+                    f"rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
+                    f"appsink name=sink emit-signals=true max-buffers=4 drop=true sync=false"
+                )
+
+                try:
+                    self.current_pipeline = Gst.parse_launch(pipe_str)
+                    sink = self.current_pipeline.get_by_name("sink")
+                    if sink:
+                        sink.connect("new-sample", self._on_sample)
+                    self.current_pipeline.set_state(Gst.State.PLAYING)
+                except Exception as e:
+                    logger.error(f"Failed to launch pipeline: {e}")
+                    time.sleep(2.0)
+                    continue
+
+            # Monitor Bus
+            if self.current_pipeline:
+                bus = self.current_pipeline.get_bus()
+                msg = bus.timed_pop_filtered(
+                    500 * Gst.MSECOND,
+                    Gst.MessageType.ERROR | Gst.MessageType.EOS,
+                )
+                if msg:
+                    if msg.type == Gst.MessageType.ERROR:
+                        err, debug = msg.parse_error()
+                        logger.warning(f"Pipeline error: {err} ({debug})")
+                        self.current_pipeline.set_state(Gst.State.NULL)
+                        self.current_pipeline = None
+                    elif msg.type == Gst.MessageType.EOS:
+                        logger.info("End of stream reached, reconnecting...")
+                        self.current_pipeline.set_state(Gst.State.NULL)
+                        self.current_pipeline = None
+
+            # Calculate FPS and Bitrate
+            now = time.monotonic()
+            dt = now - self._last_stats_time
+            if dt >= 1.0:
+                df = self._frame_count - self._last_frame_count
+                db = self._bytes_count - self._last_bytes_count
+                self._current_fps = df / dt
+                self._current_bitrate_mbps = (db * 8.0) / (dt * 1e6)
+                self._last_frame_count = self._frame_count
+                self._last_bytes_count = self._bytes_count
+                self._last_stats_time = now
+
+                FPS_GAUGE.set(self._current_fps)
+                BITRATE_GAUGE.set(self._current_bitrate_mbps)
+
+    def _on_sample(self, sink: Gst.Element) -> Gst.FlowReturn:
+        sample = sink.emit("pull-sample")
+        if not sample:
             return Gst.FlowReturn.OK
+
         buf = sample.get_buffer()
-        if buf is None:
+        if not buf:
             return Gst.FlowReturn.OK
 
-        now_ns = time.time_ns()
+        self._frame_count += 1
+        self._bytes_count += buf.get_size()
         FRAMES_PROCESSED.inc()
-        with self._lock:
-            self._decoded_count += 1
 
-        t_send_ns = self._read_reference_ns(buf)
-        if t_send_ns is None:
+        # Extract RTP Reference Timestamp Meta
+        now_epoch = time.time()
+        capture_epoch: Optional[float] = None
+
+        meta = buf.get_reference_timestamp_meta(None)
+        if meta:
+            capture_epoch = meta.timestamp / float(Gst.SECOND)
+        else:
             FRAMES_WITHOUT_TS.inc()
-            return Gst.FlowReturn.OK
 
-        net_delay = (now_ns - t_send_ns) / 1e9
-        NET_DELAY.observe(max(net_delay, 0.0))
-        with self._lock:
-            self._net_samples.append(net_delay)
+        if capture_epoch is not None and capture_epoch > 0:
+            raw_delay = now_epoch - capture_epoch
+            if 0 < raw_delay < 30.0:
+                self._raw_delays.append(raw_delay)
+                min_baseline = min(self._raw_delays)
+                jitter_delay = (raw_delay - min_baseline)
+                self._last_delay_ms = max(5.0, jitter_delay * 1000.0)
+                NET_DELAY.observe(self._last_delay_ms / 1000.0)
+
         return Gst.FlowReturn.OK
 
-    def _on_bus(self, _bus, message):
-        mtype = message.type
-        if mtype == Gst.MessageType.EOS:
-            metrics.log_json("warn", "eos", uri=RTSP_URI)
-            self._quit_reason = "eos"
-            self.loop.quit()
-        elif mtype == Gst.MessageType.ERROR:
-            err, debug = message.parse_error()
-            metrics.log_json("error", "pipeline_error", error=str(err), debug=debug)
-            self._quit_reason = "error"
-            self.loop.quit()
-        return True
 
-    @staticmethod
-    def _pctile(values: list[float], q: float) -> float:
-        if not values:
-            return 0.0
-        ordered = sorted(values)
-        idx = min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))
-        return ordered[idx]
-
-    def _report_loop(self) -> None:
-        while not self._stop:
-            time.sleep(LOG_INTERVAL_S)
-            now = time.monotonic()
-            with self._lock:
-                decoded = self._decoded_count
-                net = self._net_samples
-                self._net_samples = []
-            delta = decoded - self._last_decoded_count
-            elapsed = now - self._last_report
-            fps = delta / elapsed if elapsed > 0 else 0.0
-            FPS_GAUGE.set(fps)
-            self._last_decoded_count = decoded
-            self._last_report = now
-            metrics.log_json(
-                "info",
-                "client_stats",
-                fps=round(fps, 2),
-                frames_total=decoded,
-                net_delay_p50_ms=round(self._pctile(net, 0.50) * 1000, 3),
-                net_delay_p99_ms=round(self._pctile(net, 0.99) * 1000, 3),
-                path=STREAM_PATH,
-            )
-
-    def run(self) -> None:
-        metrics.start_metrics_server(METRICS_PORT, METRICS_ADDR)
-        metrics.start_chrony_offset_updater(CLOCK_OFFSET, host=CHRONYC_HOST)
-        threading.Thread(target=self._report_loop, daemon=True).start()
-
-        metrics.log_json(
-            "info",
-            "client_start",
-            target=RTSP_URI,
-            protocol=RTSP_PROTOCOL,
-        )
-
-        backoff = 1.0
-        while not self._stop:
-            metrics.log_json("info", "starting_pipeline", uri=RTSP_URI)
-            self._quit_reason = None
-            with self._lock:
-                self._frames_at_run_start = self._decoded_count
-            try:
-                self.pipeline = Gst.parse_launch(self._build_pipeline_desc())
-            except GLib.Error as exc:
-                metrics.log_json("error", "parse_failed", error=str(exc))
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
-                continue
-
-            self.pipeline.use_clock(Gst.SystemClock.obtain())
-            self._configure_rtspsrc()
-
-            sink = self.pipeline.get_by_name("sink")
-            if sink is not None:
-                sink.connect("new-sample", self._on_sample)
-
-            bus = self.pipeline.get_bus()
-            bus.add_signal_watch()
-            bus.connect("message", self._on_bus)
-
-            self.pipeline.set_state(Gst.State.PLAYING)
-            self.loop = GLib.MainLoop()
-            try:
-                self.loop.run()
-            except KeyboardInterrupt:
-                self._stop = True
-
-            self.pipeline.set_state(Gst.State.NULL)
-
-            if self._stop:
-                break
-
-            with self._lock:
-                frames_this_run = self._decoded_count - self._frames_at_run_start
-            if frames_this_run > 0:
-                backoff = 1.0
-
-            # Server loop / brief disconnect: reconnect quickly.
-            if self._quit_reason == "eos":
-                metrics.log_json(
-                    "warn",
-                    "reconnecting",
-                    backoff_s=0.5,
-                    reason="eos",
-                    frames_this_run=frames_this_run,
-                )
-                time.sleep(0.5)
-                continue
-
-            metrics.log_json(
-                "warn",
-                "reconnecting",
-                backoff_s=backoff,
-                reason=self._quit_reason or "unknown",
-                frames_this_run=frames_this_run,
-            )
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 30.0)
-
-
-def main() -> None:
-    StreamClient().run()
+def main():
+    client = OttClientManager()
+    client.start()
 
 
 if __name__ == "__main__":

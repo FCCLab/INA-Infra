@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Wait for interfaces / video file, warn on clock skew, then exec the server.
+# OTT Video Streaming Server entrypoint
 set -euo pipefail
 
-OTA_IFACE="${OTA_IFACE:-}"
+OTA_IFACE="${OTA_IFACE:-net1}"
 METRICS_IFACE="${METRICS_IFACE:-}"
-IFACE_TIMEOUT="${IFACE_TIMEOUT:-60}"
+IFACE_TIMEOUT="${IFACE_TIMEOUT:-10}"
 CHRONY_MAX_OFFSET_MS="${CHRONY_MAX_OFFSET_MS:-5}"
 CHRONYC_HOST="${CHRONYC_HOST:-}"
-VIDEO_SOURCE="${VIDEO_SOURCE:-/data/source.mp4}"
-VIDEO_WAIT_TIMEOUT_S="${VIDEO_WAIT_TIMEOUT_S:-3600}"
+MTX_CONF="${MTX_CONF:-/app/server/mediamtx.yml}"
 
 log() {
   printf '{"ts":%s,"level":"%s","event":"entrypoint","msg":"%s"}\n' \
@@ -29,22 +28,6 @@ wait_for_iface() {
   log info "interface ${iface} ready"
 }
 
-wait_for_video() {
-  local elapsed=0
-  while [ ! -s "${VIDEO_SOURCE}" ]; do
-    if [ "$elapsed" -ge "$VIDEO_WAIT_TIMEOUT_S" ]; then
-      log error "VIDEO_SOURCE ${VIDEO_SOURCE} missing after ${VIDEO_WAIT_TIMEOUT_S}s"
-      exit 1
-    fi
-    if [ $((elapsed % 10)) -eq 0 ]; then
-      log info "waiting for VIDEO_SOURCE ${VIDEO_SOURCE} (${elapsed}s)"
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-  done
-  log info "VIDEO_SOURCE ready ($(wc -c <"${VIDEO_SOURCE}") bytes)"
-}
-
 check_chrony() {
   local args=(tracking)
   [ -n "$CHRONYC_HOST" ] && args=(-h "$CHRONYC_HOST" tracking)
@@ -55,7 +38,7 @@ check_chrony() {
   local offset
   offset="$(chronyc "${args[@]}" 2>/dev/null | awk '/Last offset/ {print $4}' || true)"
   if [ -z "$offset" ]; then
-    log warn "chrony not reachable; ensure host is NTP-synced over ens0"
+    log warn "chrony not reachable; ensure host is NTP-synced"
     return 0
   fi
   local abs_ms
@@ -67,10 +50,32 @@ check_chrony() {
   fi
 }
 
-log info "entrypoint start (server)"
+log info "entrypoint start (ott-server + mediamtx + api)"
 wait_for_iface "$OTA_IFACE"
 wait_for_iface "$METRICS_IFACE"
-wait_for_video
 check_chrony
 
-exec python3 /app/server/server.py
+# Announce static MAC via gratuitous ARP if net1 exists
+if ip link show dev net1 >/dev/null 2>&1; then
+  NET1_IP=$(ip -4 -o addr show dev net1 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+  if [ -n "${NET1_IP}" ] && command -v arping >/dev/null 2>&1; then
+    log info "announcing static MAC on net1 (${NET1_IP})"
+    arping -c 3 -U -I net1 "${NET1_IP}" >/dev/null 2>&1 || true
+  fi
+fi
+
+if [ -n "${MULTUS_IP:-}" ]; then
+  export MTX_WEBRTCICEHOSTNAT1TO1IPS="${MULTUS_IP}"
+fi
+
+START_MEDIAMTX="${START_MEDIAMTX:-false}"
+MTX_RTSP_URL="${MTX_RTSP_URL:-rtsp://127.0.0.1:8555}"
+
+if [ "${START_MEDIAMTX}" = "true" ] && command -v mediamtx >/dev/null 2>&1; then
+  log info "starting embedded MediaMTX"
+  mediamtx "${MTX_CONF}" &
+  MTX_PID=$!
+  trap 'kill -TERM ${MTX_PID} 2>/dev/null || true' EXIT
+fi
+
+exec python3 -m server.main

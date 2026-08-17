@@ -960,38 +960,88 @@ def generate_server_manifests(
         app_name = "application-ott"
         labels["app.kubernetes.io/name"] = app_name
         rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8554)
+        http_port = int(p.get("http_port") or 8080)
         metrics_port = int(p.get("metrics_port") or app_cfg.metrics_port or 9103)
         stream_path = str(p.get("stream_path") or "live/hd")
-        dash_port = int(p.get("dashboard_port") or 8080)
         bitrate = str(p.get("bitrate_kbps") or "6000")
         fps = str(p.get("fps") or "25")
 
         server_img = (
             app_cfg.server_image
-            or "10.1.132.30:5000/hd-stream-server:hdstream-v2"
+            or "10.1.132.30:5000/application-ott:nws-v0.9-amd64"
         )
 
-        ott_env = [
-            *common_env,
-            {"name": "APP_NAME", "value": app_name},
-            {"name": "RTSP_PORT", "value": str(rtsp_port)},
-            {"name": "STREAM_PATH", "value": stream_path},
-            {"name": "METRICS_PORT", "value": str(metrics_port)},
-            {"name": "BITRATE_KBPS", "value": bitrate},
-            {"name": "FPS", "value": fps},
+        def _read_ott(name: str) -> str:
+            path = f"/home/fcp/INA-Infra/applications/ott/server/{name}"
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            return ""
+
+        cm_data = {
+            "main.py": _read_ott("main.py"),
+            "ott.py": _read_ott("ott.py"),
+            "api.py": _read_ott("api.py"),
+            "state.py": _read_ott("state.py"),
+            "youtube_resolver.py": _read_ott("youtube_resolver.py"),
+            "mediamtx.yml": _read_ott("mediamtx.yml"),
+            "entrypoint.sh": _read_ott("entrypoint.sh"),
+            "__init__.py": _read_ott("__init__.py"),
+        }
+
+        cm_manifest = {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": f"{app_name}-code",
+                "namespace": profile_name,
+                "labels": labels,
+            },
+            "data": {k: v for k, v in cm_data.items() if v},
+        }
+
+        ott_mounts = [
+            {"name": "code-volume", "mountPath": f"/app/server/{fn}", "subPath": fn}
+            for fn, v in cm_data.items() if v
         ]
+
         pod_spec = {
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
+            "volumes": [
+                {
+                    "name": "code-volume",
+                    "configMap": {
+                        "name": f"{app_name}-code",
+                        "defaultMode": 0o755,
+                    },
+                },
+            ],
             "containers": [
                 {
                     "name": "ott-server",
                     "image": server_img,
-                    "imagePullPolicy": "IfNotPresent",
-                    "env": ott_env,
+                    "imagePullPolicy": "Always",
+                    "volumeMounts": ott_mounts,
+                    "env": [
+                        *common_env,
+                        {"name": "APP_NAME", "value": app_name},
+                        {"name": "RTSP_PORT", "value": str(rtsp_port)},
+                        {"name": "HTTP_PORT", "value": str(http_port)},
+                        {"name": "STREAM_PATH", "value": stream_path},
+                        {"name": "METRICS_PORT", "value": str(metrics_port)},
+                        {"name": "BITRATE_KBPS", "value": bitrate},
+                        {"name": "FPS", "value": fps},
+                        {"name": "MTX_RTSP_URL", "value": "rtsp://127.0.0.1:8555"},
+                        {"name": "MTX_HLS_URL", "value": "http://127.0.0.1:8888"},
+                        {"name": "MTX_WHEP_URL", "value": "http://127.0.0.1:8889"},
+                        {"name": "MTX_API_URL", "value": "http://127.0.0.1:9997"},
+                        {"name": "START_MEDIAMTX", "value": "false"},
+                    ],
                     "ports": [
                         {"name": "rtsp", "containerPort": rtsp_port},
+                        {"name": "http", "containerPort": http_port},
                         {"name": "metrics", "containerPort": metrics_port},
                     ],
                     "resources": {
@@ -999,22 +1049,39 @@ def generate_server_manifests(
                         "limits": {"cpu": "2", "memory": "2Gi"},
                     },
                 },
-                _control_dashboard_container(
-                    app_kind="ott",
-                    app_name=app_name,
-                    target_container="ott-server",
-                    dash_port=dash_port,
-                    metrics_port=metrics_port,
-                    extra_env=[
-                        {"name": "RTSP_PORT", "value": str(rtsp_port)},
-                        {"name": "STREAM_PATH", "value": stream_path},
-                        {"name": "BITRATE_KBPS", "value": bitrate},
-                        {"name": "FPS", "value": fps},
-                        {"name": "MULTUS_IP", "value": app_multus_ip},
+                # Container 2: Dedicated MediaMTX Sidecar
+                {
+                    "name": "mediamtx",
+                    "image": "docker.io/bluenviron/mediamtx:1.12.2",
+                    "imagePullPolicy": "IfNotPresent",
+                    "args": ["/app/server/mediamtx.yml"],
+                    "ports": [
+                        {"name": "rtsp-publish", "containerPort": 8555},
+                        {"name": "hls", "containerPort": 8888},
+                        {"name": "webrtc", "containerPort": 8889},
+                        {"name": "api", "containerPort": 9997},
                     ],
-                ),
+                    "resources": {
+                        "requests": {"cpu": "100m", "memory": "128Mi"},
+                        "limits": {"cpu": "1000m", "memory": "512Mi"},
+                    },
+                    "volumeMounts": [
+                        {"name": "code-volume", "mountPath": "/app/server/mediamtx.yml", "subPath": "mediamtx.yml"}
+                    ],
+                },
+                # Container 3: Dedicated Nginx + React OTT Portal Frontend
+                {
+                    "name": "frontend",
+                    "image": "10.1.132.30:5000/application-ott-frontend:nws-v0.9-amd64",
+                    "imagePullPolicy": "Always",
+                    "ports": [{"name": "web", "containerPort": 80}],
+                    "resources": {
+                        "requests": {"cpu": "50m", "memory": "64Mi"},
+                        "limits": {"cpu": "500m", "memory": "256Mi"},
+                    },
+                },
                 _influx_pusher_container(metrics_port, app_name, sid, profile_name, app_type, target_cluster),
-            ]
+            ],
         }
 
         deploy_manifest = {
@@ -1027,6 +1094,7 @@ def generate_server_manifests(
             },
             "spec": {
                 "replicas": 1,
+                "strategy": {"type": "Recreate"},
                 "selector": {"matchLabels": labels},
                 "template": {
                     "metadata": {
@@ -1052,14 +1120,14 @@ def generate_server_manifests(
                 "type": "NodePort",
                 "selector": labels,
                 "ports": [
-                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port},
-                    {"name": "dashboard", "port": dash_port, "targetPort": dash_port, "nodePort": 30083},
-                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port},
+                    {"name": "web", "port": 80, "targetPort": 80, "nodePort": 30083},
+                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port, "nodePort": 30163},
+                    {"name": "http", "port": http_port, "targetPort": http_port},
+                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port, "nodePort": 32433},
                 ],
             },
         }
-        manifests.extend(_control_dashboard_rbac(app_name, profile_name, labels))
-        manifests.extend([deploy_manifest, svc_manifest])
+        manifests.extend([cm_manifest, deploy_manifest, svc_manifest])
 
     elif app_type == "iot":
         app_name = "application-iot"

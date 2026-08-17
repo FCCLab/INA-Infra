@@ -62,8 +62,8 @@ export const APPLICATION_DASHBOARDS: Record<
     sliceId: 3,
     dashboard: {
       href: "http://10.1.137.110:30083/",
-      label: "OTT Dashboard",
-      title: "Open OTT control dashboard (bitrate, FPS, restart) on 10.1.137.110:30083",
+      label: "OTT Portal & Console",
+      title: "Open OTT Video Streaming Portal & UE Reception Console on 10.1.137.110:30083",
     },
     grafana: {
       href: grafanaUrl("ina-ott-metrics", "ott-metrics"),
