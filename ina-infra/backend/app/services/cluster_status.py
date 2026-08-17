@@ -269,7 +269,7 @@ def _infer_kind(name: str, item: Optional[dict] = None) -> str:
         return "client"
     if name.startswith(("oai-", "upf-slice-")):
         return "ran"
-    if name == "cctv" or (
+    if name.startswith("application-") or name == "cctv" or (
         name.startswith("slice")
         and (
             "-physical-ai" in name

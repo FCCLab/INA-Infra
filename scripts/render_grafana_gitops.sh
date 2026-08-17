@@ -300,6 +300,12 @@ spec:
         - name: datasources
           mountPath: /etc/grafana/provisioning/datasources
           readOnly: true
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+          readOnly: true
+        - name: dashboards
+          mountPath: /var/lib/grafana/dashboards/ina-apps
+          readOnly: true
       volumes:
       - name: data
         persistentVolumeClaim:
@@ -307,7 +313,87 @@ spec:
       - name: datasources
         configMap:
           name: ${GRAFANA_NAME}-datasources
+      - name: dashboard-provider
+        configMap:
+          name: ${GRAFANA_NAME}-dashboard-provider
+      - name: dashboards
+        configMap:
+          name: ${GRAFANA_NAME}-dashboards
 EOF
+}
+
+write_dashboard_provider() {
+  local dir="$1"
+  cat >"${dir}/configmap-${GRAFANA_NAME}-dashboard-provider.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${GRAFANA_NAME}-dashboard-provider
+  namespace: ${GRAFANA_NS}
+  labels:
+    app.kubernetes.io/name: ${GRAFANA_NAME}
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: ina-apps
+        orgId: 1
+        folder: Applications
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/ina-apps
+EOF
+}
+
+write_dashboards() {
+  local dir="$1"
+  python3 - "$dir" "$REPO_ROOT" "$GRAFANA_NS" "$GRAFANA_NAME" <<'PY'
+import json, sys
+from pathlib import Path
+
+dest_dir, repo_root, ns, name = sys.argv[1:]
+files = [
+    Path(repo_root) / "applications/cctv/dashboard/grafana-dashboard.json",
+    Path(repo_root) / "grafana/dashboards/physical-ai-metrics.json",
+    Path(repo_root) / "grafana/dashboards/ott-dashboard.json",
+    Path(repo_root) / "grafana/dashboards/ott-metrics.json",
+    Path(repo_root) / "grafana/dashboards/iot-dashboard.json",
+    Path(repo_root) / "grafana/dashboards/iot-metrics.json",
+]
+entries = []
+for path in files:
+    if not path.is_file():
+        raise SystemExit(f"missing dashboard JSON: {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    dash = data.get("dashboard", data)
+    key = f"{dash.get('uid') or path.stem}.json"
+    body = json.dumps(dash, indent=2)
+    indented = "\n".join(("    " + line) if line else "" for line in body.splitlines())
+    entries.append(f"  {key}: |\n{indented}")
+
+out = Path(dest_dir) / f"configmap-{name}-dashboards.yaml"
+out.write_text(
+    "\n".join(
+        [
+            "apiVersion: v1",
+            "kind: ConfigMap",
+            "metadata:",
+            f"  name: {name}-dashboards",
+            f"  namespace: {ns}",
+            "  labels:",
+            f"    app.kubernetes.io/name: {name}",
+            "data:",
+            *entries,
+            "",
+        ]
+    ),
+    encoding="utf-8",
+)
+print(f"    dashboards ConfigMap: {out}")
+PY
 }
 
 write_service() {
@@ -354,6 +440,8 @@ write_cluster_grafana() {
   write_nad "$dest_ns" "$master"
   write_secret "$dest_ns"
   write_datasources "$dest_ns"
+  write_dashboard_provider "$dest_ns"
+  write_dashboards "$dest_ns"
   write_pvc "$dest_ns"
   write_deployment "$dest_ns" "$node" "$vip"
   write_service "$dest_ns"

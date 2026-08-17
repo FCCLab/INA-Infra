@@ -157,6 +157,16 @@ export type SliceApplicationConfig = {
   last_error?: string | null;
 };
 
+export type PhysicalAiHfTokenStatus = {
+  ok: boolean;
+  configured: boolean;
+  cluster: string;
+  namespace: string;
+  secret: string;
+  restarted?: boolean;
+  message: string;
+};
+
 export type AppDeployRequest = {
   slice_id?: number | null;
   profile?: Profile | null;
@@ -784,16 +794,16 @@ export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
     app_type: "physical_ai",
     name: "Physical AI (Cosmos3 VLM)",
     enabled: true,
-    target_cluster: "auto",
-    server_image: "10.1.132.30:5000/cosmo3-vllm:nws-v0.5-arm64-cu128",
-    client_image: "10.1.132.30:5000/cosmo3-aiperf:nws-v0.5-amd64",
+    target_cluster: "edge",
+    server_image: "10.1.132.30:5000/cosmo3-vllm:nws-v0.7",
+    client_image: "10.1.132.30:5000/cosmo3-aiperf:nws-v0.7-amd64",
     server_port: 8000,
     metrics_port: 8002,
     params: {
-      model: "nvidia/Cosmos-Nemotron-34B",
+      model: "nvidia/Cosmos3-Nano",
       tensor_parallel_size: 1,
       max_model_len: 4096,
-      gpu_arch: "arm64-gh200",
+      gpu_arch: "auto",
       request_rate: 10,
     },
   },
@@ -1046,6 +1056,23 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(applications),
       },
+    ),
+  getPhysicalAiHfToken: (profileName: string) =>
+    request<PhysicalAiHfTokenStatus>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/physical-ai/hf-token`,
+    ),
+  savePhysicalAiHfToken: (profileName: string, token: string) =>
+    request<PhysicalAiHfTokenStatus>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/physical-ai/hf-token`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ token }),
+      },
+    ),
+  deletePhysicalAiHfToken: (profileName: string) =>
+    request<PhysicalAiHfTokenStatus>(
+      `/api/v1/profiles/${encodeURIComponent(profileName)}/physical-ai/hf-token`,
+      { method: "DELETE" },
     ),
   deployApp: (profileName: string, body: AppDeployRequest) =>
     request<AppDeployResponse>(

@@ -21,7 +21,7 @@ const IconConfig = (
 
 const APP_TYPES: { id: SliceAppType; label: string; tag: string }[] = [
   { id: "cctv", label: "CCTV Vision Server", tag: "YOLO + RTSP Analyzer" },
-  { id: "physical_ai", label: "Physical AI Server (Cosmos3)", tag: "vLLM on GH200" },
+  { id: "physical_ai", label: "Physical AI Server (Cosmos3)", tag: "vLLM on A40 / GH200" },
   { id: "ott", label: "OTT Video Server", tag: "RTSP / HLS Server" },
   { id: "iot", label: "IoT Broker Server", tag: "Mosquitto Broker" },
   { id: "custom", label: "Custom Server", tag: "Generic Service" },
@@ -184,9 +184,12 @@ export default function ApplicationServerSettingsBox({
               const p = cfg.params || {};
               const plSite = getPlPlacement(s.id);
               const resolvedCluster =
-                cfg.target_cluster && cfg.target_cluster !== "auto"
-                  ? cfg.target_cluster
-                  : plSite || "Auto (PL)";
+                cfg.app_type === "physical_ai" &&
+                (!cfg.target_cluster || cfg.target_cluster === "auto")
+                  ? "edge"
+                  : cfg.target_cluster && cfg.target_cluster !== "auto"
+                    ? cfg.target_cluster
+                    : plSite || "Auto (PL)";
 
               return (
                 <div key={s.id} className="app-slice-card">
@@ -252,7 +255,7 @@ export default function ApplicationServerSettingsBox({
 
                       <FieldHelp
                         label="Placement cluster"
-                        help="Cluster where the server container is deployed (Auto uses optimal PL placement)."
+                        help="Cluster where the server container is deployed. Physical AI (slice 2) defaults to edge gpu-a40; other types use Auto (PL)."
                       >
                         <select
                           value={cfg.target_cluster || "auto"}
@@ -371,7 +374,7 @@ export default function ApplicationServerSettingsBox({
                             help="HuggingFace / vLLM model checkpoint."
                           >
                             <input
-                              value={p.model || "nvidia/Cosmos-Nemotron-34B"}
+                              value={p.model || "nvidia/Cosmos3-Nano"}
                               disabled={disabled}
                               onChange={(e) => updateParam(s.id, "model", e.target.value)}
                             />

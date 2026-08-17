@@ -216,20 +216,39 @@ def detect_cluster_master(cluster: str, *, use_cache: bool = True) -> str:
     return detect_host_master(_probe_host(cluster), use_cache=use_cache)
 
 
+def pick_gpu_worker(
+    cluster: str,
+    *,
+    arch: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Prefer gpu-* workers (gpu-a40 / gpu-gh81 / gpu-gh82); skip usrp."""
+    nodes = list_cluster_nodes(cluster)
+    gpu_nodes = [
+        n
+        for n in nodes
+        if n.get("ready")
+        and n.get("gpu")
+        and str(n.get("name") or "") != "usrp"
+    ]
+    if arch:
+        gpu_nodes = [n for n in gpu_nodes if n.get("arch") == arch]
+        if not gpu_nodes:
+            return None
+    named = [n for n in gpu_nodes if str(n.get("name") or "").startswith("gpu-")]
+    chosen = named or gpu_nodes
+    return chosen[0] if chosen else None
+
+
 def detect_gpu_worker_master(
     cluster: str,
     *,
     use_cache: bool = True,
-    arch: Optional[str] = "arm64",
+    arch: Optional[str] = None,
 ) -> str:
-    """Multus parent on a GPU worker. Default: arm64 (GH200); no hostname list."""
-    nodes = list_cluster_nodes(cluster)
-    for n in nodes:
-        if not (n.get("ready") and n.get("gpu")):
-            continue
-        if arch and n.get("arch") != arch:
-            continue
-        return detect_host_master(n["name"], use_cache=use_cache)
+    """Multus parent on a GPU worker. arch=None accepts any GPU arch."""
+    worker = pick_gpu_worker(cluster, arch=arch)
+    if worker:
+        return detect_host_master(worker["name"], use_cache=use_cache)
     return detect_cluster_master(cluster, use_cache=use_cache)
 
 

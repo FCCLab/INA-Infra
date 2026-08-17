@@ -8,9 +8,11 @@ import {
   type UeClientStatusOut,
 } from "../api/client";
 import ApplicationSettingsBox from "../components/ApplicationSettingsBox";
+import { AppDashboardButtons } from "../components/AppDashboardLinks";
 import Card from "../components/ui/Card";
 import SectionLabel from "../components/ui/SectionLabel";
 import KpiStrip from "../components/ui/KpiStrip";
+import { APPLICATION_DASHBOARD_LIST } from "../lib/applicationDashboards";
 
 export default function ApplicationsPage() {
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -164,33 +166,6 @@ export default function ApplicationsPage() {
                 ))}
               </select>
             </label>
-            <a
-              href="http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv?orgId=1&refresh=2s"
-              target="_blank"
-              rel="noreferrer"
-              className="button"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                background: "rgba(249, 115, 22, 0.15)",
-                color: "#fb923c",
-                border: "1px solid rgba(249, 115, 22, 0.35)",
-                textDecoration: "none",
-                fontWeight: 600,
-                fontSize: 12,
-                padding: "6px 12px",
-                borderRadius: 6,
-              }}
-              title="Open real-time CCTV dashboard on Grafana (10.1.137.105:3000)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-              Grafana Dashboard
-            </a>
             <button
               type="button"
               onClick={() => void loadProfile(selectedProfileName)}
@@ -211,6 +186,25 @@ export default function ApplicationsPage() {
         </div>
         {error && <div className="banner error">{error}</div>}
         {status && <div className="banner ok-inline">{status}</div>}
+      </Card>
+
+      <Card className="tier">
+        <SectionLabel kicker="Per application">Dashboards</SectionLabel>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Each application has a control UI (like the CCTV video wall) and a Grafana metrics dashboard.
+        </p>
+        <div className="app-dashboard-grid">
+          {APPLICATION_DASHBOARD_LIST.map((app) => (
+            <div key={app.id} className="app-dashboard-cell">
+              <div className="app-dashboard-cell-title">
+                Slice {app.sliceId} · {app.name}
+              </div>
+              <div className="app-dashboard-cell-actions">
+                <AppDashboardButtons appType={app.id} />
+              </div>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {profileRecord && (

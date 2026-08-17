@@ -60,22 +60,29 @@ if [ -n "${MULTUS_IP:-}" ]; then
   export MTX_WEBRTCICEHOSTNAT1TO1IPS="${MULTUS_IP}"
 fi
 
-log info "starting MediaMTX"
-mediamtx "${MTX_CONF}" &
-MTX_PID=$!
+START_MEDIAMTX="${START_MEDIAMTX:-true}"
+MTX_RTSP_URL="${MTX_RTSP_URL:-rtsp://127.0.0.1:8555}"
 
-for _ in $(seq 1 40); do
-  if curl -fsS http://127.0.0.1:9997/v3/config/global/get >/dev/null 2>&1; then
-    log info "MediaMTX API ready"
-    break
-  fi
-  sleep 0.25
-done
+if [ "${START_MEDIAMTX}" = "true" ] && [[ "${MTX_RTSP_URL}" == *"127.0.0.1"* || "${MTX_RTSP_URL}" == *"localhost"* ]]; then
+  log info "starting local MediaMTX"
+  mediamtx "${MTX_CONF}" &
+  MTX_PID=$!
 
-cleanup() {
-  kill "${MTX_PID}" 2>/dev/null || true
-}
-trap cleanup EXIT
+  for _ in $(seq 1 40); do
+    if curl -fsS http://127.0.0.1:9997/v3/config/global/get >/dev/null 2>&1; then
+      log info "MediaMTX API ready"
+      break
+    fi
+    sleep 0.25
+  done
+
+  cleanup() {
+    kill "${MTX_PID}" 2>/dev/null || true
+  }
+  trap cleanup EXIT
+else
+  log info "using external MediaMTX at ${MTX_RTSP_URL}"
+fi
 
 log info "starting GStreamer analyzer + FastAPI"
 exec python3 -m edge.analyzer

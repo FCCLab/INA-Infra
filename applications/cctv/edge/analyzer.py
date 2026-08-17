@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import io
-import os
 import multiprocessing as mp
+import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -68,6 +69,25 @@ METRICS_ADDR = _env("METRICS_ADDR", "0.0.0.0")
 LOG_INTERVAL_S = float(_env("LOG_INTERVAL_S", "1"))
 CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
 
+
+def normalize_client_name(client_id: str) -> str:
+    s = str(client_id).lower().strip()
+    if s.startswith("slice") and "client" in s:
+        return s
+    m = re.search(r"cam(\d+)", s)
+    if m:
+        return f"slice1-cctv-client-{m.group(1)}"
+    m = re.search(r"ue(\d+)", s)
+    if m:
+        return f"slice1-cctv-client-{m.group(1)}"
+    if "slicea" in s or s == "cam":
+        return "slice1-cctv-client-1"
+    m = re.search(r"(\d+)", s)
+    if m:
+        return f"slice1-cctv-client-{m.group(1)}"
+    return "slice1-cctv-client-1"
+
+
 # --- Prometheus Metrics -----------------------------------------------------
 NET_DELAY = Histogram(
     "cctv_net_delay_seconds",
@@ -84,6 +104,12 @@ E2E_DELAY = Histogram(
     "Capture-to-post-inference end-to-end delay",
     buckets=metrics.LATENCY_BUCKETS,
 )
+CLIENT_NET_DELAY_MS = Gauge("cctv_client_net_delay_ms", "5G Network Delay per client in ms", ["client"])
+CLIENT_YOLO_DELAY_MS = Gauge("cctv_client_yolo_delay_ms", "YOLO AI Latency per client in ms", ["client"])
+CLIENT_E2E_DELAY_MS = Gauge("cctv_client_e2e_delay_ms", "End-to-End Latency per client in ms", ["client"])
+CLIENT_INGRESS_FPS = Gauge("cctv_client_ingress_fps", "Ingress FPS per client", ["client"])
+CLIENT_EGRESS_FPS = Gauge("cctv_client_egress_fps", "Egress FPS per client", ["client"])
+
 FRAMES_PROCESSED = Counter(
     "cctv_frames_processed_total", "Frames pulled from appsink"
 )
@@ -100,6 +126,76 @@ EGRESS_FPS_GAUGE = Gauge("application_egress_fps", "Egress processed frame rate 
 CLOCK_OFFSET = Gauge(
     "cctv_clock_offset_seconds", "Absolute chrony clock offset (edge)"
 )
+APPLICATION_CLOCK_OFFSET_MS = Gauge(
+    "application_clock_offset_ms",
+    "Host clock offset vs reference (ms)",
+    ["origin"],
+)
+APPLICATION_THROUGHPUT_BPS = Gauge(
+    "application_throughput_bytes_per_sec",
+    "N6/Multus ingest rate (bytes/sec RX)",
+    ["origin"],
+)
+
+
+def _kernel_clock_offset_seconds() -> Optional[float]:
+    """Kernel NTP PLL offset (adjtimex). Used when chronyd is not in the pod."""
+    try:
+        import ctypes
+        import ctypes.util
+
+        class _Timex(ctypes.Structure):
+            _fields_ = [
+                ("modes", ctypes.c_uint),
+                ("offset", ctypes.c_long),
+                ("freq", ctypes.c_long),
+                ("maxerror", ctypes.c_long),
+                ("esterror", ctypes.c_long),
+                ("status", ctypes.c_int),
+                ("constant", ctypes.c_long),
+                ("precision", ctypes.c_long),
+                ("tolerance", ctypes.c_long),
+                ("time_tv_sec", ctypes.c_long),
+                ("time_tv_usec", ctypes.c_long),
+                ("tick", ctypes.c_long),
+                ("ppsfreq", ctypes.c_long),
+                ("jitter", ctypes.c_long),
+                ("shift", ctypes.c_int),
+                ("stabil", ctypes.c_long),
+                ("jitcnt", ctypes.c_long),
+                ("calcnt", ctypes.c_long),
+                ("errcnt", ctypes.c_long),
+                ("stbcnt", ctypes.c_long),
+                ("tai", ctypes.c_int),
+                ("_pad", ctypes.c_int * 11),
+            ]
+
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        tx = _Timex()
+        if libc.adjtimex(ctypes.byref(tx)) < 0:
+            return None
+        sta_nano = 0x2000
+        if tx.status & sta_nano:
+            return float(tx.offset) / 1e9
+        return float(tx.offset) / 1e6
+    except Exception:
+        return None
+
+
+def _dataplane_rx_bytes() -> Optional[int]:
+    """RX bytes on Multus/N6 (net1) or OAI UE tun (oaitun*)."""
+    try:
+        with open("/proc/net/dev", encoding="utf-8") as f:
+            for line in f:
+                if ":" not in line:
+                    continue
+                iface, rest = line.split(":", 1)
+                name = iface.strip()
+                if name.startswith("net1") or name.startswith("oaitun"):
+                    return int(rest.split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
 
 
 def _cgroup_cpu_quota() -> int:
@@ -169,6 +265,8 @@ class CCTVAnalyzer:
         self._workers: Dict[str, _YoloProc] = {}
         self._worker_lock = threading.Lock()
         self._worker_index = 0
+        self._last_dp_rx: Optional[int] = None
+        self._last_dp_t: Optional[float] = None
 
     def _get_context(self, client_id: str) -> ClientStreamContext:
         with GLOBAL_LOCK:
@@ -176,7 +274,18 @@ class CCTVAnalyzer:
                 ctx = ClientStreamContext(client_id)
                 self._stream_contexts[client_id] = ctx
                 CLIENT_STREAMS[client_id] = ctx
-            return self._stream_contexts[client_id]
+            ctx = self._stream_contexts[client_id]
+            if not hasattr(ctx, "decoded_count"):
+                ctx.decoded_count = 0
+            if not hasattr(ctx, "last_decoded_count"):
+                ctx.last_decoded_count = 0
+            if not hasattr(ctx, "analyzed_count"):
+                ctx.analyzed_count = 0
+            if not hasattr(ctx, "last_analyzed_count"):
+                ctx.last_analyzed_count = 0
+            if not hasattr(ctx, "egress_fps"):
+                ctx.egress_fps = 0.0
+            return ctx
 
     def _load_model(self) -> None:
         if not YOLO_ENABLED:
@@ -324,17 +433,22 @@ class CCTVAnalyzer:
                     seq, jpeg, labels, count, delay, err = res[:6]
                     t_cap = None
                 ctx = self._get_context(handle.client_id)
+                c_name = normalize_client_name(handle.client_id)
                 YOLO_DELAY.observe(max(float(delay), 0.0))
+                yolo_ms = round(float(delay) * 1000.0, 2)
+                CLIENT_YOLO_DELAY_MS.labels(client=c_name).set(yolo_ms)
                 with GLOBAL_LOCK:
-                    ctx.yolo_delay_ms = round(float(delay) * 1000.0, 2)
+                    ctx.yolo_delay_ms = yolo_ms
                     ctx.yolo_samples.append(float(delay))
                     if t_cap is not None:
                         e2e_delay = (time.time_ns() - t_cap) / 1e9
                         E2E_DELAY.observe(max(e2e_delay, 0.0))
                         ctx.e2e_samples.append(e2e_delay)
                         ctx.e2e_delay_ms = round(max(0.0, e2e_delay * 1000.0), 2)
+                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
                     elif ctx.net_delay_ms > 0:
                         ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)
+                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
                     if jpeg:
                         ctx.latest_jpeg = jpeg
                     ctx.detections_count = int(count or 0)
@@ -455,17 +569,20 @@ class CCTVAnalyzer:
         FRAMES_PROCESSED.inc()
         ctx = self._get_context(client_id)
         with GLOBAL_LOCK:
-            ctx.decoded_count += 1
+            ctx.decoded_count = getattr(ctx, "decoded_count", 0) + 1
             ctx.last_frame_time = time.monotonic()
         t_capture_ns = self._read_reference_ns(buf)
         if t_capture_ns is None:
             FRAMES_WITHOUT_TS.inc()
             return Gst.PadProbeReturn.OK
         net_delay = (now_ns - t_capture_ns) / 1e9
+        c_name = normalize_client_name(client_id)
         NET_DELAY.observe(max(net_delay, 0.0))
+        net_ms = round(max(0.0, net_delay * 1000.0), 2)
+        CLIENT_NET_DELAY_MS.labels(client=c_name).set(net_ms)
         with GLOBAL_LOCK:
             ctx.net_samples.append(net_delay)
-            ctx.net_delay_ms = round(max(0.0, net_delay * 1000.0), 2)
+            ctx.net_delay_ms = net_ms
         return Gst.PadProbeReturn.OK
 
     def _on_sample(self, appsink, client_id: str):
@@ -606,6 +723,17 @@ class CCTVAnalyzer:
                     ctx.last_report = now
                     total_ingress_fps += fps
                     total_egress_fps += egress_fps
+                    is_active = (now - ctx.last_frame_time) < 5.0
+                    c_name = normalize_client_name(cid)
+                    if is_active:
+                        CLIENT_INGRESS_FPS.labels(client=c_name).set(round(fps, 2))
+                        CLIENT_EGRESS_FPS.labels(client=c_name).set(round(egress_fps, 2))
+                    else:
+                        for g in (CLIENT_NET_DELAY_MS, CLIENT_YOLO_DELAY_MS, CLIENT_E2E_DELAY_MS, CLIENT_INGRESS_FPS, CLIENT_EGRESS_FPS):
+                            try:
+                                g.remove(c_name)
+                            except Exception:
+                                pass
                     if cid == "slicea" or cid == "ue1" or len(self._stream_contexts) == 1:
                         FPS_GAUGE.set(fps)
                     ctx.net_samples = []
@@ -613,6 +741,23 @@ class CCTVAnalyzer:
                     ctx.e2e_samples = []
                 INGRESS_FPS_GAUGE.set(total_ingress_fps)
                 EGRESS_FPS_GAUGE.set(total_egress_fps)
+                rx = _dataplane_rx_bytes()
+                now_m = time.monotonic()
+                if rx is not None and self._last_dp_rx is not None and self._last_dp_t is not None:
+                    dt = max(0.5, now_m - self._last_dp_t)
+                    bps = max(0.0, (rx - self._last_dp_rx) / dt)
+                    APPLICATION_THROUGHPUT_BPS.labels(origin="server").set(bps)
+                if rx is not None:
+                    self._last_dp_rx = rx
+                    self._last_dp_t = now_m
+                offset = metrics.get_chrony_offset_seconds(CHRONYC_HOST)
+                if offset is None:
+                    offset = _kernel_clock_offset_seconds()
+                if offset is not None:
+                    CLOCK_OFFSET.set(abs(offset))
+                    APPLICATION_CLOCK_OFFSET_MS.labels(origin="server").set(
+                        round(abs(offset) * 1000.0, 3)
+                    )
             self._reap_idle_workers()
 
     def run(self) -> None:

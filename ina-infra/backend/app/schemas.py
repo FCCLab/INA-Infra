@@ -423,6 +423,20 @@ class SliceApplicationConfig(BaseModel):
     last_error: Optional[str] = Field(None, description="Last deployment error if any")
 
 
+class PhysicalAiHfTokenStatus(BaseModel):
+    ok: bool = True
+    configured: bool = False
+    cluster: str = "edge"
+    namespace: str = ""
+    secret: str = "ina-hf-token"
+    restarted: bool = False
+    message: str = ""
+
+
+class PhysicalAiHfTokenSaveRequest(BaseModel):
+    token: str = Field(..., min_length=1, description="Hugging Face access token (hf_…)")
+
+
 class AppDeployRequest(BaseModel):
     slice_id: Optional[int] = Field(None, description="Slice ID to deploy, or null to deploy all enabled apps")
     profile: Optional[Profile] = None

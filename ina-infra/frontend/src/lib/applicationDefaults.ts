@@ -36,16 +36,16 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   },
   physical_ai: {
     name: "Physical AI (Cosmos3 VLM)",
-    server_image: `${REG}/cosmo3-vllm:nws-v0.5-arm64-cu128`,
-    client_image: `${REG}/cosmo3-aiperf:nws-v0.5-amd64`,
+    server_image: `${REG}/cosmo3-vllm:nws-v0.7`,
+    client_image: `${REG}/cosmo3-aiperf:nws-v0.7-amd64`,
     server_port: 8000,
     metrics_port: 8002,
     server_params: {
-      model: "nvidia/Cosmos-Nemotron-34B",
+      model: "nvidia/Cosmos3-Nano",
       tensor_parallel_size: 1,
       max_model_len: 4096,
-      gpu_arch: "arm64-gh200",
-      gpu_memory_utilization: 0.9,
+      gpu_arch: "auto",
+      gpu_memory_utilization: 0.85,
     },
     client_params: {
       client_count: 1,
@@ -119,6 +119,7 @@ export function defaultsForAppType(
     client_image: d.client_image,
     server_port: d.server_port,
     metrics_port: d.metrics_port,
+    ...(appType === "physical_ai" ? { target_cluster: "edge" as const } : {}),
     params: {
       ...d.server_params,
       ...d.client_params,

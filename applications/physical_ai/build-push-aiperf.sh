@@ -4,13 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-nws-v0.5-amd64}"
+IMAGE_TAG="${IMAGE_TAG:-nws-v0.7-amd64}"
 LOCAL_TAG="cosmo3-aiperf:${IMAGE_TAG}"
 REMOTE_TAG="${REGISTRY}/cosmo3-aiperf:${IMAGE_TAG}"
 
 cd "${SCRIPT_DIR}"
-echo "==> Building ${LOCAL_TAG} (amd64)"
-docker build -f Dockerfile.aiperf -t "${LOCAL_TAG}" .
+echo "==> Building ${LOCAL_TAG} (linux/amd64)"
+docker build --platform linux/amd64 -f Dockerfile.aiperf -t "${LOCAL_TAG}" -t "${REMOTE_TAG}" .
 
 echo "==> Tagging ${REMOTE_TAG}"
 docker tag "${LOCAL_TAG}" "${REMOTE_TAG}"

@@ -73,6 +73,8 @@ from app.schemas import (
     PsSolveResponse,
     SliceApplicationConfig,
     SliceIn,
+    PhysicalAiHfTokenSaveRequest,
+    PhysicalAiHfTokenStatus,
 )
 from app.services import (
     application_deploy,
@@ -85,6 +87,7 @@ from app.services import (
     operators,
     ues,
     gitea_apply,
+    hf_token,
     pl_solver,
     pm_loop,
     profile_rollout,
@@ -387,6 +390,47 @@ def get_profile_applications(name: str):
 def save_profile_applications(name: str, body: Dict[str, SliceApplicationConfig]):
     try:
         return profile_store.save_profile_applications(name, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{name}/physical-ai/hf-token",
+    response_model=PhysicalAiHfTokenStatus,
+    tags=["Applications"],
+    summary="Hugging Face token status for Physical AI (never returns the token)",
+)
+def physical_ai_hf_token_status(name: str):
+    try:
+        return hf_token.status(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put(
+    "/profiles/{name}/physical-ai/hf-token",
+    response_model=PhysicalAiHfTokenStatus,
+    tags=["Applications"],
+    summary="Save Hugging Face token as a cluster Secret for Cosmos3 vLLM",
+)
+def physical_ai_hf_token_save(name: str, body: PhysicalAiHfTokenSaveRequest):
+    try:
+        return hf_token.save(name, body.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/profiles/{name}/physical-ai/hf-token",
+    response_model=PhysicalAiHfTokenStatus,
+    tags=["Applications"],
+    summary="Remove the Hugging Face token Secret",
+)
+def physical_ai_hf_token_delete(name: str):
+    try:
+        return hf_token.delete(name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -1,12 +1,37 @@
-/* cctv.css — NeuroRAN Vision AI & CCTV Video Wall Styling */
-
 .cctv-wall-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
+  gap: 12px;
+  flex-wrap: nowrap;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.cctv-wall-header .actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.cctv-wall-header select {
+  width: auto !important;
+  height: 28px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.cctv-wall-header button {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .cam-wall {
@@ -15,27 +40,43 @@
   margin-top: 14px;
 }
 
+.cam-wall[data-layout="auto"] {
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+.cam-wall[data-layout="1"],
 .cam-wall[data-cols="1"] {
-  grid-template-columns: minmax(360px, 1100px);
+  grid-template-columns: minmax(360px, 1200px);
   justify-content: center;
 }
 
+.cam-wall[data-layout="2x2"],
 .cam-wall[data-cols="2"] {
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.cam-wall[data-layout="3x3"],
 .cam-wall[data-cols="3"] {
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.cam-wall[data-layout="4x4"],
 .cam-wall[data-cols="4"] {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1024px) {
+  .cam-wall[data-layout="3x3"],
+  .cam-wall[data-layout="4x4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
-  .cam-wall[data-cols="2"],
-  .cam-wall[data-cols="3"],
-  .cam-wall[data-cols="4"] {
+  .cam-wall[data-layout="2x2"],
+  .cam-wall[data-layout="3x3"],
+  .cam-wall[data-layout="4x4"],
+  .cam-wall[data-layout="auto"] {
     grid-template-columns: 1fr;
   }
 }

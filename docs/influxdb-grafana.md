@@ -41,7 +41,14 @@ PVC: InfluxDB **1900Gi** on `edge-0`’s 2T `local-path` disk (`INFLUX_PVC_SIZE`
 
 ## Dashboards
 
-CCTV YOLO / e2e delay: [http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv) — see [cctv.md](cctv.md).
+Each application has **two** dashboards: an app UI (or Grafana overview) plus a Grafana metrics board. Definitions: `grafana/dashboards/` (CCTV JSON stays in `applications/cctv/dashboard/`). Push: `./grafana/dashboards/push_all.sh`. GitOps also provisions them under folder **Applications**.
+
+| App | UI dashboard | Grafana metrics |
+|-----|--------------|-----------------|
+| CCTV | [Video Wall](http://10.1.137.120:30080/) | [cctv-dashboard](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s) |
+| Physical AI | [Dashboard](http://10.1.137.133:30082/) | [physical-ai-metrics](http://10.1.137.105:3000/d/ina-physical-ai/physical-ai-metrics?orgId=1&refresh=5s) |
+| OTT | [OTT control](http://10.1.137.110:30083/) | [OTT Metrics](http://10.1.137.105:3000/d/ina-ott-metrics/ott-metrics?orgId=1&refresh=5s) |
+| IoT | [IoT control](http://10.1.137.110:30084/) | [IoT Metrics](http://10.1.137.105:3000/d/ina-iot-metrics/iot-metrics?orgId=1&refresh=5s) |
 
 ## Verify
 

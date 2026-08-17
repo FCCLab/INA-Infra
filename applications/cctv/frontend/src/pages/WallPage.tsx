@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
 import Card from "../components/ui/Card";
 import KpiStrip from "../components/ui/KpiStrip";
-import SectionLabel from "../components/ui/SectionLabel";
 import StatusDot from "../components/ui/StatusDot";
 import { fetchClients, type CctvClient } from "../lib/api";
 
 function CameraTile({ cam }: { cam: CctvClient }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [hlsOk, setHlsOk] = useState(false);
+  const [streamMode, setStreamMode] = useState<"mjpeg" | "hls">("mjpeg");
+  const [hlsPlaying, setHlsPlaying] = useState(false);
   const [timeStr, setTimeStr] = useState("");
 
   useEffect(() => {
@@ -22,6 +22,10 @@ function CameraTile({ cam }: { cam: CctvClient }) {
   }, []);
 
   useEffect(() => {
+    if (streamMode !== "hls") {
+      setHlsPlaying(false);
+      return;
+    }
     const el = videoRef.current;
     if (!el || !cam.hls_path) return;
     const src = cam.hls_path;
@@ -29,22 +33,31 @@ function CameraTile({ cam }: { cam: CctvClient }) {
 
     if (el.canPlayType("application/vnd.apple.mpegurl")) {
       el.src = src;
-      setHlsOk(true);
+      el.play().catch(() => {});
+      setHlsPlaying(true);
     } else if (Hls.isSupported()) {
       hls = new Hls({
         lowLatencyMode: true,
-        liveSyncDurationCount: 2,
+        liveSyncDurationCount: 1,
         maxLiveSyncPlaybackRate: 1.5,
       });
       hls.loadSource(src);
       hls.attachMedia(el);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => setHlsOk(true));
-      hls.on(Hls.Events.ERROR, () => setHlsOk(false));
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        el.play().catch(() => {});
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        setHlsPlaying(true);
+        el.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, () => {
+        setHlsPlaying(false);
+      });
     }
     return () => {
       hls?.destroy();
     };
-  }, [cam.hls_path]);
+  }, [cam.hls_path, streamMode]);
 
   const detSummary = useMemo(() => {
     if (!cam.detected_objects || cam.detected_objects.length === 0) {
@@ -56,6 +69,8 @@ function CameraTile({ cam }: { cam: CctvClient }) {
     }
     return Object.entries(counts).map(([name, count]) => `${name} × ${count}`);
   }, [cam.detected_objects, cam.detections_count]);
+
+  const isHlsActive = streamMode === "hls" && hlsPlaying;
 
   return (
     <div className={`cam-card ${cam.active ? "is-live" : ""}`}>
@@ -69,24 +84,41 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           <span className={`cam-badge ${cam.active ? "cam-badge-live" : "cam-badge-idle"}`}>
             {cam.active ? `${cam.fps.toFixed(1)} FPS` : "OFFLINE"}
           </span>
-          <span className="cam-badge cam-badge-idle">
-            {hlsOk ? "HLS Live" : "MJPEG"}
-          </span>
+          <button
+            type="button"
+            className={`cam-badge ${streamMode === "mjpeg" ? "cam-badge-live" : "cam-badge-idle"}`}
+            style={{ cursor: "pointer", border: "none" }}
+            onClick={() => setStreamMode((prev) => (prev === "mjpeg" ? "hls" : "mjpeg"))}
+            title="Click to toggle between Low-Latency MJPEG and HLS Stream"
+          >
+            {streamMode === "mjpeg" ? "MJPEG (Live)" : "HLS Stream"}
+          </button>
         </div>
       </div>
 
       <div className="cam-stage">
+        {/* HLS Video Player */}
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
-          style={{ display: hlsOk ? "block" : "none" }}
+          style={{ display: isHlsActive ? "block" : "none" }}
         />
-        {!hlsOk && cam.has_frame && (
-          <img src={cam.mjpeg_path} alt={cam.name} />
+
+        {/* Instant MJPEG / Snapshot Stream */}
+        {!isHlsActive && (
+          <img
+            src={cam.mjpeg_path}
+            alt={cam.name || cam.id}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.src = `${cam.snapshot_path}?t=${Date.now()}`;
+            }}
+          />
         )}
-        {!cam.active && !cam.has_frame && !hlsOk && (
+        {!cam.active && !cam.has_frame && !isHlsActive && (
           <div className="cam-offline">
             <svg className="cam-offline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M4 6h11a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" />
@@ -167,9 +199,15 @@ function CameraTile({ cam }: { cam: CctvClient }) {
   );
 }
 
+type LayoutPattern = "auto" | "1" | "2x2" | "3x3" | "4x4";
+type SortOption = "default" | "active" | "detections" | "name";
+
 export default function WallPage() {
   const [clients, setClients] = useState<CctvClient[]>([]);
-  const [cols, setCols] = useState(0);
+  const [layout, setLayout] = useState<LayoutPattern>("auto");
+  const [selectedCamId, setSelectedCamId] = useState<string>("all");
+  const [activeOnly, setActiveOnly] = useState<boolean>(true);
+  const [sortBy, setSortBy] = useState<SortOption>("default");
 
   useEffect(() => {
     let stop = false;
@@ -189,9 +227,10 @@ export default function WallPage() {
     };
   }, []);
 
-  const live = clients.filter((c) => c.active || c.has_frame);
+  const liveFeeds = useMemo(() => clients.filter((c) => c.active || c.has_frame), [clients]);
   const activeCount = clients.filter((c) => c.active).length;
   const totalDetections = clients.reduce((sum, c) => sum + (c.active ? c.detections_count : 0), 0);
+
   const avgYolo = useMemo(() => {
     const activeFeeds = clients.filter((c) => c.active && c.yolo_delay_ms > 0);
     if (!activeFeeds.length) return "0.0";
@@ -206,9 +245,32 @@ export default function WallPage() {
     return (sum / activeFeeds.length).toFixed(1);
   }, [clients]);
 
-  const autoCols = live.length <= 1 ? 1 : live.length <= 4 ? 2 : 3;
-  const grid = cols || autoCols;
-  const shown = useMemo(() => (live.length ? live : clients), [live, clients]);
+  // Filter and sort cameras
+  const displayedCameras = useMemo(() => {
+    let list = activeOnly ? (liveFeeds.length ? liveFeeds : clients) : clients;
+    if (layout === "1" && selectedCamId !== "all") {
+      const match = list.find((c) => c.id === selectedCamId);
+      if (match) list = [match];
+    }
+    const cloned = [...list];
+    if (sortBy === "active") {
+      cloned.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+    } else if (sortBy === "detections") {
+      cloned.sort((a, b) => b.detections_count - a.detections_count);
+    } else if (sortBy === "name") {
+      cloned.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    }
+    return cloned;
+  }, [clients, liveFeeds, activeOnly, layout, selectedCamId, sortBy]);
+
+  // Compute effective grid cols attribute
+  const effectiveGridCols = useMemo(() => {
+    if (layout === "1") return 1;
+    if (layout === "2x2") return 2;
+    if (layout === "3x3") return 3;
+    if (layout === "4x4") return 4;
+    return displayedCameras.length <= 1 ? 1 : displayedCameras.length <= 4 ? 2 : 3;
+  }, [layout, displayedCameras.length]);
 
   return (
     <>
@@ -276,55 +338,103 @@ export default function WallPage() {
 
       <Card className="tier" glow>
         <div className="cctv-wall-header">
-          <SectionLabel kicker={`${shown.length} camera feed${shown.length === 1 ? "" : "s"} · MediaMTX HLS subscribe`}>
-            Multi-Camera Video Wall
-          </SectionLabel>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--text)" }}>
+              Video Wall
+            </span>
+            <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "12px", background: "rgba(255, 255, 255, 0.07)", color: "var(--muted)", fontWeight: 500 }}>
+              {displayedCameras.length} Feed{displayedCameras.length === 1 ? "" : "s"} · {layout.toUpperCase()}
+            </span>
+          </div>
+
           <div className="actions">
+            {/* Pattern Chooser: Auto, 1, 2x2, 3x3, 4x4 */}
+            <div style={{ display: "inline-flex", background: "rgba(255, 255, 255, 0.05)", borderRadius: "8px", padding: "2px", border: "1px solid var(--border)", flexShrink: 0 }}>
+              {(["auto", "1", "2x2", "3x3", "4x4"] as LayoutPattern[]).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={layout === p ? "is-selected" : ""}
+                  style={{
+                    padding: "3px 9px",
+                    height: "24px",
+                    fontSize: "11.5px",
+                    fontWeight: layout === p ? 700 : 500,
+                    borderRadius: "6px",
+                    border: "none",
+                    background: layout === p ? "var(--accent)" : "transparent",
+                    color: layout === p ? "#000" : "var(--text)",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    display: "inline-flex",
+                    alignItems: "center",
+                  }}
+                  onClick={() => setLayout(p)}
+                  title={`Select ${p.toUpperCase()} Grid Pattern`}
+                >
+                  {p === "auto" ? "Auto" : p}
+                </button>
+              ))}
+            </div>
+
+            {/* Camera selector when in single view */}
+            {layout === "1" && clients.length > 1 && (
+              <select
+                value={selectedCamId}
+                onChange={(e) => setSelectedCamId(e.target.value)}
+                style={{ flexShrink: 0 }}
+                title="Choose camera to display in Single view"
+              >
+                <option value="all">First Available</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.id} {c.active ? "(Live)" : "(Offline)"}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Reorder / Sort Options */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              style={{ flexShrink: 0 }}
+              title="Reorder camera feeds"
+            >
+              <option value="default">Sort: Ingest</option>
+              <option value="active">Sort: Active</option>
+              <option value="detections">Sort: Detections</option>
+              <option value="name">Sort: Name</option>
+            </select>
+
+            {/* Filter Inactive Feeds */}
             <button
               type="button"
-              className={cols === 0 ? "is-selected" : ""}
-              onClick={() => setCols(0)}
-              title="Automatic responsive column grid"
+              className={activeOnly ? "is-selected" : ""}
+              onClick={() => setActiveOnly((prev) => !prev)}
+              style={{
+                height: "28px",
+                padding: "2px 10px",
+                fontSize: "12px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+              title="Toggle offline camera feeds"
             >
-              Auto
-            </button>
-            <button
-              type="button"
-              className={cols === 1 ? "is-selected" : ""}
-              onClick={() => setCols(1)}
-              title="1 Column single view"
-            >
-              1
-            </button>
-            <button
-              type="button"
-              className={cols === 2 ? "is-selected" : ""}
-              onClick={() => setCols(2)}
-              title="2 Columns side-by-side"
-            >
-              2
-            </button>
-            <button
-              type="button"
-              className={cols === 3 ? "is-selected" : ""}
-              onClick={() => setCols(3)}
-              title="3 Columns grid"
-            >
-              3
-            </button>
-            <button
-              type="button"
-              className={cols === 4 ? "is-selected" : ""}
-              onClick={() => setCols(4)}
-              title="4 Columns compact grid"
-            >
-              4
+              {activeOnly ? "✓ Active Only" : "Show All"}
             </button>
           </div>
         </div>
 
-        <div className="cam-wall" data-cols={grid}>
-          {shown.length === 0 ? (
+        <div
+          className="cam-wall"
+          data-cols={effectiveGridCols}
+          data-layout={layout}
+        >
+          {displayedCameras.length === 0 ? (
             <div className="empty-wall-guide">
               <div className="empty-wall-title">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
@@ -342,7 +452,7 @@ export default function WallPage() {
               </div>
             </div>
           ) : (
-            shown.map((cam) => <CameraTile key={cam.id} cam={cam} />)
+            displayedCameras.map((cam) => <CameraTile key={cam.id} cam={cam} />)
           )}
         </div>
       </Card>

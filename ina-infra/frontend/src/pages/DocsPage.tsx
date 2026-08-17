@@ -265,19 +265,23 @@ demand   = radio_mbps  →  fed to PM`}</Formula>
         </Card>
 
         <Card className="tier">
-          <h2 className="docs-h2">Applications · CCTV</h2>
+          <h2 className="docs-h2">Applications · dashboards</h2>
           <p className="docs-lead">
-            Slice 1 vision streaming. Server (YOLO + MediaMTX + dashboard) is GitOps on
-            regional; UE clients are on-demand on edge. Lab notes:{" "}
-            <code>docs/cctv.md</code>. Wall:{" "}
-            <a href="http://10.1.137.121:8080/" target="_blank" rel="noreferrer">
-              10.1.137.121:8080
-            </a>
-            . Swagger:{" "}
-            <a href="http://10.1.137.121:8080/docs" target="_blank" rel="noreferrer">
-              /docs
-            </a>
-            .
+            Each slice app has a control UI (CCTV wall, Physical AI, OTT, IoT) plus Grafana metrics.
+            CCTV:{" "}
+            <a href="http://10.1.137.120:30080/" target="_blank" rel="noreferrer">10.1.137.120:30080</a>
+            . Physical AI:{" "}
+            <a href="http://10.1.137.133:30082/" target="_blank" rel="noreferrer">10.1.137.133:30082</a>
+            . OTT:{" "}
+            <a href="http://10.1.137.110:30083/" target="_blank" rel="noreferrer">10.1.137.110:30083</a>
+            . IoT:{" "}
+            <a href="http://10.1.137.110:30084/" target="_blank" rel="noreferrer">10.1.137.110:30084</a>
+            . Grafana:{" "}
+            <a href="http://10.1.137.105:3000/" target="_blank" rel="noreferrer">
+              10.1.137.105:3000
+            </a>{" "}
+            (<code>inainfra</code> / <code>inainfra</code>). Notes:{" "}
+            <code>docs/influxdb-grafana.md</code>, <code>docs/cctv.md</code>.
           </p>
         </Card>
       </div>

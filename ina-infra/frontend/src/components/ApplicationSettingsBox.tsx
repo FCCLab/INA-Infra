@@ -13,6 +13,7 @@ import SectionLabel from "./ui/SectionLabel";
 import FieldHelp from "./FieldHelp";
 import { useDialog } from "./ui/Dialog";
 import { defaultClientImage } from "../lib/applicationDefaults";
+import { AppDashboardTags } from "./AppDashboardLinks";
 import {
   CCTV_CLIPS,
   defaultCctvClipIds,
@@ -440,30 +441,7 @@ export default function ApplicationSettingsBox({
                       >
                         Active UEs: {clientCount} {clientCount > 1 ? "Cameras" : "Camera"}
                       </span>
-                      {cfg.app_type === "cctv" && (
-                        <a
-                          href="http://10.1.137.121:8080/"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="tag"
-                          style={{ fontSize: 11, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0, fontWeight: 700, background: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", border: "1px solid rgba(59, 130, 246, 0.4)", borderRadius: 6, textDecoration: "none", cursor: "pointer" }}
-                          title="Open live adaptive CCTV Surveillance Video Wall on 10.1.137.121:8080"
-                        >
-                          📹 Video Wall ↗
-                        </a>
-                      )}
-                      {cfg.app_type === "cctv" && (
-                        <a
-                          href="http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv?orgId=1&refresh=2s"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="tag"
-                          style={{ fontSize: 11, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0, fontWeight: 600, background: "rgba(249, 115, 22, 0.12)", color: "#fb923c", border: "1px solid rgba(249, 115, 22, 0.25)", borderRadius: 6, textDecoration: "none", cursor: "pointer" }}
-                          title="View live CCTV dashboard on Grafana (10.1.137.105:3000)"
-                        >
-                          Grafana: CCTV ↗
-                        </a>
-                      )}
+                      <AppDashboardTags appType={cfg.app_type} />
                       <span
                         className={livePillClass(live?.overall, cfg.deployed, cfg.last_error)}
                         style={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}

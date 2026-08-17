@@ -12,41 +12,46 @@ each RTP packet also carries the RFC 6051 NTP-64 header extension. The analyzer
 reconstructs capture time from `GstReferenceTimestampMeta` and computes
 `delay = now - capture`.
 
-## Architecture
+## Architecture (Pattern B — Multi-Container Pod)
+
+The CCTV server runs on the Regional cluster as a unified multi-container Pod:
 
 ```mermaid
-flowchart LR
-  subgraph ue [Client UE]
-    Pub["publisher RTSP RECORD"]
+flowchart TD
+  subgraph ue [Client UE - Edge]
+    Pub["publisher.py RTSP RECORD push (:8554)"]
   end
-  subgraph server [CCTV server image]
-    Gst["analyzer gst-rtsp-server :8554"]
-    Yolo["YOLO workers"]
-    Mtx["MediaMTX :8555 publish / :8888 HLS"]
-    Api["FastAPI Swagger :8080"]
-    Ui["React dashboard"]
+  subgraph server_pod [Regional Cluster - application-cctv Pod]
+    Gst["cctv container: gst-rtsp-server :8554 + YOLOv8 worker pool"]
+    Api["cctv container: FastAPI :8080 (/snapshot, /video)"]
+    Mtx["mediamtx container: MediaMTX :8555 publish / :8888 HLS / :8889 WHEP"]
+    Ui["frontend container: Nginx :80 (NodePort 30080) React Video Wall"]
+    Metric["metrics-exporter container: Prometheus :9102 -> InfluxDB"]
   end
-  Pub -->|"UE ingest timestamps stay in GStreamer"| Gst --> Yolo
-  Yolo -->|"publish annotated H264"| Mtx
-  Ui -->|"subscribe HLS / WHEP"| Mtx
-  Ui --> Api
+  Pub -->|"RTSP RECORD (NTP-64 timestamps)"| Gst
+  Gst -->|"YOLO Bounding Boxes"| Api
+  Gst -->|"Push annotated RTSP :8555"| Mtx
+  Ui -->|"Proxy /api/, /snapshot/, /video/"| Api
+  Ui -->|"Proxy /live/, /whep/"| Mtx
+  Metric -->|"Scrape /metrics"| Gst
 ```
 
-The **server image** has two app components plus a media router:
+The multi-container pod contains 3 dedicated application containers + 1 metrics exporter sidecar:
+1. **`cctv`** (Backend) — GStreamer RECORD Ingest on Multus (`10.1.137.161:8554`), YOLOv8 inference workers, FastAPI (`/snapshot`, `/video`), and Prometheus exporter (`:9102`).
+2. **`mediamtx`** (Media Server) — Standalone MediaMTX v1.12.2 process on `127.0.0.1`, ingesting annotated RTSP streams and remuxing live HLS fMP4 segments (`/live/`) & WebRTC WHEP (`/whep/`).
+3. **`frontend`** (Web Gateway) — Nginx serving the React Video Wall SPA on NodePort `30080`, reverse-proxying API, snapshots, MJPEG, and HLS.
+4. **`metrics-exporter`** (Sidecar) — InfluxDB pusher scraping Prometheus `:9102`.
 
-1. **Backend** — GStreamer RECORD ingest (UEs), YOLO, FastAPI (`/docs` Swagger), publishes annotated streams into [MediaMTX](https://github.com/bluenviron/mediamtx).
-2. **Frontend** — NeuroRAN-style dashboard that **subscribes** (HLS `/live/{path}/index.m3u8`, WHEP `/whep/{path}`).
-
-UE ingest stays on gst-rtsp-server `:8554` so RTP NTP-64 timestamps are not relayed through MediaMTX (M1 issue). MediaMTX is the **dashboard** pub/sub path only (`rtsp://127.0.0.1:8555/cam_*`).
-
-## Layout
+## Repository Layout
 
 ```
 applications/cctv/
-  client/     publisher.py (UE RTSP RECORD)
-  edge/       analyzer.py, api.py (Swagger), mtx_publish.py, mediamtx.yml
-  frontend/   React dashboard (INA-Infra shell)
-  common/     metrics.py
+  client/     publisher.py (UE RTSP RECORD push), Dockerfile, entrypoint.sh
+  edge/       analyzer.py (GStreamer + YOLO), api.py, state.py, mtx_publish.py, mediamtx.yml, Dockerfile
+  frontend/   React Video Wall SPA (Vite, TypeScript, Nginx), Dockerfile, nginx.conf
+  common/     metrics.py (Prometheus telemetry helpers)
+  data/       Sample video assets (classroom.mp4, traffic.mp4, example.mp4)
+  dashboard/  Grafana dashboard definition & push script (dashboard_push.sh)
 ```
 
 **UE-push model.** The edge runs a `gst-rtsp-server` in **RECORD** mode and the

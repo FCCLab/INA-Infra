@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Physical AI · NeuroRAN</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* NeuroRAN Visual Identity Standard — CSS Design System */
+    :root {
+      --bg0: #070b14;
+      --bg1: #0b1120;
+      --card: rgba(15, 23, 42, 0.75);
+      --card-raised: rgba(22, 34, 60, 0.85);
+      --surface: rgba(255, 255, 255, 0.035);
+      --surface-2: rgba(255, 255, 255, 0.06);
+      --surface-raised: rgba(255, 255, 255, 0.09);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-2: rgba(255, 255, 255, 0.14);
+      --text: #eef2f9;
+      --text-dim: #93a0b8;
+      --text-faint: #5e6b85;
+      --accent: #16E6A0;
+      --accent2: #00C2D4;
+      --accent-glow: rgba(22, 230, 160, 0.25);
+      --accent-orange: #f5a623;
+      --bad: #ff5a6e;
+      --bad-bg: rgba(255, 90, 110, 0.12);
+      --ok: #16e6a0;
+      --ok-bg: rgba(22, 230, 160, 0.12);
+      --warn: #f5a623;
+      --warn-bg: rgba(245, 166, 35, 0.12);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-tier: 0 18px 50px -22px rgba(0, 0, 0, 0.7);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100vh; }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(22, 230, 160, 0.12) 0%, transparent 60%),
+        radial-gradient(1000px 700px at 10% 110%, rgba(0, 194, 212, 0.10) 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+
+    .mono {
+      font-family: 'IBM Plex Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Header & Navigation */
+    header {
+      background: rgba(7, 11, 20, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 38px;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .brand-text h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-text h1 .badge {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(22, 230, 160, 0.12);
+      border: 1px solid rgba(22, 230, 160, 0.3);
+      padding: 2px 7px;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+    }
+
+    .kicker {
+      color: var(--text-dim);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 600;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ext-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      transition: all 0.15s ease;
+    }
+    .ext-link:hover {
+      color: var(--text);
+      border-color: var(--border-2);
+      background: var(--surface-2);
+    }
+    .ext-link.grafana {
+      color: var(--accent);
+      border-color: rgba(22, 230, 160, 0.25);
+      background: rgba(22, 230, 160, 0.06);
+    }
+    .ext-link.grafana:hover {
+      border-color: var(--accent);
+      background: rgba(22, 230, 160, 0.14);
+    }
+
+    /* Container */
+    main {
+      padding: 24px 28px 48px;
+      max-width: 1080px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+
+    /* KPI Summary Strip */
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      box-shadow: 0 4px 20px -8px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
+      transition: border-color 0.15s ease;
+    }
+    .kpi-card:hover {
+      border-color: var(--border-2);
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kpi-value {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Standard Cards */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      box-shadow: var(--shadow-tier);
+      backdrop-filter: blur(12px);
+      position: relative;
+    }
+
+    .card.tier::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 24px;
+      right: 24px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(22, 230, 160, 0.4), transparent);
+    }
+
+    .card-header {
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .card-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-subtitle {
+      color: var(--text-dim);
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    /* Form Controls */
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: rgba(7, 11, 20, 0.7);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+      background: rgba(7, 11, 20, 0.95);
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+
+    /* Buttons */
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: linear-gradient(135deg, rgba(22, 230, 160, 0.16), rgba(0, 194, 212, 0.16));
+      color: var(--accent);
+      border: 1px solid rgba(22, 230, 160, 0.35);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    button:hover:not(:disabled), .btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(22, 230, 160, 0.26), rgba(0, 194, 212, 0.26));
+      border-color: var(--accent);
+      box-shadow: 0 0 12px rgba(22, 230, 160, 0.2);
+    }
+    button:disabled, .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button.btn-secondary {
+      background: var(--surface);
+      color: var(--text-dim);
+      border-color: var(--border);
+    }
+    button.btn-secondary:hover:not(:disabled) {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border-2);
+      box-shadow: none;
+    }
+
+    button.danger {
+      background: var(--bad-bg);
+      color: var(--bad);
+      border-color: rgba(255, 90, 110, 0.35);
+    }
+    button.danger:hover:not(:disabled) {
+      background: rgba(255, 90, 110, 0.22);
+      border-color: var(--bad);
+      box-shadow: 0 0 12px rgba(255, 90, 110, 0.2);
+    }
+
+    /* Status Pills & Dots */
+    .pill {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      background: var(--surface);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pill.ok {
+      color: var(--ok);
+      border-color: rgba(22, 230, 160, 0.35);
+      background: var(--ok-bg);
+    }
+    .pill.bad {
+      color: var(--bad);
+      border-color: rgba(255, 90, 110, 0.35);
+      background: var(--bad-bg);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      background: currentColor;
+    }
+    .dot.pulse {
+      animation: pulse-dot 1.8s infinite ease-in-out;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.6; }
+    }
+
+    /* Output & Terminal Area */
+    pre, .code-box {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12.5px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(5, 8, 15, 0.85);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      color: #cbd5e1;
+      min-height: 80px;
+      max-height: 480px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .prompt-presets {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .preset-chip {
+      font-size: 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 3px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .preset-chip:hover {
+      color: var(--accent);
+      border-color: rgba(22, 230, 160, 0.4);
+      background: var(--surface-2);
+    }
+
+    /* Messages & Alerts */
+    .msg-box {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      display: none;
+    }
+    .msg-box.show { display: block; }
+    .msg-box.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid rgba(22, 230, 160, 0.3); }
+    .msg-box.err { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255, 90, 110, 0.3); }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <!-- NeuroRAN Fixed Shell Header -->
+  <header>
+    <div class="brand-wrap">
+      <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="NeuroRAN">
+        <defs>
+          <linearGradient id="nr-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#16E6A0" />
+            <stop offset="100%" stop-color="#00C2D4" />
+          </linearGradient>
+        </defs>
+        <g fill="none" stroke="url(#nr-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z" />
+          <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40" />
+        </g>
+        <g fill="url(#nr-grad)">
+          <circle cx="32" cy="28" r="4" />
+          <circle cx="14" cy="20" r="3" />
+          <circle cx="50" cy="20" r="3" />
+          <circle cx="32" cy="10" r="3" />
+          <circle cx="14" cy="40" r="3" />
+          <circle cx="50" cy="40" r="3" />
+          <circle cx="32" cy="50" r="3" />
+        </g>
+      </svg>
+      <div class="brand-text">
+        <div class="kicker">Slice 2 · Edge Server (A40 GPU)</div>
+        <h1>Physical AI Console <span class="badge">Cosmos3</span></h1>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="row" id="header-pills">
+        <span class="pill"><span class="dot pulse"></span> connecting…</span>
+      </div>
+      <a class="ext-link" href="/api/docs" target="_blank" rel="noreferrer" title="Swagger REST API Reference">Swagger API</a>
+      <a class="ext-link grafana" href="http://10.1.137.105:3000/d/ina-physical-ai/physical-ai-metrics?orgId=1&refresh=5s" target="_blank" rel="noreferrer" title="Open Grafana Physical AI Metrics">
+        <span>Grafana</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <!-- KPI Summary Strip -->
+    <div class="kpi-strip">
+      <div class="kpi-card">
+        <div class="kpi-label">HF Secret Token <span class="dot" id="kpi-hf-dot"></span></div>
+        <div class="kpi-value" id="kpi-hf">Checking…</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">vLLM Inference Engine <span class="dot" id="kpi-vllm-dot"></span></div>
+        <div class="kpi-value" id="kpi-vllm">Checking…</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active Model</div>
+        <div class="kpi-value" id="kpi-model" style="font-size: 13px;">nvidia/Cosmos3-Nano</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Cluster & Namespace</div>
+        <div class="kpi-value mono" id="kpi-ns" style="font-size: 13px;">ina-infra · edge</div>
+      </div>
+    </div>
+
+    <!-- Hugging Face Token Configuration -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Hugging Face Model Access Token
+          </h2>
+          <p class="card-subtitle">
+            Cosmos3-Nano requires authenticated license acceptance on <a href="https://huggingface.co/nvidia/Cosmos3-Nano" target="_blank" rel="noreferrer">huggingface.co/nvidia/Cosmos3-Nano</a>. Token is saved securely into Secret <code>ina-hf-token</code>.
+          </p>
+        </div>
+      </div>
+
+      <label>User Access Token (Read)</label>
+      <div class="row">
+        <input id="token" type="password" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" style="flex: 1 1 280px;" />
+        <button type="button" class="btn-secondary" id="toggle-token">Show</button>
+        <button type="button" id="save-token">Save Token & Start Engine</button>
+        <button type="button" class="danger" id="remove-token">Remove</button>
+      </div>
+      <div class="msg-box" id="token-msg"></div>
+    </section>
+
+    <!-- Interactive Inference & Reasoning Studio -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Physical AI Prompt & Reasoning Studio
+          </h2>
+          <p class="card-subtitle">Execute multimodal spatial reasoning and scene synthesis queries against the live vLLM server on port <code>8000</code>.</p>
+        </div>
+        <div class="row">
+          <label style="margin:0; text-transform:none;">Max Tokens:</label>
+          <select id="max-tokens" style="width: auto; padding: 4px 8px; font-size: 12px;">
+            <option value="128">128 tokens</option>
+            <option value="256" selected>256 tokens</option>
+            <option value="512">512 tokens</option>
+            <option value="1024">1024 tokens</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Prompt / Scenario Input</label>
+      <textarea id="prompt">Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.</textarea>
+      
+      <div class="prompt-presets">
+        <span style="font-size: 11px; color: var(--text-faint); margin-right: 4px; align-self: center;">Quick Presets:</span>
+        <button type="button" class="preset-chip" data-p="Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.">Robot Navigation</button>
+        <button type="button" class="preset-chip" data-p="Describe the spatial relationships of all objects in this scene for a robotic manipulation arm.">Spatial Scene Map</button>
+        <button type="button" class="preset-chip" data-p="Detect any safety rule violations or unauthorized personnel in this high-voltage substation zone.">Industrial Safety Check</button>
+      </div>
+
+      <div class="row" style="margin-top: 14px;">
+        <button type="button" id="send-chat" style="padding: 9px 18px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Run Inference
+        </button>
+        <button type="button" class="btn-secondary" id="clear-out">Clear Output</button>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label>Reasoning Output</label>
+        <pre id="output-box">vLLM output will appear here once inference is requested…</pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function req(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      return body;
+    }
+
+    function showMsg(boxId, text, isError = false) {
+      const el = $(boxId);
+      el.className = `msg-box show ${isError ? 'err' : 'ok'}`;
+      el.textContent = text;
+      setTimeout(() => { el.className = 'msg-box'; }, 6000);
+    }
+
+    async function refreshStatus() {
+      try {
+        const s = await req("/api/status");
+        
+        // Header Pills
+        $("header-pills").innerHTML =
+          `<span class="pill ${s.configured ? "ok" : "bad"}"><span class="dot ${s.configured ? "pulse" : ""}"></span>${s.configured ? "HF Token Active" : "HF Token Missing"}</span>` +
+          `<span class="pill ${s.vllm_ready ? "ok" : "bad"}"><span class="dot ${s.vllm_ready ? "pulse" : ""}"></span>${s.vllm_ready ? "vLLM Ready" : "vLLM Engine Offline"}</span>` +
+          `<span class="pill mono">${s.namespace}</span>`;
+
+        // KPI Strip
+        $("kpi-hf").textContent = s.configured ? "Saved in Secret" : "Missing / Not Set";
+        $("kpi-hf-dot").className = `dot ${s.configured ? "ok pulse" : "bad"}`;
+        $("kpi-vllm").textContent = s.vllm_ready ? "Online (200 OK)" : "Waiting for Token / Start";
+        $("kpi-vllm-dot").className = `dot ${s.vllm_ready ? "ok pulse" : "bad"}`;
+        if (s.model) $("kpi-model").textContent = s.model;
+        $("kpi-ns").textContent = `${s.namespace} · edge (gpu-a40)`;
+      } catch (e) {
+        $("header-pills").innerHTML = `<span class="pill bad"><span class="dot"></span> Connection Error</span>`;
+      }
+    }
+
+    // Token toggle
+    $("toggle-token").onclick = () => {
+      const input = $("token");
+      input.type = input.type === "password" ? "text" : "password";
+      $("toggle-token").textContent = input.type === "password" ? "Show" : "Hide";
+    };
+
+    // Save token
+    $("save-token").onclick = async () => {
+      const tok = $("token").value.trim();
+      if (!tok) {
+        showMsg("token-msg", "Please enter a valid Hugging Face access token.", true);
+        return;
+      }
+      $("save-token").disabled = true;
+      try {
+        const res = await req("/api/hf-token", { method: "PUT", body: JSON.stringify({ token: tok }) });
+        showMsg("token-msg", res.message || "Token saved successfully. vLLM engine is initializing…");
+        $("token").value = "";
+        await refreshStatus();
+      } catch (e) {
+        showMsg("token-msg", e.message, true);
+      } finally {
+        $("save-token").disabled = false;
+      }
+    };
+
+    // Remove token
+    $("remove-token").onclick = async () => {
+      if (!confirm("Remove the stored Hugging Face token secret?")) return;
+      $("remove-token").disabled = true;
+      try {
+        const res = await req("/api/hf-token", { method: "DELETE" });
+        showMsg("token-msg", res.message || "Token secret removed.");
+        await refreshStatus();
+      } catch (e) {
+        showMsg("token-msg", e.message, true);
+      } finally {
+        $("remove-token").disabled = false;
+      }
+    };
+
+    // Preset prompts
+    document.querySelectorAll(".preset-chip").forEach((btn) => {
+      btn.onclick = () => {
+        $("prompt").value = btn.getAttribute("data-p");
+      };
+    });
+
+    // Chat Inference
+    $("send-chat").onclick = async () => {
+      const promptText = $("prompt").value.trim();
+      if (!promptText) return;
+      
+      const maxTokens = parseInt($("max-tokens").value, 10) || 256;
+      $("output-box").textContent = "Executing Cosmos3 inference on GPU worker… please wait…";
+      $("send-chat").disabled = true;
+
+      const t0 = performance.now();
+      try {
+        const res = await req("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({ prompt: promptText, max_tokens: maxTokens })
+        });
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+        $("output-box").textContent = `[Inference completed in ${elapsed}s]\n\n${res.text || JSON.stringify(res, null, 2)}`;
+      } catch (e) {
+        $("output-box").textContent = `[Inference Error]: ${e.message}\n\nEnsure Hugging Face token is active and vLLM container has finished loading model weights.`;
+      } finally {
+        $("send-chat").disabled = false;
+      }
+    };
+
+    $("clear-out").onclick = () => {
+      $("output-box").textContent = "vLLM output will appear here once inference is requested…";
+    };
+
+    refreshStatus();
+    setInterval(refreshStatus, 6000);
+  </script>
+</body>
+</html>

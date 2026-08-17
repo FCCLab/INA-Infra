@@ -143,7 +143,7 @@ def clients() -> Dict[str, List[ClientOut]]:
     return {"clients": [ClientOut.model_validate(c) for c in snapshot_clients()]}
 
 
-@app.get("/snapshot/{client_id}", tags=["Media"], summary="JPEG snapshot")
+@app.api_route("/snapshot/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="JPEG snapshot")
 def snapshot(client_id: str) -> Response:
     jpeg = None
     with GLOBAL_LOCK:
@@ -157,7 +157,7 @@ def snapshot(client_id: str) -> Response:
     return Response(content=jpeg, media_type="image/jpeg")
 
 
-@app.get("/video/{client_id}", tags=["Media"], summary="MJPEG fallback subscribe")
+@app.api_route("/video/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="MJPEG fallback subscribe")
 def mjpeg(client_id: str) -> StreamingResponse:
     def gen():
         last = None

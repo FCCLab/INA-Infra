@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT Control · NeuroRAN</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* NeuroRAN Visual Identity Standard — CSS Design System */
+    :root {
+      --bg0: #070b14;
+      --bg1: #0b1120;
+      --card: rgba(15, 23, 42, 0.75);
+      --card-raised: rgba(22, 34, 60, 0.85);
+      --surface: rgba(255, 255, 255, 0.035);
+      --surface-2: rgba(255, 255, 255, 0.06);
+      --surface-raised: rgba(255, 255, 255, 0.09);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-2: rgba(255, 255, 255, 0.14);
+      --text: #eef2f9;
+      --text-dim: #93a0b8;
+      --text-faint: #5e6b85;
+      --accent: #16E6A0;
+      --accent2: #00C2D4;
+      --accent-glow: rgba(22, 230, 160, 0.25);
+      --accent-orange: #f5a623;
+      --bad: #ff5a6e;
+      --bad-bg: rgba(255, 90, 110, 0.12);
+      --ok: #16e6a0;
+      --ok-bg: rgba(22, 230, 160, 0.12);
+      --warn: #f5a623;
+      --warn-bg: rgba(245, 166, 35, 0.12);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-tier: 0 18px 50px -22px rgba(0, 0, 0, 0.7);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100vh; }
+
+    body {
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(22, 230, 160, 0.12) 0%, transparent 60%),
+        radial-gradient(1000px 700px at 10% 110%, rgba(0, 194, 212, 0.10) 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+
+    .mono {
+      font-family: 'IBM Plex Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Header & Navigation */
+    header {
+      background: rgba(7, 11, 20, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 38px;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .brand-text h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-text h1 .badge {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(22, 230, 160, 0.12);
+      border: 1px solid rgba(22, 230, 160, 0.3);
+      padding: 2px 7px;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+    }
+
+    .kicker {
+      color: var(--text-dim);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 600;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ext-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      transition: all 0.15s ease;
+    }
+    .ext-link:hover {
+      color: var(--text);
+      border-color: var(--border-2);
+      background: var(--surface-2);
+    }
+    .ext-link.grafana {
+      color: var(--accent);
+      border-color: rgba(22, 230, 160, 0.25);
+      background: rgba(22, 230, 160, 0.06);
+    }
+    .ext-link.grafana:hover {
+      border-color: var(--accent);
+      background: rgba(22, 230, 160, 0.14);
+    }
+
+    /* Container */
+    main {
+      padding: 24px 28px 48px;
+      max-width: 1080px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+
+    /* KPI Summary Strip */
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      box-shadow: 0 4px 20px -8px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
+      transition: border-color 0.15s ease;
+    }
+    .kpi-card:hover {
+      border-color: var(--border-2);
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kpi-value {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Standard Cards */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      box-shadow: var(--shadow-tier);
+      backdrop-filter: blur(12px);
+      position: relative;
+    }
+
+    .card.tier::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 24px;
+      right: 24px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(22, 230, 160, 0.4), transparent);
+    }
+
+    .card-header {
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .card-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-subtitle {
+      color: var(--text-dim);
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    /* Form Controls */
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: rgba(7, 11, 20, 0.7);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+      background: rgba(7, 11, 20, 0.95);
+    }
+
+    textarea {
+      min-height: 72px;
+      resize: vertical;
+    }
+
+    /* Buttons */
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: linear-gradient(135deg, rgba(22, 230, 160, 0.16), rgba(0, 194, 212, 0.16));
+      color: var(--accent);
+      border: 1px solid rgba(22, 230, 160, 0.35);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    button:hover:not(:disabled), .btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(22, 230, 160, 0.26), rgba(0, 194, 212, 0.26));
+      border-color: var(--accent);
+      box-shadow: 0 0 12px rgba(22, 230, 160, 0.2);
+    }
+    button:disabled, .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button.btn-secondary {
+      background: var(--surface);
+      color: var(--text-dim);
+      border-color: var(--border);
+    }
+    button.btn-secondary:hover:not(:disabled) {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border-2);
+      box-shadow: none;
+    }
+
+    /* Status Pills & Dots */
+    .pill {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      background: var(--surface);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pill.ok {
+      color: var(--ok);
+      border-color: rgba(22, 230, 160, 0.35);
+      background: var(--ok-bg);
+    }
+    .pill.bad {
+      color: var(--bad);
+      border-color: rgba(255, 90, 110, 0.35);
+      background: var(--bad-bg);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      background: currentColor;
+    }
+    .dot.pulse {
+      animation: pulse-dot 1.8s infinite ease-in-out;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.6; }
+    }
+
+    /* MQTT Broker URL Box */
+    .broker-banner {
+      background: rgba(5, 8, 15, 0.85);
+      border: 1px solid rgba(22, 230, 160, 0.25);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .broker-url {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Output & Terminal Area */
+    pre, .code-box {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12.5px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(5, 8, 15, 0.85);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      color: #cbd5e1;
+      min-height: 80px;
+      max-height: 380px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .payload-presets {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .preset-chip {
+      font-size: 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 2px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .preset-chip:hover {
+      color: var(--accent);
+      border-color: rgba(22, 230, 160, 0.4);
+      background: var(--surface-2);
+    }
+
+    /* Messages & Alerts */
+    .msg-box {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      display: none;
+    }
+    .msg-box.show { display: block; }
+    .msg-box.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid rgba(22, 230, 160, 0.3); }
+    .msg-box.err { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255, 90, 110, 0.3); }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <!-- NeuroRAN Fixed Shell Header -->
+  <header>
+    <div class="brand-wrap">
+      <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="NeuroRAN">
+        <defs>
+          <linearGradient id="nr-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#16E6A0" />
+            <stop offset="100%" stop-color="#00C2D4" />
+          </linearGradient>
+        </defs>
+        <g fill="none" stroke="url(#nr-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z" />
+          <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40" />
+        </g>
+        <g fill="url(#nr-grad)">
+          <circle cx="32" cy="28" r="4" />
+          <circle cx="14" cy="20" r="3" />
+          <circle cx="50" cy="20" r="3" />
+          <circle cx="32" cy="10" r="3" />
+          <circle cx="14" cy="40" r="3" />
+          <circle cx="50" cy="40" r="3" />
+          <circle cx="32" cy="50" r="3" />
+        </g>
+      </svg>
+      <div class="brand-text">
+        <div class="kicker">Slice 4 · Massive IoT & Sensor Gateway</div>
+        <h1>IoT Control Console <span class="badge">MQTT Broker</span></h1>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="row" id="header-pills">
+        <span class="pill"><span class="dot pulse"></span> connecting…</span>
+      </div>
+      <a class="ext-link" href="/api/docs" target="_blank" rel="noreferrer" title="Swagger REST API Reference">Swagger API</a>
+      <a class="ext-link grafana" href="http://10.1.137.105:3000/d/ina-iot-metrics/iot-metrics?orgId=1&refresh=5s" target="_blank" rel="noreferrer" title="Open Grafana IoT Metrics">
+        <span>Grafana</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <!-- KPI Summary Strip -->
+    <div class="kpi-strip">
+      <div class="kpi-card">
+        <div class="kpi-label">Broker Status <span class="dot" id="kpi-broker-dot"></span></div>
+        <div class="kpi-value" id="kpi-broker">Checking…</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">OTA Downlink Period</div>
+        <div class="kpi-value mono" id="kpi-ota">Fast 300s / Slow 3600s</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Payload & QoS</div>
+        <div class="kpi-value mono" id="kpi-qos">256 B · QoS 0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">N6 Multus Data Plane</div>
+        <div class="kpi-value mono" id="kpi-n6" style="font-size: 13px;">--</div>
+      </div>
+    </div>
+
+    <!-- Live MQTT Endpoint Banner -->
+    <div class="broker-banner">
+      <div class="broker-url">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        <span id="mqtt-label">Loading MQTT broker address…</span>
+      </div>
+      <div class="row">
+        <button type="button" class="btn-secondary" id="copy-mqtt" style="padding: 4px 10px; font-size: 11px;">Copy Broker URL</button>
+        <button type="button" class="btn-secondary" id="copy-sub" style="padding: 4px 10px; font-size: 11px;">Copy mosquitto_sub</button>
+      </div>
+    </div>
+
+    <!-- Broker & OTA Timing Configuration -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            MQTT Broker & OTA Downlink Scheduling
+          </h2>
+          <p class="card-subtitle">Tune sensor reporting frequencies, downlink payload burst sizes, and MQTT delivery QoS parameters.</p>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div><label>DL_FAST_PERIOD_S</label><input id="DL_FAST_PERIOD_S" placeholder="300" /></div>
+        <div><label>DL_SLOW_PERIOD_S</label><input id="DL_SLOW_PERIOD_S" placeholder="3600" /></div>
+        <div><label>DL_PAYLOAD_BYTES</label><input id="DL_PAYLOAD_BYTES" placeholder="256" /></div>
+        <div><label>MQTT_QOS</label><input id="MQTT_QOS" placeholder="0" /></div>
+      </div>
+
+      <div class="row" style="margin-top: 16px;">
+        <button type="button" id="save-config">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          Apply Config & Roll Pod
+        </button>
+        <button type="button" class="btn-secondary" id="restart-broker">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Restart Broker Process
+        </button>
+      </div>
+
+      <div class="msg-box" id="cfg-msg"></div>
+    </section>
+
+    <!-- Downlink Message Publisher Test Studio -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Publish Downlink Message (Test Harness)
+          </h2>
+          <p class="card-subtitle">Dispatch test payloads directly to connected IoT UEs and field edge sensors through the internal broker.</p>
+        </div>
+        <div class="row">
+          <label style="margin:0; text-transform:none;">QoS Level:</label>
+          <select id="pub-qos" style="width: auto; padding: 4px 8px; font-size: 12px;">
+            <option value="0" selected>QoS 0 (At most once)</option>
+            <option value="1">QoS 1 (At least once)</option>
+            <option value="2">QoS 2 (Exactly once)</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Destination Topic</label>
+      <input id="topic" value="slice_d/dl/test" style="margin-bottom: 10px;" />
+
+      <label>Message Payload (JSON / Text)</label>
+      <textarea id="payload">{"command": "poll_telemetry", "interval_s": 5, "timestamp": 0}</textarea>
+
+      <div class="payload-presets">
+        <span style="font-size: 11px; color: var(--text-faint); margin-right: 4px; align-self: center;">Payload Presets:</span>
+        <button type="button" class="preset-chip" data-t="slice_d/dl/telemetry" data-p='{"command": "poll_telemetry", "interval_s": 5}'>Telemetry Poll</button>
+        <button type="button" class="preset-chip" data-t="slice_d/dl/ota" data-p='{"command": "ota_update", "version": "v1.4.2", "firmware_url": "http://10.1.137.164:8080/firmware.bin"}'>OTA Firmware Trigger</button>
+        <button type="button" class="preset-chip" data-t="slice_d/dl/alarm" data-p='{"alarm": "critical_threshold", "sensor_id": "temp_01", "action": "shutoff"}'>Sensor Alarm</button>
+      </div>
+
+      <div class="row" style="margin-top: 14px;">
+        <button type="button" id="publish-btn" style="padding: 9px 18px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Publish Message
+        </button>
+      </div>
+
+      <div class="msg-box" id="pub-msg"></div>
+    </section>
+
+    <!-- Live Telemetry & Metrics Scraper -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Live Sensor Telemetry & MQTT Prometheus Metrics
+          </h2>
+          <p class="card-subtitle">Real-time statistics scraped from the IoT server on <code>127.0.0.1:9105/metrics</code>.</p>
+        </div>
+        <button type="button" class="btn-secondary" id="manual-refresh" style="padding: 4px 10px; font-size: 11px;">Refresh</button>
+      </div>
+
+      <pre id="metrics-box">Connecting to local metrics endpoint…</pre>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const KEYS = ["DL_FAST_PERIOD_S", "DL_SLOW_PERIOD_S", "DL_PAYLOAD_BYTES", "MQTT_QOS"];
+    let currentMqtt = "";
+
+    async function req(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      return body;
+    }
+
+    function showMsg(boxId, text, isError = false) {
+      const el = $(boxId);
+      el.className = `msg-box show ${isError ? 'err' : 'ok'}`;
+      el.textContent = text;
+      setTimeout(() => { el.className = 'msg-box'; }, 6000);
+    }
+
+    async function refreshStatus() {
+      try {
+        const s = await req("/api/status");
+        currentMqtt = s.mqtt || "";
+
+        // Header Pills
+        $("header-pills").innerHTML =
+          `<span class="pill ${s.metrics_live ? "ok" : "bad"}"><span class="dot ${s.metrics_live ? "pulse" : ""}"></span>${s.metrics_live ? "Broker Live" : "Broker Offline"}</span>` +
+          `<span class="pill mono">${s.namespace}</span>` +
+          (s.n6_ip ? `<span class="pill mono">N6 ${s.n6_ip}</span>` : "");
+
+        // KPI Strip
+        $("kpi-broker").textContent = s.metrics_live ? "Active · Port 1883" : "Initializing…";
+        $("kpi-broker-dot").className = `dot ${s.metrics_live ? "ok pulse" : "bad"}`;
+
+        if (s.config) {
+          KEYS.forEach((k) => {
+            if (s.config[k] != null && !document.activeElement.id.includes(k)) {
+              $(k).value = s.config[k];
+            }
+          });
+          $("kpi-ota").textContent = `Fast ${s.config.DL_FAST_PERIOD_S || "300"}s / Slow ${s.config.DL_SLOW_PERIOD_S || "3600"}s`;
+          $("kpi-qos").textContent = `${s.config.DL_PAYLOAD_BYTES || "256"} B · QoS ${s.config.MQTT_QOS || "0"}`;
+        }
+
+        if (s.n6_ip) {
+          $("kpi-n6").textContent = `${s.n6_ip}:1883`;
+        }
+
+        // MQTT Banner
+        $("mqtt-label").textContent = s.mqtt ? `MQTT Broker: ${s.mqtt}` : "MQTT Broker Endpoint: Awaiting Multus N6 allocation…";
+
+        // Metrics display
+        const m = s.metrics || {};
+        const entries = Object.entries(m);
+        if (entries.length > 0) {
+          const lines = entries.map(([k, v]) => `${k.padEnd(45)} ${v}`);
+          $("metrics-box").textContent = lines.join("\n");
+        } else {
+          $("metrics-box").textContent = "No active Prometheus metrics returned from 127.0.0.1:9105/metrics yet.";
+        }
+      } catch (e) {
+        $("header-pills").innerHTML = `<span class="pill bad"><span class="dot"></span> Connection Error</span>`;
+      }
+    }
+
+    // Copy actions
+    $("copy-mqtt").onclick = () => {
+      if (!currentMqtt) return;
+      navigator.clipboard.writeText(currentMqtt);
+      showMsg("cfg-msg", `Copied Broker URL: ${currentMqtt}`);
+    };
+
+    $("copy-sub").onclick = () => {
+      if (!currentMqtt) return;
+      const host = currentMqtt.replace("mqtt://", "").split(":")[0];
+      const cmd = `mosquitto_sub -h ${host} -p 1883 -t "slice_d/#" -v`;
+      navigator.clipboard.writeText(cmd);
+      showMsg("cfg-msg", `Copied subscriber command: ${cmd}`);
+    };
+
+    // Save configuration
+    $("save-config").onclick = async () => {
+      $("save-config").disabled = true;
+      try {
+        const values = {};
+        KEYS.forEach((k) => { if ($(k).value) values[k] = $(k).value.trim(); });
+        const res = await req("/api/config", { method: "POST", body: JSON.stringify({ values }) });
+        showMsg("cfg-msg", res.message || "Broker configuration saved. Rolling deployment…");
+        await refreshStatus();
+      } catch (e) {
+        showMsg("cfg-msg", e.message, true);
+      } finally {
+        $("save-config").disabled = false;
+      }
+    };
+
+    // Restart broker
+    $("restart-broker").onclick = async () => {
+      if (!confirm("Restart the IoT MQTT broker process?")) return;
+      $("restart-broker").disabled = true;
+      try {
+        const res = await req("/api/restart", { method: "POST", body: "{}" });
+        showMsg("cfg-msg", res.message || "Restart trigger issued.");
+        await refreshStatus();
+      } catch (e) {
+        showMsg("cfg-msg", e.message, true);
+      } finally {
+        $("restart-broker").disabled = false;
+      }
+    };
+
+    // Payload Presets
+    document.querySelectorAll(".preset-chip").forEach((btn) => {
+      btn.onclick = () => {
+        $("topic").value = btn.getAttribute("data-t");
+        $("payload").value = btn.getAttribute("data-p");
+      };
+    });
+
+    // Publish Message
+    $("publish-btn").onclick = async () => {
+      const topic = $("topic").value.trim();
+      const payload = $("payload").value.trim();
+      const qos = parseInt($("pub-qos").value, 10) || 0;
+      if (!topic) {
+        showMsg("pub-msg", "Please specify a destination topic.", true);
+        return;
+      }
+
+      $("publish-btn").disabled = true;
+      try {
+        const res = await req("/api/mqtt/publish", {
+          method: "POST",
+          body: JSON.stringify({ topic, payload, qos })
+        });
+        showMsg("pub-msg", `Message successfully dispatched to topic: ${topic}`);
+      } catch (e) {
+        showMsg("pub-msg", `Publish failed: ${e.message}`, true);
+      } finally {
+        $("publish-btn").disabled = false;
+      }
+    };
+
+    $("manual-refresh").onclick = refreshStatus;
+
+    refreshStatus();
+    setInterval(refreshStatus, 5000);
+  </script>
+</body>
+</html>

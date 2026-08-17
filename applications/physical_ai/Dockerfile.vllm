@@ -1,5 +1,5 @@
-# Cosmos3 Nano Reasoner (vLLM) — build on aarch64 (gh82 / GH200).
-# Matches setup.sh: vllm==0.21.0 + cu130 + vllm-cosmos3.
+# Cosmos3 Nano Reasoner (vLLM) — linux/amd64 (edge gpu-a40) and linux/arm64 (GH200).
+# Same CUDA 12.8 + vllm 0.19.1 on both arches (aarch64 vllm>=0.20 links cudart 13).
 FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \

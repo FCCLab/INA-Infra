@@ -2,12 +2,12 @@
 # Start Cosmos3 Nano Reasoner (OpenAI-compatible) via native vLLM.
 set -euo pipefail
 
-HOST_PORT="${HOST_PORT:-8000}"
+HOST_PORT="${HOST_PORT:-${PORT:-8000}}"
 GPU_DEVICE="${GPU_DEVICE:-0}"
 MEDIA_PATH="${MEDIA_PATH:-/}"
-MODEL="${MODEL:-nvidia/Cosmos3-Nano}"
+MODEL="${MODEL:-${MODEL_NAME:-nvidia/Cosmos3-Nano}}"
 HF_HOME="${HF_HOME:-/models}"
-# gh82 often has other CUDA workloads (e.g. cuphycontroller); default 0.9 OOMs.
+# Conservative default: GH200 often shares the GPU; A40 (48G) can raise this via env.
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.6}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
 

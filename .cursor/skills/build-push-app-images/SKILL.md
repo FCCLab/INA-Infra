@@ -30,8 +30,15 @@ Build/push progress:
 |---|---|---|---|
 | CCTV | `applications/cctv/` | `./build_push.sh` | `slicea-analyzer`, `slicea-publisher` |
 | IoT | `applications/iot/` | `./build_push.sh` | `sliced-edge`, `sliced-client` |
-| Physical AI client | `applications/physical_ai/` | `./build-push-aiperf.sh` | `cosmo3-aiperf` (amd64) |
-| Physical AI server | `applications/physical_ai/` | `./build-push-vllm-gh82.sh` | `cosmo3-vllm` (**arm64**, GH200) |
+| Physical AI dashboard | `applications/physical_ai/` | `./build-push-dashboard.sh` | `cosmo3-dashboard` (amd64 sidecar UI) |
+| OTT / IoT control dashboard | `applications/control_dashboard/` | `./build-push.sh` | `ina-control-dashboard` (amd64 sidecar UI) |
+| Physical AI server | `applications/physical_ai/` | `./build-push-vllm.sh` | `cosmo3-vllm` (**amd64 A40 + arm64 GH200**, multi-arch tag) |
+
+```bash
+cd /home/fcp/INA-Infra/applications/physical_ai
+IMAGE_TAG=nws-v0.7-amd64 ./build-push-aiperf.sh
+IMAGE_TAG=nws-v0.7 ./build-push-vllm.sh   # local amd64 + gpu-gh82 arm64 + manifest
+```
 
 ```bash
 cd /home/fcp/INA-Infra/applications/cctv
@@ -58,6 +65,6 @@ Do not hand-edit `repos/*/namespaces/...` YAML; regenerate via the existing GitO
 ## Conventions
 
 - `set -euo pipefail` in any new build script
-- Tag suffix **`-amd64`** for x86_64 images, **`-arm64`** only for GH200/vLLM
+- Tag suffix **`-amd64`** for x86_64 images, **`-arm64`** (or `-arm64-cu128`) for GH200/vLLM; Physical AI also publishes a multi-arch `cosmo3-vllm:nws-vX.Y`
 - `--platform linux/amd64` even on an amd64 host
 - Verify: `curl -s http://10.1.132.30:5000/v2/<name>/tags/list`
