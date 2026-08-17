@@ -3,11 +3,11 @@ import Hls from "hls.js";
 import Card from "../components/ui/Card";
 import KpiStrip from "../components/ui/KpiStrip";
 import StatusDot from "../components/ui/StatusDot";
-import { fetchClients, type CctvClient } from "../lib/api";
+import { fetchClients, formatCameraName, type CctvClient } from "../lib/api";
 
 function CameraTile({ cam }: { cam: CctvClient }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [streamMode, setStreamMode] = useState<"mjpeg" | "hls">("mjpeg");
+  const [streamMode, setStreamMode] = useState<"mjpeg" | "hls">("hls");
   const [hlsPlaying, setHlsPlaying] = useState(false);
   const [timeStr, setTimeStr] = useState("");
 
@@ -77,7 +77,7 @@ function CameraTile({ cam }: { cam: CctvClient }) {
       <div className="cam-card-topbar">
         <div className="cam-meta-left">
           <StatusDot state={cam.active ? "ok" : "warn"} />
-          <span className="cam-title">{cam.name || cam.id}</span>
+          <span className="cam-title">{formatCameraName(cam.id, cam.name)}</span>
           <span className="cam-id-pill">{cam.id}</span>
         </div>
         <div className="cam-meta-right">
@@ -86,12 +86,12 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           </span>
           <button
             type="button"
-            className={`cam-badge ${streamMode === "mjpeg" ? "cam-badge-live" : "cam-badge-idle"}`}
+            className={`cam-badge ${streamMode === "hls" ? "cam-badge-live" : "cam-badge-idle"}`}
             style={{ cursor: "pointer", border: "none" }}
-            onClick={() => setStreamMode((prev) => (prev === "mjpeg" ? "hls" : "mjpeg"))}
-            title="Click to toggle between Low-Latency MJPEG and HLS Stream"
+            onClick={() => setStreamMode((prev) => (prev === "hls" ? "mjpeg" : "hls"))}
+            title="Click to toggle between MediaMTX Pub/Sub (HLS) and Direct MJPEG"
           >
-            {streamMode === "mjpeg" ? "MJPEG (Live)" : "HLS Stream"}
+            {streamMode === "hls" ? "MediaMTX (HLS)" : "MJPEG (Direct)"}
           </button>
         </div>
       </div>
@@ -130,6 +130,19 @@ function CameraTile({ cam }: { cam: CctvClient }) {
         <div className="cam-hud-overlay">
           <div className="cam-hud-top">
             {timeStr && <span className="cam-hud-tag">{timeStr}</span>}
+            {cam.active && (
+              <>
+                <span className="cam-hud-tag" title="Network Transit Delay">
+                  Net {cam.net_delay_ms.toFixed(1)}ms
+                </span>
+                <span className="cam-hud-tag" title="YOLO Inference Latency">
+                  Infer {cam.yolo_delay_ms.toFixed(1)}ms
+                </span>
+                <span className="cam-hud-tag" title="Total End-to-End Latency">
+                  E2E {cam.e2e_delay_ms.toFixed(1)}ms
+                </span>
+              </>
+            )}
           </div>
           <div className="cam-hud-bottom">
             <div className="cam-detections-list">
@@ -140,60 +153,50 @@ function CameraTile({ cam }: { cam: CctvClient }) {
               ))}
             </div>
             {cam.active && (
-              <span className="cam-hud-tag">
-                YOLO {cam.yolo_delay_ms.toFixed(1)}ms
+              <span className="cam-hud-tag" style={{ background: "rgba(22, 230, 160, 0.25)", borderColor: "var(--accent)" }}>
+                Obj: {cam.detections_count}
               </span>
             )}
           </div>
         </div>
       </div>
 
-      <div className="cam-hud">
-        <div className="cam-hud-stat">
-          <span className="cam-hud-stat-label">Inference</span>
-          <span className="cam-hud-stat-val accent">{cam.yolo_delay_ms.toFixed(1)} <small>ms</small></span>
+      <div className="cam-card-foot">
+        <div className="cam-foot-stats">
+          <span className="cam-mini-stat" title="Network Transit Delay">
+            <span className="lbl">Net</span> <strong>{cam.net_delay_ms.toFixed(1)}ms</strong>
+          </span>
+          <span className="cam-mini-stat" title="YOLO Inference Latency">
+            <span className="lbl">Infer</span> <strong>{cam.yolo_delay_ms.toFixed(1)}ms</strong>
+          </span>
+          <span className="cam-mini-stat" title="Total End-to-End Delay">
+            <span className="lbl">E2E</span> <strong>{cam.e2e_delay_ms.toFixed(1)}ms</strong>
+          </span>
+          <span className="cam-mini-stat" title="Detected Objects Count">
+            <span className="lbl">Obj</span> <strong>{cam.detections_count}</strong>
+          </span>
         </div>
-        <div className="cam-hud-stat">
-          <span className="cam-hud-stat-label">E2E Delay</span>
-          <span className="cam-hud-stat-val">{cam.e2e_delay_ms.toFixed(1)} <small>ms</small></span>
-        </div>
-        <div className="cam-hud-stat">
-          <span className="cam-hud-stat-label">Net Delay</span>
-          <span className="cam-hud-stat-val">{cam.net_delay_ms.toFixed(1)} <small>ms</small></span>
-        </div>
-        <div className="cam-hud-stat">
-          <span className="cam-hud-stat-label">Objects</span>
-          <span className="cam-hud-stat-val accent">{cam.detections_count}</span>
-        </div>
-      </div>
 
-      <div className="cam-foot-actions">
-        <a
-          href={cam.snapshot_path}
-          target="_blank"
-          rel="noreferrer"
-          className="cam-action-btn"
-          title="Download full resolution JPEG snapshot"
-        >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
-          Snapshot
-        </a>
-        <a
-          href={cam.hls_path}
-          target="_blank"
-          rel="noreferrer"
-          className="cam-action-btn"
-          title="Open MediaMTX HLS playlist"
-        >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" />
-          </svg>
-          HLS Stream
-        </a>
+        <div className="cam-foot-links">
+          <a
+            href={cam.snapshot_path}
+            target="_blank"
+            rel="noreferrer"
+            className="cam-mini-btn"
+            title="Download full resolution JPEG snapshot"
+          >
+            Snap
+          </a>
+          <a
+            href={cam.hls_path}
+            target="_blank"
+            rel="noreferrer"
+            className="cam-mini-btn"
+            title="Open MediaMTX HLS playlist"
+          >
+            HLS
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -230,6 +233,13 @@ export default function WallPage() {
   const liveFeeds = useMemo(() => clients.filter((c) => c.active || c.has_frame), [clients]);
   const activeCount = clients.filter((c) => c.active).length;
   const totalDetections = clients.reduce((sum, c) => sum + (c.active ? c.detections_count : 0), 0);
+
+  const avgNet = useMemo(() => {
+    const activeFeeds = clients.filter((c) => c.active && c.net_delay_ms > 0);
+    if (!activeFeeds.length) return "0.0";
+    const sum = activeFeeds.reduce((acc, c) => acc + c.net_delay_ms, 0);
+    return (sum / activeFeeds.length).toFixed(1);
+  }, [clients]);
 
   const avgYolo = useMemo(() => {
     const activeFeeds = clients.filter((c) => c.active && c.yolo_delay_ms > 0);
@@ -287,21 +297,21 @@ export default function WallPage() {
             ),
           },
           {
-            label: "Total Detections",
-            value: String(totalDetections),
-            kicker: "Real-time YOLO bounding boxes",
+            label: "Avg Net Delay",
+            value: avgNet,
+            unit: "ms",
+            kicker: "Network transit delay",
             icon: (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M9 12l2 2 4-4" />
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
               </svg>
             ),
           },
           {
-            label: "Avg YOLO Latency",
+            label: "Avg Inference Delay",
             value: avgYolo,
             unit: "ms",
-            kicker: "Inference time / frame",
+            kicker: "YOLO detection / frame",
             icon: (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
@@ -312,7 +322,7 @@ export default function WallPage() {
             label: "Avg E2E Delay",
             value: avgE2e,
             unit: "ms",
-            kicker: "Capture → Infer → Subscribe",
+            kicker: "Total capture → inference → subscribe",
             icon: (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" />
@@ -321,22 +331,20 @@ export default function WallPage() {
             ),
           },
           {
-            label: "Ingest & PubSub",
-            value: ":8554",
-            unit: "RTSP",
-            kicker: "MediaMTX HLS / WHEP",
+            label: "Total Detections",
+            value: String(totalDetections),
+            kicker: "Real-time YOLO bounding boxes",
             icon: (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="2" y="2" width="20" height="8" rx="2" />
-                <rect x="2" y="14" width="20" height="8" rx="2" />
-                <path d="M6 6h.01M6 18h.01" />
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9 12l2 2 4-4" />
               </svg>
             ),
           },
         ]}
       />
 
-      <Card className="tier" glow>
+      <Card className="tier" glow style={{ padding: "6px 10px", flex: 1, minHeight: 0, height: "100%", maxHeight: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box", overflow: "hidden", marginBottom: 0 }}>
         <div className="cctv-wall-header">
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--text)" }}>

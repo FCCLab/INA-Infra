@@ -47,7 +47,7 @@ The multi-container pod contains 3 dedicated application containers + 1 metrics 
 ```
 applications/cctv/
   client/     publisher.py (UE RTSP RECORD push), Dockerfile, entrypoint.sh
-  edge/       analyzer.py (GStreamer + YOLO), api.py, state.py, mtx_publish.py, mediamtx.yml, Dockerfile
+  edge/       cctv.py (GStreamer RTSP Ingest + Server), api.py (FastAPI), state.py, yolo_worker.py, mtx_publish.py, mediamtx.yml, Dockerfile, entrypoint.sh
   frontend/   React Video Wall SPA (Vite, TypeScript, Nginx), Dockerfile, nginx.conf
   common/     metrics.py (Prometheus telemetry helpers)
   data/       Sample video assets (classroom.mp4, traffic.mp4, example.mp4)
@@ -62,13 +62,13 @@ edge cannot connect back to it. Only the signaling/connection direction changed
 versus a pull model -- the media (and its wall-clock carriage) still flows uplink
 UE -> edge, so the absolute-timestamp path is preserved.
 
-There is still **no relay**: the analyzer's RTSP server terminates the stream
+There is still **no relay**: the `cctv.py` RTSP server terminates the stream
 directly, so absolute timestamps stay entirely within GStreamer. This avoids
 MediaMTX, whose `useAbsoluteTimestamp` propagation proved unreliable during M1
 (sustained ~1.27 s timestamp excursions + `received RTP packet without absolute
 time` warnings; upstream mediamtx #5355).
 
-- OTA (5G data plane): analyzer RTSP RECORD server on `EDGE_OTA_IP`; the UE
+- OTA (5G data plane): CCTV RTSP RECORD server on `EDGE_OTA_IP`; the UE
   publisher pushes to it. RTCP SR + the RFC 6051 NTP-64 header extension travel
   outbound from the UE (the direction we want).
 - Metrics/NTP plane (`ens0`): Prometheus scrape of `/metrics` and chrony sync.
@@ -76,15 +76,11 @@ time` warnings; upstream mediamtx #5355).
 ## Layout
 
 ```
-cctv-fable-plan/
+applications/cctv/
   client/     publisher.py (rtspclientsink RECORD push), entrypoint.sh, Dockerfile
-  edge/       analyzer.py (gst-rtsp-server RECORD -> YOLO), entrypoint.sh, Dockerfile
+  edge/       cctv.py (gst-rtsp-server RECORD -> YOLO), api.py, yolo_worker.py, entrypoint.sh, Dockerfile
   common/     metrics.py (slice-agnostic helpers, shared buckets)
   data/       drop VIDEO_SOURCE files here (example.mp4 included)
-  docker-compose.local.yml    single-host test (OTA simulated with a bridge)
-  docker-compose.client.yml   client host (two-host / OTA)
-  docker-compose.edge.yml     edge host   (two-host / OTA)
-  .env.example
 ```
 
 ## Verified results (single-host, OTA simulated with a bridge)

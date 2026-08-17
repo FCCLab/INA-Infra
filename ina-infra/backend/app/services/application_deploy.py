@@ -548,7 +548,7 @@ def generate_server_manifests(
             return ""
 
         cm_data = {
-            "analyzer.py": _read_edge("analyzer.py"),
+            "cctv.py": _read_edge("cctv.py"),
             "yolo_worker.py": _read_edge("yolo_worker.py"),
             "state.py": _read_edge("state.py"),
             "api.py": _read_edge("api.py"),
@@ -715,7 +715,7 @@ def generate_server_manifests(
 
         gpu_arch = _physical_ai_gpu_arch(target_cluster.lower(), p)
         server_img = _physical_ai_server_image(app_cfg.server_image, gpu_arch)
-        gpu_mem = str(p.get("gpu_memory_utilization") or ("0.85" if gpu_arch == "amd64" else "0.6"))
+        gpu_mem = str(p.get("gpu_memory_utilization") or ("0.75" if gpu_arch == "amd64" else "0.6"))
         gpu_worker = multus_iface.pick_gpu_worker(target_cluster.lower(), arch=gpu_arch)
         node_sel = dict(multus_iface.scheduling_node_selector(gpu_arch, master))
         if gpu_worker and gpu_worker.get("name"):

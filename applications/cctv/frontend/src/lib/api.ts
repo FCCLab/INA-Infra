@@ -32,15 +32,48 @@ export type CctvStatus = {
   clients: CctvClient[];
 };
 
+export function normalizeCanonicalId(id: string): string {
+  const s = (id || "").toLowerCase().trim();
+  const m = s.match(/cam[_-]?(\d+)/);
+  if (m) return `slicea_cam${m[1]}`;
+  if (s === "slicea" || s === "default" || s === "cam") return "slicea_cam1";
+  const m2 = s.match(/(\d+)/);
+  if (m2) return `slicea_cam${m2[1]}`;
+  return id || "slicea_cam1";
+}
+
+export function formatCameraName(id: string, name?: string): string {
+  const s = (id || "").toLowerCase().trim();
+  const m = s.match(/cam[_-]?(\d+)/);
+  if (m) return `Camera ${m[1]}`;
+  if (s === "slicea" || s === "default" || s === "cam") return "Camera 1";
+  const m2 = s.match(/(\d+)/);
+  if (m2) return `Camera ${m2[1]}`;
+  return name || id;
+}
+
+function sortClients(list: CctvClient[]): CctvClient[] {
+  return [...list].sort((a, b) => {
+    const na = formatCameraName(a.id, a.name);
+    const nb = formatCameraName(b.id, b.name);
+    return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
 export async function fetchClients(): Promise<CctvClient[]> {
   const res = await fetch("/api/v1/clients", { cache: "no-store" });
   if (!res.ok) throw new Error(`clients ${res.status}`);
   const body = (await res.json()) as { clients?: CctvClient[] };
-  return Array.isArray(body.clients) ? body.clients : [];
+  const list = Array.isArray(body.clients) ? body.clients : [];
+  return sortClients(list);
 }
 
 export async function fetchStatus(): Promise<CctvStatus> {
   const res = await fetch("/api/v1/status", { cache: "no-store" });
   if (!res.ok) throw new Error(`status ${res.status}`);
-  return (await res.json()) as CctvStatus;
+  const data = (await res.json()) as CctvStatus;
+  if (Array.isArray(data.clients)) {
+    data.clients = sortClients(data.clients);
+  }
+  return data;
 }

@@ -2,9 +2,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: nowrap;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
+  flex: 0 0 auto;
   overflow-x: auto;
   white-space: nowrap;
 }
@@ -12,16 +13,16 @@
 .cctv-wall-header .actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: nowrap;
   flex-shrink: 0;
 }
 
 .cctv-wall-header select {
   width: auto !important;
-  height: 28px;
-  font-size: 12px;
-  padding: 2px 8px;
+  height: 24px;
+  font-size: 11px;
+  padding: 1px 6px;
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text);
@@ -36,40 +37,46 @@
 
 .cam-wall {
   display: grid;
-  gap: 18px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 0;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.cam-wall[data-layout="auto"] {
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+.cam-wall[data-layout="auto"],
+.cam-wall[data-layout="2x2"],
+.cam-wall[data-cols="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  height: 100%;
 }
 
 .cam-wall[data-layout="1"],
 .cam-wall[data-cols="1"] {
-  grid-template-columns: minmax(360px, 1200px);
-  justify-content: center;
-}
-
-.cam-wall[data-layout="2x2"],
-.cam-wall[data-cols="2"] {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 .cam-wall[data-layout="3x3"],
 .cam-wall[data-cols="3"] {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  height: 100%;
 }
 
 .cam-wall[data-layout="4x4"],
 .cam-wall[data-cols="4"] {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-@media (max-width: 1024px) {
-  .cam-wall[data-layout="3x3"],
-  .cam-wall[data-layout="4x4"] {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  height: 100%;
 }
 
 @media (max-width: 768px) {
@@ -78,24 +85,30 @@
   .cam-wall[data-layout="4x4"],
   .cam-wall[data-layout="auto"] {
     grid-template-columns: 1fr;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 }
 
 .cam-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   position: relative;
 }
 
 .cam-card:hover {
   border-color: var(--border-2);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .cam-card.is-live {
@@ -106,7 +119,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 4px 10px;
+  height: 28px;
+  min-height: 28px;
   background: color-mix(in srgb, var(--surface-2) 80%, transparent);
   border-bottom: 1px solid var(--border);
 }
@@ -120,16 +135,16 @@
 .cam-title {
   font-family: 'Space Grotesk', system-ui, sans-serif;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text);
   letter-spacing: 0.01em;
 }
 
 .cam-id-pill {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--text-dim) 15%, transparent);
   color: var(--text-dim);
 }
@@ -142,13 +157,13 @@
 
 .cam-badge {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 10px;
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .cam-badge-live {
@@ -164,8 +179,10 @@
 
 .cam-stage {
   position: relative;
-  background: #04070e;
-  aspect-ratio: 16 / 9;
+  background: #000;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -187,13 +204,13 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 6px 8px;
 }
 
 .cam-hud-top {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cam-hud-tag {
@@ -202,22 +219,22 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #fff;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .cam-hud-bottom {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cam-detections-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
   max-width: 75%;
 }
 
@@ -228,9 +245,9 @@
   color: #fff;
   font-family: 'Space Grotesk', system-ui, sans-serif;
   font-weight: 600;
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 4px;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .cam-offline {
@@ -240,62 +257,84 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 11px;
   background: radial-gradient(circle at center, rgba(22, 230, 160, 0.04) 0%, #04070e 75%);
 }
 
 .cam-offline-icon {
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   opacity: 0.4;
   color: var(--accent);
 }
 
-.cam-hud {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  padding: 10px 14px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-}
-
-.cam-hud-stat {
+.cam-card-foot {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px;
+  height: 26px;
+  min-height: 26px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  box-sizing: border-box;
 }
 
-.cam-hud-stat-label {
-  font-size: 9.5px;
-  color: var(--text-faint);
+.cam-foot-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cam-mini-stat {
   font-family: 'IBM Plex Mono', monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 10px;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
-.cam-hud-stat-val {
+.cam-mini-stat .lbl {
+  color: var(--text-faint);
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cam-mini-stat strong {
   font-family: 'Space Grotesk', monospace;
   font-weight: 700;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.cam-hud-stat-val.accent {
   color: var(--accent);
 }
 
-.cam-foot-actions {
+.cam-foot-links {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 8px 14px;
-  background: color-mix(in srgb, var(--surface) 50%, transparent);
-  border-top: 1px solid var(--border);
+  gap: 5px;
+}
+
+.cam-mini-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.cam-mini-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-2);
 }
 
 .cam-action-btn {

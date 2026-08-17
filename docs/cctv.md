@@ -67,13 +67,23 @@ Base: `http://10.1.137.120:30080`. Interactive docs: `/docs`. OpenAPI: `/openapi
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/v1/health` | Analyzer + MediaMTX + Frontend readiness |
-| GET | `/api/v1/status` | YOLO flags, MediaMTX active paths, camera summary |
+| GET | `/api/v1/health` | Backend + MediaMTX + Frontend readiness |
+| GET | `/api/v1/status` | YOLO flags, MediaMTX active paths, camera telemetry & object detections |
+| GET | `/api/v1/connected` | Fast lightweight status of connected clients and stream activity |
 | GET | `/api/v1/clients` | Live camera list + HLS/WHEP/MJPEG URLs & latency stats |
 | GET | `/live/{path}` | HLS subscribe (proxied to MediaMTX :8888) |
 | POST | `/whep/{path}` | WHEP subscribe (proxied to MediaMTX :8889) |
 | GET | `/video/{id}` | Low-latency MJPEG live stream (proxied to Backend :8080) |
-| GET | `/snapshot/{id}` | Single JPEG image with YOLO bounding boxes |
+| GET | `/snapshot/{id}` | Single JPEG image with YOLO bounding boxes (`Cache-Control: no-cache`) |
+
+### Latency Measurement & Telemetry Format
+
+Each camera card displays live performance metrics in standard sequence:
+$$\text{Net Delay} \longrightarrow \text{Inference Delay} \longrightarrow \text{E2E Delay} \longrightarrow \text{Detected Object(s)}$$
+
+- **Network Delay (`net_delay_ms`)**: Measures uplink transit from UE capture to edge GStreamer appsink via RTP NTP-64 header timestamps. A 30-sample rolling sliding-window baseline filters out host presentation timestamp / clock drift to isolate true 5G radio transit jitter (~5ms–90ms).
+- **YOLO Inference Latency (`yolo_delay_ms`)**: Multi-process worker inference execution time per processed frame (~90ms–220ms).
+- **End-to-End Latency (`e2e_delay_ms`)**: Calibrated total capture-to-inference display latency ($=\text{net\_delay} + \text{yolo\_delay}$).
 
 ## Video Wall Dashboard Features
 

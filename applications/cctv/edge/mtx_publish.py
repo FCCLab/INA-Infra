@@ -86,6 +86,8 @@ class _Publisher:
                 flow=str(ret),
             )
 
+    push_frame = push_bgr
+
     def stop(self) -> None:
         try:
             self.appsrc.emit("end-of-stream")
@@ -122,16 +124,18 @@ class Hub:
                         ctx.mtx_path = pub.path
             pub.push_bgr(frame)
 
+    push_frame = push_bgr
+
     def push_jpeg(self, client_id: str, jpeg: Optional[bytes]) -> None:
         if not jpeg:
             return
         try:
-            import io
+            import cv2
             import numpy as np
-            from PIL import Image
 
-            im = Image.open(io.BytesIO(jpeg)).convert("RGB")
-            arr = np.asarray(im)[:, :, ::-1].copy()  # RGB → BGR
+            arr = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if arr is None:
+                return
         except Exception:
             return
         self.push_bgr(client_id, arr)

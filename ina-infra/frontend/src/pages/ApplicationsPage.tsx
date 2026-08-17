@@ -191,7 +191,7 @@ export default function ApplicationsPage() {
       <Card className="tier">
         <SectionLabel kicker="Per application">Dashboards</SectionLabel>
         <p className="hint" style={{ marginTop: 0 }}>
-          Each application has a control UI (like the CCTV video wall) and a Grafana metrics dashboard.
+          Each application has a control UI (like the CCTV dashboard) and a Grafana metrics dashboard.
         </p>
         <div className="app-dashboard-grid">
           {APPLICATION_DASHBOARD_LIST.map((app) => (

@@ -3,7 +3,7 @@ import Card from "../components/ui/Card";
 import KpiStrip from "../components/ui/KpiStrip";
 import SectionLabel from "../components/ui/SectionLabel";
 import StatusDot from "../components/ui/StatusDot";
-import { fetchStatus, type CctvStatus } from "../lib/api";
+import { fetchStatus, formatCameraName, type CctvStatus } from "../lib/api";
 
 export default function StatusPage() {
   const [st, setSt] = useState<CctvStatus | null>(null);
@@ -192,7 +192,7 @@ export default function StatusPage() {
                     />
                   </td>
                   <td>
-                    <strong>{c.name || c.id}</strong>
+                    <strong>{formatCameraName(c.id, c.name)}</strong>
                     <div className="mono muted" style={{ fontSize: "10px" }}>{c.id}</div>
                   </td>
                   <td className="mono">

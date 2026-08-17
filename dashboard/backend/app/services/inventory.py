@@ -414,18 +414,37 @@ def _fetch_prometheus_node_usage(
 def _fetch_prometheus_gpus(cluster: str) -> Dict[str, Any]:
     """GPU util + framebuffer from DCGM series in Prometheus.
 
-    Uses last_over_time so briefly stale scrapes (e.g. Prom→pod timeout to GH200)
-    still surface recent values. Prefer kubernetes_node / Hostname as node name.
+    This exporter does not publish DCGM_FI_DEV_FB_TOTAL. Capacity is
+    FB_USED + FB_FREE from the *same* instant (do not max() those over a
+    long lookback — idle free + later used double-counts vRAM).
     """
-    # Look back far enough that a Prom restart / scrape outage still has series.
-    util_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_GPU_UTIL[30m]))"
-    used_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_USED[30m]))"
-    total_q = "max by (Hostname, kubernetes_node, node, gpu, modelName, UUID) (last_over_time(DCGM_FI_DEV_FB_TOTAL[30m]))"
-    util_res, util_err = prom.query(cluster, util_q)
-    if util_err:
-        return {"source": "prometheus", "nodes": [], "error": util_err}
-    used_res, _ = prom.query(cluster, used_q)
-    total_res, _ = prom.query(cluster, total_q)
+    by_labels = "Hostname, kubernetes_node, node, gpu, modelName, UUID"
+
+    def _prom(expr: str) -> List[Dict[str, Any]]:
+        res, _err = prom.query(cluster, expr)
+        return res or []
+
+    util_res = _prom(f"max by ({by_labels}) (DCGM_FI_DEV_GPU_UTIL)")
+    if not util_res:
+        util_res = _prom(
+            f"max by ({by_labels}) (last_over_time(DCGM_FI_DEV_GPU_UTIL[2m]))"
+        )
+    used_res = _prom(f"max by ({by_labels}) (DCGM_FI_DEV_FB_USED)")
+    free_res = _prom(f"max by ({by_labels}) (DCGM_FI_DEV_FB_FREE)")
+    total_res = _prom(
+        f"max by ({by_labels}) (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)"
+    )
+    if not total_res:
+        total_res = _prom(
+            f"max by ({by_labels}) (last_over_time(DCGM_FI_DEV_FB_TOTAL[2m]))"
+        )
+
+    if not util_res and not used_res:
+        return {
+            "source": "prometheus",
+            "nodes": [],
+            "error": "no DCGM samples in prometheus",
+        }
 
     def _gpu_key(metric: Dict[str, str]) -> Tuple[str, int]:
         host = (
@@ -444,86 +463,57 @@ def _fetch_prometheus_gpus(cluster: str) -> Dict[str, Any]:
             idx = 0
         return canonical_node_name(host), idx
 
+    def _blank() -> Dict[str, Any]:
+        return {
+            "index": 0,
+            "model": "GPU",
+            "uuid": "",
+            "util_pct": None,
+            "memory_used_mib": None,
+            "memory_free_mib": None,
+            "memory_total_mib": None,
+        }
+
     by_gpu: Dict[Tuple[str, int], Dict[str, Any]] = {}
-    for sample in util_res:
-        metric = sample.get("metric") or {}
-        host, idx = _gpu_key(metric)
-        if not host:
-            continue
-        val = prom.sample_value(sample)
-        if val is None:
-            continue
-        rec = by_gpu.setdefault(
-            (host, idx),
-            {
-                "node": host,
-                "index": idx,
-                "model": metric.get("modelName") or metric.get("model") or "GPU",
-                "uuid": metric.get("UUID") or metric.get("uuid") or "",
-                "util_pct": None,
-                "memory_used_mib": None,
-                "memory_total_mib": None,
-            },
-        )
-        rec["util_pct"] = val
 
-    for sample in used_res:
-        metric = sample.get("metric") or {}
-        host, idx = _gpu_key(metric)
-        if not host:
-            continue
-        val = prom.sample_value(sample)
-        if val is None:
-            continue
-        rec = by_gpu.setdefault(
-            (host, idx),
-            {
-                "node": host,
-                "index": idx,
-                "model": metric.get("modelName") or metric.get("model") or "GPU",
-                "uuid": metric.get("UUID") or metric.get("uuid") or "",
-                "util_pct": None,
-                "memory_used_mib": None,
-                "memory_total_mib": None,
-            },
-        )
-        rec["memory_used_mib"] = val
+    def _ingest(samples: List[Dict[str, Any]], field: str) -> None:
+        for sample in samples:
+            metric = sample.get("metric") or {}
+            host, idx = _gpu_key(metric)
+            if not host:
+                continue
+            val = prom.sample_value(sample)
+            if val is None:
+                continue
+            rec = by_gpu.setdefault((host, idx), _blank())
+            rec["index"] = idx
+            rec["model"] = metric.get("modelName") or metric.get("model") or rec["model"]
+            rec["uuid"] = metric.get("UUID") or metric.get("uuid") or rec["uuid"]
+            rec[field] = val
 
-    for sample in total_res:
-        metric = sample.get("metric") or {}
-        host, idx = _gpu_key(metric)
-        if not host:
-            continue
-        val = prom.sample_value(sample)
-        if val is None:
-            continue
-        rec = by_gpu.setdefault(
-            (host, idx),
-            {
-                "node": host,
-                "index": idx,
-                "model": metric.get("modelName") or metric.get("model") or "GPU",
-                "uuid": metric.get("UUID") or metric.get("uuid") or "",
-                "util_pct": None,
-                "memory_used_mib": None,
-                "memory_total_mib": None,
-            },
-        )
-        rec["memory_total_mib"] = val
+    _ingest(util_res, "util_pct")
+    _ingest(used_res, "memory_used_mib")
+    _ingest(free_res, "memory_free_mib")
+    _ingest(total_res, "memory_total_mib")
 
     by_node: Dict[str, Dict[str, Any]] = {}
     for (host, _idx), rec in sorted(by_gpu.items()):
-        used = prom.finite(rec.get("memory_used_mib")) or 0.0
-        total = prom.finite(rec.get("memory_total_mib")) or 0.0
+        used = prom.finite(rec.get("memory_used_mib"))
+        free = prom.finite(rec.get("memory_free_mib"))
+        total = prom.finite(rec.get("memory_total_mib"))
+        if (total is None or total <= 0) and used is not None and free is not None:
+            total = used + free
+        used_f = used or 0.0
+        total_f = total or 0.0
         util = prom.finite(rec.get("util_pct")) or 0.0
         gpu = {
             "index": int(rec["index"]),
             "model": str(rec["model"]),
             "util_pct": round(util, 2),
-            "memory_used_mib": round(used, 2),
-            "memory_total_mib": round(total, 2),
-            "memory_used_bytes": int(used * 1024 * 1024),
-            "memory_total_bytes": int(total * 1024 * 1024),
+            "memory_used_mib": round(used_f, 2),
+            "memory_total_mib": round(total_f, 2),
+            "memory_used_bytes": int(used_f * 1024 * 1024),
+            "memory_total_bytes": int(total_f * 1024 * 1024),
         }
         node = by_node.setdefault(
             host, {"name": host, "gpu_count": 0, "gpus": [], "error": None}

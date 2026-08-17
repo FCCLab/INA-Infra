@@ -13,10 +13,12 @@ import {
   SliceIn,
   StreamHandlers,
   OaiRegistryStatus,
+  SliceAppType,
 } from "../api/client";
 import Topology from "../components/Topology";
-import ApplicationSettingsBox from "../components/ApplicationSettingsBox";
 import ApplicationServerSettingsBox from "../components/ApplicationServerSettingsBox";
+import { AppDashboardButtons, AppDashboardTags } from "../components/AppDashboardLinks";
+import { APPLICATION_DASHBOARD_LIST } from "../lib/applicationDashboards";
 import NetworkSettingsForm from "../components/NetworkSettingsForm";
 import OaiImagesForm from "../components/OaiImagesForm";
 import FieldHelp from "../components/FieldHelp";
@@ -1803,58 +1805,73 @@ export default function PlanningPage() {
                       <th>CU-UP F1-U</th>
                       <th>UE RF</th>
                       <th>DNN</th>
+                      <th>Application (N6)</th>
                       <th>Sites</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {ipPlan.slices.map((s) => (
-                      <tr key={s.n}>
-                        <td className="mono">{s.n}</td>
-                        <td>
-                          <code>{s.upf_n3}</code>
-                        </td>
-                        <td>
-                          <code>{s.cuup_n3}</code>
-                        </td>
-                        <td>
-                          <code>{s.upf_n4}</code>
-                        </td>
-                        <td>
-                          <code>{s.upf_n6}</code>
-                        </td>
-                        <td>
-                          <code>{s.cuup_e1}</code>
-                        </td>
-                        <td>
-                          <code>{s.cuup_f1u}</code>
-                        </td>
-                        <td>
-                          <code>{s.ue_rf}</code>
-                        </td>
-                        <td>
-                          <code>{s.dnn_cidr}</code>
-                        </td>
-                        <td>
-                          <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-                            {s.site_cu && (
-                              <span className={`tag ${getClusterTagClass(s.site_cu)}`} style={{ fontSize: 9.5 }}>
-                                CU: {s.site_cu}
-                              </span>
-                            )}
-                            {s.site_upf && (
-                              <span className={`tag ${getClusterTagClass(s.site_upf)}`} style={{ fontSize: 9.5 }}>
-                                UPF: {s.site_upf}
-                              </span>
-                            )}
-                            {s.site_app && (
-                              <span className={`tag ${getClusterTagClass(s.site_app)}`} style={{ fontSize: 9.5 }}>
-                                APP: {s.site_app}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {ipPlan.slices.map((s) => {
+                      const appCfg = applications[String(s.slice_id || s.n)];
+                      const appType = (appCfg?.app_type || (s.n === 1 ? "cctv" : s.n === 2 ? "physical_ai" : s.n === 3 ? "ott" : s.n === 4 ? "iot" : "none")) as SliceAppType;
+                      return (
+                        <tr key={s.n}>
+                          <td className="mono">{s.n}</td>
+                          <td>
+                            <code>{s.upf_n3}</code>
+                          </td>
+                          <td>
+                            <code>{s.cuup_n3}</code>
+                          </td>
+                          <td>
+                            <code>{s.upf_n4}</code>
+                          </td>
+                          <td>
+                            <code>{s.upf_n6}</code>
+                          </td>
+                          <td>
+                            <code>{s.cuup_e1}</code>
+                          </td>
+                          <td>
+                            <code>{s.cuup_f1u}</code>
+                          </td>
+                          <td>
+                            <code>{s.ue_rf}</code>
+                          </td>
+                          <td>
+                            <code>{s.dnn_cidr}</code>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              <code>{s.app_ip || "—"}</code>
+                              {appType && appType !== "none" && appType !== "custom" && (
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 2 }}>
+                                  <AppDashboardTags appType={appType} />
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                              {s.site_cu && (
+                                <span className={`tag ${getClusterTagClass(s.site_cu)}`} style={{ fontSize: 9.5 }}>
+                                  CU: {s.site_cu}
+                                </span>
+                              )}
+                              {s.site_upf && (
+                                <span className={`tag ${getClusterTagClass(s.site_upf)}`} style={{ fontSize: 9.5 }}>
+                                  UPF: {s.site_upf}
+                                </span>
+                              )}
+                              {s.site_app && (
+                                <span className={`tag ${getClusterTagClass(s.site_app)}`} style={{ fontSize: 9.5 }}>
+                                  APP: {s.site_app}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2027,6 +2044,142 @@ export default function PlanningPage() {
               shortcuts. Undeploy also force-cleans cluster namespaces.{" "}
               <strong>Rollout</strong> is separate — staged NF restart only.
             </p>
+            {deployed && (
+              <div
+                className="deployed-apps-banner"
+                style={{
+                  marginTop: 18,
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 16,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 12,
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  <div>
+                    <div
+                      className="kicker"
+                      style={{
+                        fontSize: 11,
+                        color: "var(--accent)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Deployed Applications & Controls
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text)",
+                        fontWeight: 600,
+                        marginTop: 2,
+                      }}
+                    >
+                      Application Dashboards & Grafana Telemetry Server
+                    </div>
+                  </div>
+                  <a
+                    href="http://10.1.137.105:3000/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: "rgba(249, 115, 22, 0.16)",
+                      color: "#fb923c",
+                      border: "1px solid rgba(249, 115, 22, 0.4)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      textDecoration: "none",
+                    }}
+                    title="Open Main Grafana Server (10.1.137.105:3000) — user/pass: inainfra/inainfra"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    Grafana Server (10.1.137.105:3000) ↗
+                  </a>
+                </div>
+
+                <div
+                  className="app-dashboard-grid"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {APPLICATION_DASHBOARD_LIST.map((app) => (
+                    <div
+                      key={app.id}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        padding: "10px 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: "var(--text)",
+                          }}
+                        >
+                          Slice {app.sliceId} · {app.name}
+                        </span>
+                        <span
+                          className="status-dot ok"
+                          style={{ width: 6, height: 6 }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <AppDashboardButtons appType={app.id} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
             </>
           ) : (
@@ -2036,36 +2189,6 @@ export default function PlanningPage() {
           )}
         </Card>
       )}
-
-      <ApplicationSettingsBox
-        profile={profile}
-        slices={slices}
-        applications={applications}
-        onChangeApplications={setApplications}
-        disabled={busy}
-        onDeployStart={(title) => {
-          resetConsole(title);
-          appendConsole(`[${new Date().toLocaleTimeString()}] Starting: ${title}`);
-        }}
-        onDeployLog={(_stream, line) => {
-          appendConsole(line);
-        }}
-        onDeployStatus={(msg) => {
-          setStatus(msg);
-          appendConsole(`ℹ ${msg}`);
-        }}
-        onDeployDone={(msg) => {
-          setStatus(msg);
-          appendConsole(`✔ ${msg}`);
-          if (profile.name) {
-            void loadProfile(profile.name);
-          }
-        }}
-        onDeployError={(err) => {
-          setError(err);
-          appendConsole(`✖ Error: ${err}`);
-        }}
-      />
 
       {(consoleOpen || deployFiles.length > 0) && (
         <div ref={consolePanelRef}>

@@ -394,16 +394,16 @@ export default function ApplicationServerSettingsBox({
 
                           <FieldHelp
                             label="GPU memory ratio"
-                            help="vLLM GPU memory utilization limit (0.1 - 1.0)."
+                            help="vLLM GPU memory utilization (0.1–1.0). A40 shares the card with host AODT (~9GiB); keep ≤0.75."
                           >
                             <input
                               type="number"
                               step="0.05"
                               min="0.1"
                               max="1.0"
-                              value={p.gpu_memory_utilization || 0.9}
+                              value={p.gpu_memory_utilization || 0.75}
                               disabled={disabled}
-                              onChange={(e) => updateParam(s.id, "gpu_memory_utilization", Number(e.target.value) || 0.9)}
+                              onChange={(e) => updateParam(s.id, "gpu_memory_utilization", Number(e.target.value) || 0.75)}
                             />
                           </FieldHelp>
                         </>

@@ -70,7 +70,7 @@ Flannel (CNI) is a dependency for NodePort when the Prom pod is not on the contr
 | CPU cores used | `(1 - avg by (node) (rate(node_cpu_seconds_total{mode="idle",job="kubernetes-pods"}[5m]))) * count by (node) (...)` |
 | Memory used | `node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes` (by `node`) |
 | NIC Mbps | `rate(node_network_*_bytes_total{node="<name>"}[5m]) * 8 / 1e6` (physical ifaces only in UI) |
-| GPU | `DCGM_FI_DEV_GPU_UTIL`, `DCGM_FI_DEV_FB_USED` / `TOTAL` (with `last_over_time` if scrape is stale) |
+| GPU | `DCGM_FI_DEV_GPU_UTIL`, `DCGM_FI_DEV_FB_USED` + `FB_FREE` (capacity = used+free when `FB_TOTAL` is not exported) |
 
 Prefer `job="kubernetes-pods"` so dual discovery (pod annotations + headless Service) does not double-count.
 

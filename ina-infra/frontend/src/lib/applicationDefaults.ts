@@ -45,7 +45,7 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
       tensor_parallel_size: 1,
       max_model_len: 4096,
       gpu_arch: "auto",
-      gpu_memory_utilization: 0.85,
+      gpu_memory_utilization: 0.75,
     },
     client_params: {
       client_count: 1,

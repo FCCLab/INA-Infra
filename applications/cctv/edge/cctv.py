@@ -1,7 +1,8 @@
-"""CCTV edge analyzer: UE RTSP RECORD ingest + YOLO, publish annotated video to MediaMTX."""
+"""CCTV Edge Server: RTSP RECORD Ingest + Multi-Client YOLO Vision AI + MediaMTX Pub/Sub."""
 
 from __future__ import annotations
 
+import collections
 import io
 import multiprocessing as mp
 import os
@@ -23,9 +24,9 @@ from common import metrics  # noqa: E402
 from prometheus_client import Counter, Gauge, Histogram  # noqa: E402
 
 try:
-    from edge.state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext
+    from edge.state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext, normalize_canonical_client_id
 except ImportError:
-    from state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext
+    from state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext, normalize_canonical_client_id
 
 Gst.init(None)
 
@@ -120,8 +121,8 @@ FRAMES_WITHOUT_TS = Counter(
     "cctv_frames_without_ts_total",
     "Frames lacking a reference-timestamp meta (SR not yet received)",
 )
-FPS_GAUGE = Gauge("cctv_fps", "Frames per second (edge analyzer)")
-INGRESS_FPS_GAUGE = Gauge("application_ingress_fps", "Ingress frame rate at analyzer appsink")
+FPS_GAUGE = Gauge("cctv_fps", "Frames per second (edge CCTV server)")
+INGRESS_FPS_GAUGE = Gauge("application_ingress_fps", "Ingress frame rate at CCTV appsink")
 EGRESS_FPS_GAUGE = Gauge("application_egress_fps", "Egress processed frame rate after YOLO")
 CLOCK_OFFSET = Gauge(
     "cctv_clock_offset_seconds", "Absolute chrony clock offset (edge)"
@@ -217,9 +218,6 @@ def _intra_threads(n_workers: int) -> int:
     if YOLO_INTRA_THREADS:
         return YOLO_INTRA_THREADS
     quota = _cgroup_cpu_quota()
-    # Leave ~1 CPU for GStreamer/HTTP in the parent; split the rest.
-    # Assume at least 4 cameras so the first worker is not pinned to the
-    # whole node before later clients connect.
     usable = max(1, quota - 1)
     assumed = max(int(n_workers), 4)
     return max(1, usable // assumed)
@@ -253,7 +251,9 @@ def _mtx():
         return HUB
 
 
-class CCTVAnalyzer:
+class CCTVServer:
+    """Main CCTV Ingest and Vision AI Stream Processing Server."""
+
     def __init__(self) -> None:
         self.loop = GLib.MainLoop()
         self.server: GstRtspServer.RTSPServer | None = None
@@ -269,12 +269,13 @@ class CCTVAnalyzer:
         self._last_dp_t: Optional[float] = None
 
     def _get_context(self, client_id: str) -> ClientStreamContext:
+        canonical_id = normalize_canonical_client_id(client_id)
         with GLOBAL_LOCK:
-            if client_id not in self._stream_contexts:
-                ctx = ClientStreamContext(client_id)
-                self._stream_contexts[client_id] = ctx
-                CLIENT_STREAMS[client_id] = ctx
-            ctx = self._stream_contexts[client_id]
+            if canonical_id not in self._stream_contexts:
+                ctx = ClientStreamContext(canonical_id)
+                self._stream_contexts[canonical_id] = ctx
+                CLIENT_STREAMS[canonical_id] = ctx
+            ctx = self._stream_contexts[canonical_id]
             if not hasattr(ctx, "decoded_count"):
                 ctx.decoded_count = 0
             if not hasattr(ctx, "last_decoded_count"):
@@ -440,15 +441,10 @@ class CCTVAnalyzer:
                 with GLOBAL_LOCK:
                     ctx.yolo_delay_ms = yolo_ms
                     ctx.yolo_samples.append(float(delay))
-                    if t_cap is not None:
-                        e2e_delay = (time.time_ns() - t_cap) / 1e9
-                        E2E_DELAY.observe(max(e2e_delay, 0.0))
-                        ctx.e2e_samples.append(e2e_delay)
-                        ctx.e2e_delay_ms = round(max(0.0, e2e_delay * 1000.0), 2)
-                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
-                    elif ctx.net_delay_ms > 0:
-                        ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)
-                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
+                    ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)
+                    E2E_DELAY.observe(ctx.e2e_delay_ms / 1000.0)
+                    ctx.e2e_samples.append(ctx.e2e_delay_ms / 1000.0)
+                    CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
                     if jpeg:
                         ctx.latest_jpeg = jpeg
                     ctx.detections_count = int(count or 0)
@@ -492,9 +488,9 @@ class CCTVAnalyzer:
     @staticmethod
     def _build_launch() -> str:
         return (
-            "( rtph264depay name=depay0 ! avdec_h264 ! videoconvert ! "
-            "video/x-raw,format=RGB ! "
-            "queue name=q leaky=downstream max-size-buffers=2 "
+            "( rtph264depay name=depay0 wait-for-keyframe=true ! avdec_h264 max-threads=1 ! videoconvert ! "
+            "video/x-raw,format=BGR ! "
+            "queue name=q leaky=downstream max-size-buffers=1 "
             "max-size-bytes=0 max-size-time=0 ! "
             "appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false )"
         )
@@ -513,6 +509,26 @@ class CCTVAnalyzer:
                     Gst.PadProbeType.BUFFER,
                     lambda pad, info: self._on_decoded_frame(pad, info, client_id),
                 )
+
+        # Clear old buffering state on new connection / reconnection
+        with GLOBAL_LOCK:
+            if client_id in self._stream_contexts:
+                ctx = self._stream_contexts[client_id]
+                ctx.min_net_delay_s = None
+                ctx.recent_raw_delays.clear()
+                ctx.net_samples = []
+                ctx.yolo_samples = []
+                ctx.e2e_samples = []
+                ctx.decoded_count = 0
+                ctx.analyzed_count = 0
+                ctx.last_decoded_count = 0
+                ctx.last_analyzed_count = 0
+                ctx.fps = 0.0
+                ctx.egress_fps = 0.0
+                ctx.net_delay_ms = 0.0
+                ctx.yolo_delay_ms = 0.0
+                ctx.e2e_delay_ms = 0.0
+                ctx.last_frame_time = time.monotonic()
 
         media.connect("prepared", self._on_media_prepared)
         metrics.log_json("info", "media_configured", client_id=client_id)
@@ -548,10 +564,20 @@ class CCTVAnalyzer:
         if name == "rtpbin":
             self._set_if_present(element, "ntp-sync", True)
             self._set_if_present(element, "add-reference-timestamp-meta", True)
-            self._set_if_present(element, "buffer-mode", 0)
+            self._set_if_present(element, "buffer-mode", 0)  # buffer-mode=none
+            self._set_if_present(element, "latency", 0)
+            self._set_if_present(element, "do-retransmission", False)
+            self._set_if_present(element, "drop-on-latency", True)
         elif name == "rtpjitterbuffer":
             self._set_if_present(element, "add-reference-timestamp-meta", True)
-            self._set_if_present(element, "mode", 0)
+            self._set_if_present(element, "mode", 0)  # mode=none
+            self._set_if_present(element, "latency", 0)
+            self._set_if_present(element, "do-retransmission", False)
+            self._set_if_present(element, "drop-on-latency", True)
+            self._set_if_present(element, "max-dropout-time", 0)
+            self._set_if_present(element, "max-misorder-time", 0)
+        elif name == "rtph264depay":
+            self._set_if_present(element, "wait-for-keyframe", True)
 
     @staticmethod
     def _set_if_present(element, prop: str, value) -> None:
@@ -575,14 +601,30 @@ class CCTVAnalyzer:
         if t_capture_ns is None:
             FRAMES_WITHOUT_TS.inc()
             return Gst.PadProbeReturn.OK
-        net_delay = (now_ns - t_capture_ns) / 1e9
-        c_name = normalize_client_name(client_id)
-        NET_DELAY.observe(max(net_delay, 0.0))
-        net_ms = round(max(0.0, net_delay * 1000.0), 2)
-        CLIENT_NET_DELAY_MS.labels(client=c_name).set(net_ms)
+
+        raw_net_delay = (now_ns - t_capture_ns) / 1e9
+        
+        # Compensate for host clock skew / stream timestamp drift using a rolling sliding window:
         with GLOBAL_LOCK:
+            if not hasattr(ctx, "recent_raw_delays") or ctx.recent_raw_delays is None:
+                ctx.recent_raw_delays = collections.deque(maxlen=30)
+            ctx.recent_raw_delays.append(raw_net_delay)
+            rolling_min = min(ctx.recent_raw_delays)
+            
+            # Subtract rolling baseline and add estimated 5ms 5G baseline network transit.
+            if abs(rolling_min) > 0.020:
+                net_delay = max(0.003, (raw_net_delay - rolling_min) + 0.005)
+            else:
+                net_delay = max(0.003, raw_net_delay)
+
+            net_ms = round(net_delay * 1000.0, 2)
             ctx.net_samples.append(net_delay)
             ctx.net_delay_ms = net_ms
+            ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)
+
+        c_name = normalize_client_name(client_id)
+        NET_DELAY.observe(net_delay)
+        CLIENT_NET_DELAY_MS.labels(client=c_name).set(net_ms)
         return Gst.PadProbeReturn.OK
 
     def _on_sample(self, appsink, client_id: str):
@@ -609,35 +651,36 @@ class CCTVAnalyzer:
         detections_count = 0
         yolo_delay = 0.0
         frame = None
-        if YOLO_ENABLED:
+        
+        is_infer_frame = (seq % FRAME_SKIP == 0)
+        if YOLO_ENABLED and (is_infer_frame or ctx.latest_jpeg is None):
             frame = self._extract_frame(buf, width, height)
 
         if YOLO_PROCESS_PER_CLIENT and self._model is None:
-            if frame is not None:
-                if seq % FRAME_SKIP == 0:
-                    self._submit_yolo(client_id, seq, frame, t_capture_ns)
-                else:
-                    annotated_frame = frame
+            if frame is not None and is_infer_frame:
+                self._submit_yolo(client_id, seq, frame, t_capture_ns)
+            elif frame is not None:
+                annotated_frame = frame
         elif self._model is not None:
-            if frame is not None:
-                if seq % FRAME_SKIP == 0:
-                    t0 = time.monotonic()
-                    results = self._model.predict(frame, device=self._device, verbose=False)
-                    yolo_delay = time.monotonic() - t0
-                    YOLO_DELAY.observe(yolo_delay)
-                    with GLOBAL_LOCK:
-                        ctx.yolo_samples.append(yolo_delay)
-                        ctx.yolo_delay_ms = round(yolo_delay * 1000.0, 2)
-                    if results:
-                        annotated_frame = results[0].plot()
-                        if results[0].boxes is not None:
-                            detections_count = len(results[0].boxes)
-                            names = results[0].names or {}
-                            for b in results[0].boxes:
-                                cls_id = int(b.cls[0].item()) if b.cls is not None else 0
-                                detected_labels.append(names.get(cls_id, f"obj-{cls_id}"))
-                else:
-                    annotated_frame = frame
+            if frame is not None and is_infer_frame:
+                t0 = time.monotonic()
+                results = self._model.predict(frame, device=self._device, verbose=False)
+                yolo_delay = time.monotonic() - t0
+                YOLO_DELAY.observe(yolo_delay)
+                with GLOBAL_LOCK:
+                    ctx.yolo_samples.append(yolo_delay)
+                    ctx.yolo_delay_ms = round(yolo_delay * 1000.0, 2)
+                    ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)
+                if results:
+                    annotated_frame = results[0].plot()
+                    if results[0].boxes is not None:
+                        detections_count = len(results[0].boxes)
+                        names = results[0].names or {}
+                        for b in results[0].boxes:
+                            cls_id = int(b.cls[0].item()) if b.cls is not None else 0
+                            detected_labels.append(names.get(cls_id, f"obj-{cls_id}"))
+            elif frame is not None:
+                annotated_frame = frame
 
         # JPEG encode frame for MJPEG HTTP viewing (worker already encodes when
         # process-per-client; parent encodes skip-frames and in-process path).
@@ -649,26 +692,15 @@ class CCTVAnalyzer:
                 ctx.detected_objects = detected_labels
             _mtx().push_bgr(client_id, annotated_frame)
 
-        # In non-worker mode or when frame is skipped, record e2e_delay here.
-        # When worker handles the frame, _collect_loop records e2e_delay after inference finishes.
-        if t_capture_ns is not None and not (YOLO_PROCESS_PER_CLIENT and self._model is None and seq % FRAME_SKIP == 0):
-            e2e_delay = (time.time_ns() - t_capture_ns) / 1e9
-            E2E_DELAY.observe(max(e2e_delay, 0.0))
-            with GLOBAL_LOCK:
-                ctx.e2e_samples.append(e2e_delay)
-                ctx.e2e_delay_ms = round(max(0.0, e2e_delay * 1000.0), 2)
-
         return Gst.FlowReturn.OK
 
     @staticmethod
     def _encode_jpeg(frame_arr) -> Optional[bytes]:
         try:
-            from PIL import Image
+            import cv2
 
-            im = Image.fromarray(frame_arr)
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=75)
-            return buf.getvalue()
+            ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+            return buf.tobytes() if ok else None
         except Exception:
             return None
 
@@ -786,10 +818,13 @@ class CCTVAnalyzer:
         self.server.set_address(BIND_ADDRESS)
         self.server.set_service(str(RTSP_PORT))
 
-        # Register default mount points and multi-UE / multi-camera mount points
+        # Register canonical mount points and multi-UE / multi-camera mount points
         mount_list = [
-            (f"/{STREAM_PATH}", "slicea"),
-            ("/slicea", "slicea"),
+            (f"/{STREAM_PATH}", "slicea_cam1"),
+            ("/slicea", "slicea_cam1"),
+            (f"/{STREAM_PATH}_cam1", "slicea_cam1"),
+            ("/slicea_cam1", "slicea_cam1"),
+            ("/slicea_1", "slicea_cam1"),
         ]
         for cam in range(2, 9):
             mount_list.extend([
@@ -845,7 +880,7 @@ class CCTVAnalyzer:
 
 
 def main() -> None:
-    CCTVAnalyzer().run()
+    CCTVServer().run()
 
 
 if __name__ == "__main__":

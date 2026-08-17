@@ -15,9 +15,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from edge.state import snapshot_clients, CLIENT_STREAMS, GLOBAL_LOCK
+    from edge.state import (
+        CLIENT_STREAMS,
+        GLOBAL_LOCK,
+        format_client_name,
+        mtx_path_for,
+        normalize_canonical_client_id,
+        snapshot_clients,
+    )
 except ImportError:
-    from state import snapshot_clients, CLIENT_STREAMS, GLOBAL_LOCK
+    from state import (
+        CLIENT_STREAMS,
+        GLOBAL_LOCK,
+        format_client_name,
+        mtx_path_for,
+        normalize_canonical_client_id,
+        snapshot_clients,
+    )
 
 FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR", "/app/frontend/dist"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
@@ -78,6 +92,23 @@ class ClientOut(BaseModel):
     snapshot_path: str
 
 
+class ConnectedClientItem(BaseModel):
+    id: str
+    name: str
+    active: bool
+    fps: float
+    has_frame: bool
+    mtx_publishing: bool
+
+
+class ConnectedClientsOut(BaseModel):
+    ok: bool = True
+    count: int
+    active_count: int
+    client_ids: List[str]
+    clients: List[ConnectedClientItem]
+
+
 class StatusOut(BaseModel):
     app: str = "cctv"
     yolo_enabled: bool
@@ -119,6 +150,43 @@ def health() -> HealthOut:
     )
 
 
+@app.get(
+    "/api/v1/connected",
+    response_model=ConnectedClientsOut,
+    tags=["Status"],
+    summary="Get connected clients (primary backend status)",
+)
+@app.get("/api/connected", response_model=ConnectedClientsOut, tags=["Status"], include_in_schema=False)
+@app.get("/api/v1/clients/connected", response_model=ConnectedClientsOut, tags=["Status"], include_in_schema=False)
+def get_connected_clients() -> ConnectedClientsOut:
+    """Fast, lightweight endpoint returning connected clients and basic stream presence without publishing data."""
+    items = []
+    client_ids = []
+    active_cnt = 0
+    for c in snapshot_clients():
+        is_act = bool(c.get("active", False))
+        if is_act:
+            active_cnt += 1
+        client_ids.append(c["id"])
+        items.append(
+            ConnectedClientItem(
+                id=c["id"],
+                name=c.get("name", c["id"]),
+                active=is_act,
+                fps=float(c.get("fps", 0.0)),
+                has_frame=bool(c.get("has_frame", False)),
+                mtx_publishing=bool(c.get("mtx_publishing", False)),
+            )
+        )
+    return ConnectedClientsOut(
+        ok=True,
+        count=len(items),
+        active_count=active_cnt,
+        client_ids=client_ids,
+        clients=items,
+    )
+
+
 @app.get("/api/v1/status", response_model=StatusOut, tags=["Status"])
 @app.get("/api/status", response_model=StatusOut, tags=["Status"], include_in_schema=False)
 def status() -> StatusOut:
@@ -145,40 +213,50 @@ def clients() -> Dict[str, List[ClientOut]]:
 
 @app.api_route("/snapshot/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="JPEG snapshot")
 def snapshot(client_id: str) -> Response:
+    norm_id = normalize_canonical_client_id(client_id)
     jpeg = None
     with GLOBAL_LOCK:
-        ctx = CLIENT_STREAMS.get(client_id)
+        ctx = CLIENT_STREAMS.get(norm_id) or CLIENT_STREAMS.get(client_id)
         if ctx is not None:
             jpeg = ctx.latest_jpeg
         elif CLIENT_STREAMS:
             jpeg = next(iter(CLIENT_STREAMS.values())).latest_jpeg
     if not jpeg:
         raise HTTPException(status_code=404, detail="No frame available")
-    return Response(content=jpeg, media_type="image/jpeg")
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.api_route("/video/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="MJPEG fallback subscribe")
 def mjpeg(client_id: str) -> StreamingResponse:
+    norm_id = normalize_canonical_client_id(client_id)
+
     def gen():
         last = None
-        while True:
-            jpeg = None
-            with GLOBAL_LOCK:
-                ctx = CLIENT_STREAMS.get(client_id)
-                if ctx is None and CLIENT_STREAMS:
-                    ctx = next(iter(CLIENT_STREAMS.values()))
-                if ctx is not None:
-                    jpeg = ctx.latest_jpeg
-            if jpeg and jpeg is not last:
-                last = jpeg
-                yield (
-                    b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                    + str(len(jpeg)).encode()
-                    + b"\r\n\r\n"
-                    + jpeg
-                    + b"\r\n"
-                )
-            time.sleep(0.04)
+        try:
+            while True:
+                jpeg = None
+                with GLOBAL_LOCK:
+                    ctx = CLIENT_STREAMS.get(norm_id) or CLIENT_STREAMS.get(client_id)
+                    if ctx is None and CLIENT_STREAMS:
+                        ctx = next(iter(CLIENT_STREAMS.values()))
+                    if ctx is not None:
+                        jpeg = ctx.latest_jpeg
+                if jpeg and jpeg is not last:
+                    last = jpeg
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                        + str(len(jpeg)).encode()
+                        + b"\r\n\r\n"
+                        + jpeg
+                        + b"\r\n"
+                    )
+                time.sleep(0.04)
+        except (GeneratorExit, ConnectionResetError, BrokenPipeError):
+            pass
 
     return StreamingResponse(
         gen(),

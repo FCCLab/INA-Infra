@@ -31,13 +31,10 @@ def _pin_cpus(cpu_set: Optional[Sequence[int]]) -> None:
 
 def _encode_jpeg(frame_arr: Any) -> Optional[bytes]:
     try:
-        import io
-        from PIL import Image
+        import cv2
 
-        im = Image.fromarray(frame_arr)
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=75)
-        return buf.getvalue()
+        ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        return buf.tobytes() if ok else None
     except Exception:
         return None
 

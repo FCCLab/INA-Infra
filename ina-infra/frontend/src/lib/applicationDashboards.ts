@@ -32,8 +32,8 @@ export const APPLICATION_DASHBOARDS: Record<
     sliceId: 1,
     dashboard: {
       href: "http://10.1.137.120:30080/",
-      label: "CCTV Video Wall",
-      title: "Open CCTV video wall & Swagger (10.1.137.120:30080)",
+      label: "CCTV Dashboard",
+      title: "Open CCTV dashboard & Swagger (10.1.137.120:30080)",
     },
     grafana: {
       href: grafanaUrl("ffvbyfvl0i29sd", "cctv-dashboard", "2s"),
@@ -47,7 +47,7 @@ export const APPLICATION_DASHBOARDS: Record<
     sliceId: 2,
     dashboard: {
       href: "http://10.1.137.133:30082/",
-      label: "Physical AI",
+      label: "Physical AI Dashboard",
       title: "Open Physical AI dashboard (HF token + vLLM) on 10.1.137.133:30082",
     },
     grafana: {

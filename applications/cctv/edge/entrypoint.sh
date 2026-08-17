@@ -84,5 +84,5 @@ else
   log info "using external MediaMTX at ${MTX_RTSP_URL}"
 fi
 
-log info "starting GStreamer analyzer + FastAPI"
-exec python3 -m edge.analyzer
+log info "starting GStreamer CCTV server + FastAPI"
+exec python3 -m edge.cctv
