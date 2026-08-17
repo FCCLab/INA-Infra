@@ -60,16 +60,16 @@ function sortClients(list: CctvClient[]): CctvClient[] {
   });
 }
 
-export async function fetchClients(): Promise<CctvClient[]> {
-  const res = await fetch("/api/v1/clients", { cache: "no-store" });
+export async function fetchClients(signal?: AbortSignal): Promise<CctvClient[]> {
+  const res = await fetch("/api/v1/clients", { cache: "no-store", signal });
   if (!res.ok) throw new Error(`clients ${res.status}`);
   const body = (await res.json()) as { clients?: CctvClient[] };
   const list = Array.isArray(body.clients) ? body.clients : [];
   return sortClients(list);
 }
 
-export async function fetchStatus(): Promise<CctvStatus> {
-  const res = await fetch("/api/v1/status", { cache: "no-store" });
+export async function fetchStatus(signal?: AbortSignal): Promise<CctvStatus> {
+  const res = await fetch("/api/v1/status", { cache: "no-store", signal });
   if (!res.ok) throw new Error(`status ${res.status}`);
   const data = (await res.json()) as CctvStatus;
   if (Array.isArray(data.clients)) {

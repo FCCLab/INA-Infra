@@ -56,6 +56,14 @@ wait_for_iface "$OTA_IFACE"
 wait_for_iface "$METRICS_IFACE"
 check_chrony
 
+if ip link show dev net1 >/dev/null 2>&1; then
+  NET1_IP=$(ip -4 -o addr show dev net1 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+  if [ -n "${NET1_IP}" ] && command -v arping >/dev/null 2>&1; then
+    log info "announcing static MAC on net1 (${NET1_IP})"
+    arping -c 3 -U -I net1 "${NET1_IP}" >/dev/null 2>&1 || true
+  fi
+fi
+
 if [ -n "${MULTUS_IP:-}" ]; then
   export MTX_WEBRTCICEHOSTNAT1TO1IPS="${MULTUS_IP}"
 fi

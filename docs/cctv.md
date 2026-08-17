@@ -52,14 +52,20 @@ UE ingest stays on GStreamer so RTP NTP-64 / RTCP SR timestamps are not relayed 
 
 | Port | Service / Container | Scope | Role |
 |------|---------------------|-------|------|
-| **80** (NodePort 30080) | `frontend` (Nginx) | External | Video Wall Web UI, API reverse proxy, HLS streaming |
-| **8554** (NodePort 30160) | `cctv` (GStreamer) | Multus / External | UE RTSP RECORD Ingest (with NTP-64 timestamps) |
-| **8080** | `cctv` (FastAPI) | Localhost | REST API, JPEG Snapshots (`/snapshot/{id}`), MJPEG (`/video/{id}`) |
+| **80** (NodePort 30080) | `frontend` (Nginx) | External | Video Wall Web UI, API reverse proxy, MediaMTX HLS streaming |
+| **8554** (NodePort 30160) | `cctv` (GStreamer) | Multus (`10.1.137.161`) | UE RTSP RECORD Ingest (with NTP-64 timestamps) |
+| **8080** | `cctv` (FastAPI) | Localhost | REST API, JPEG Snapshots (`/snapshot/{id}`) |
 | **8555** | `mediamtx` (RTSP) | Localhost | Annotated RTSP stream push from YOLO workers (`/cam_*`) |
 | **8888** | `mediamtx` (HLS) | Localhost | HLS stream remuxer (fMP4 playlist `/live/{path}`) |
 | **8889** | `mediamtx` (WebRTC) | Localhost | WebRTC WHEP streaming (`/whep/{path}`) |
 | **9102** (NodePort 32431) | `cctv` (Prometheus)| External | Telemetry metrics endpoint (`/metrics`) |
 | **9997** | `mediamtx` (API) | Localhost | MediaMTX control & management API |
+
+## Network & Multus Configuration
+
+- **Static Deterministic MAC**: Pinned to `02:42:0a:01:89:a1` on Multus interface `net1` (`10.1.137.161/24`).
+- **Gratuitous ARP**: On startup, `entrypoint.sh` executes `arping -c 3 -U -I net1 10.1.137.161` to instantly update switch and router ARP tables.
+- **NetworkAttachmentDefinition**: Configured with `"capabilities": {"ips": true, "mac": true}` in `app-slice1-multus`.
 
 ## API Endpoints
 
@@ -70,10 +76,9 @@ Base: `http://10.1.137.120:30080`. Interactive docs: `/docs`. OpenAPI: `/openapi
 | GET | `/api/v1/health` | Backend + MediaMTX + Frontend readiness |
 | GET | `/api/v1/status` | YOLO flags, MediaMTX active paths, camera telemetry & object detections |
 | GET | `/api/v1/connected` | Fast lightweight status of connected clients and stream activity |
-| GET | `/api/v1/clients` | Live camera list + HLS/WHEP/MJPEG URLs & latency stats |
+| GET | `/api/v1/clients` | Live camera list + HLS/WHEP URLs & latency stats |
 | GET | `/live/{path}` | HLS subscribe (proxied to MediaMTX :8888) |
 | POST | `/whep/{path}` | WHEP subscribe (proxied to MediaMTX :8889) |
-| GET | `/video/{id}` | Low-latency MJPEG live stream (proxied to Backend :8080) |
 | GET | `/snapshot/{id}` | Single JPEG image with YOLO bounding boxes (`Cache-Control: no-cache`) |
 
 ### Latency Measurement & Telemetry Format
@@ -87,10 +92,12 @@ $$\text{Net Delay} \longrightarrow \text{Inference Delay} \longrightarrow \text{
 
 ## Video Wall Dashboard Features
 
+- **Exclusive MediaMTX Pub/Sub Engine**: High-performance multi-subscriber streaming via HLS fMP4 and WebRTC WHEP. Zero CPU overhead on the Python YOLO backend.
+- **On-Demand Viewport Streaming**: React `IntersectionObserver` ensures only visible, active camera feeds decode video in the browser. Inactive or hidden tiles are automatically paused/destroyed.
+- **Non-Blocking Telemetry Polling**: Periodic `/api/v1/clients` updates use `AbortController` to cancel in-flight requests, preventing socket queues.
 - **Pattern Layout Selector**: `Auto`, `1 (Focus View)`, `2x2`, `3x3`, `4x4`.
 - **Camera Sorting & Reordering**: `Sort: Active First`, `Sort: Detections Count`, `Sort: Name`, `Sort: Ingest Order`.
 - **Single View Focus**: Instant camera picker dropdown in `1` mode.
-- **Dual Streaming Modes**: Instant zero-latency MJPEG default with live fallback and one-click `HLS Stream` toggle.
 
 ## Build and GitOps Deployment
 

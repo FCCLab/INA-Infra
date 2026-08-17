@@ -6,10 +6,25 @@ import StatusDot from "../components/ui/StatusDot";
 import { fetchClients, formatCameraName, type CctvClient } from "../lib/api";
 
 function CameraTile({ cam }: { cam: CctvClient }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [streamMode, setStreamMode] = useState<"mjpeg" | "hls">("hls");
   const [hlsPlaying, setHlsPlaying] = useState(false);
   const [timeStr, setTimeStr] = useState("");
+  const [inView, setInView] = useState(true);
+
+  // Lazy in-view observer: only stream video when tile is visible in the viewport
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        setInView(entry.isIntersecting);
+      },
+      { threshold: 0.05 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     const updateClock = () => {
@@ -22,7 +37,7 @@ function CameraTile({ cam }: { cam: CctvClient }) {
   }, []);
 
   useEffect(() => {
-    if (streamMode !== "hls") {
+    if (!inView || !cam.active) {
       setHlsPlaying(false);
       return;
     }
@@ -40,6 +55,10 @@ function CameraTile({ cam }: { cam: CctvClient }) {
         lowLatencyMode: true,
         liveSyncDurationCount: 1,
         maxLiveSyncPlaybackRate: 1.5,
+        manifestLoadingTimeOut: 4000,
+        levelLoadingTimeOut: 4000,
+        fragLoadingTimeOut: 4000,
+        enableWorker: true,
       });
       hls.loadSource(src);
       hls.attachMedia(el);
@@ -50,14 +69,27 @@ function CameraTile({ cam }: { cam: CctvClient }) {
         setHlsPlaying(true);
         el.play().catch(() => {});
       });
-      hls.on(Hls.Events.ERROR, () => {
-        setHlsPlaying(false);
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls?.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls?.recoverMediaError();
+              break;
+            default:
+              setHlsPlaying(false);
+              hls?.destroy();
+              break;
+          }
+        }
       });
     }
     return () => {
       hls?.destroy();
     };
-  }, [cam.hls_path, streamMode]);
+  }, [cam.hls_path, cam.active, inView]);
 
   const detSummary = useMemo(() => {
     if (!cam.detected_objects || cam.detected_objects.length === 0) {
@@ -70,10 +102,10 @@ function CameraTile({ cam }: { cam: CctvClient }) {
     return Object.entries(counts).map(([name, count]) => `${name} × ${count}`);
   }, [cam.detected_objects, cam.detections_count]);
 
-  const isHlsActive = streamMode === "hls" && hlsPlaying;
+  const isHlsActive = hlsPlaying;
 
   return (
-    <div className={`cam-card ${cam.active ? "is-live" : ""}`}>
+    <div ref={containerRef} className={`cam-card ${cam.active ? "is-live" : ""}`}>
       <div className="cam-card-topbar">
         <div className="cam-meta-left">
           <StatusDot state={cam.active ? "ok" : "warn"} />
@@ -84,20 +116,13 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           <span className={`cam-badge ${cam.active ? "cam-badge-live" : "cam-badge-idle"}`}>
             {cam.active ? `${cam.fps.toFixed(1)} FPS` : "OFFLINE"}
           </span>
-          <button
-            type="button"
-            className={`cam-badge ${streamMode === "hls" ? "cam-badge-live" : "cam-badge-idle"}`}
-            style={{ cursor: "pointer", border: "none" }}
-            onClick={() => setStreamMode((prev) => (prev === "hls" ? "mjpeg" : "hls"))}
-            title="Click to toggle between MediaMTX Pub/Sub (HLS) and Direct MJPEG"
-          >
-            {streamMode === "hls" ? "MediaMTX (HLS)" : "MJPEG (Direct)"}
-          </button>
+          <span className="cam-badge cam-badge-live" title="Streaming exclusively via MediaMTX Pub/Sub (HLS/WebRTC)">
+            MediaMTX
+          </span>
         </div>
       </div>
 
       <div className="cam-stage">
-        {/* HLS Video Player */}
         <video
           ref={videoRef}
           autoPlay
@@ -106,15 +131,13 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           style={{ display: isHlsActive ? "block" : "none" }}
         />
 
-        {/* Instant MJPEG / Snapshot Stream */}
         {!isHlsActive && (
           <img
-            src={cam.mjpeg_path}
+            src={`${cam.snapshot_path}?t=${Date.now()}`}
             alt={cam.name || cam.id}
             style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
             onError={(e) => {
-              const target = e.currentTarget;
-              target.src = `${cam.snapshot_path}?t=${Date.now()}`;
+              e.currentTarget.style.display = "none";
             }}
           />
         )}
@@ -178,24 +201,28 @@ function CameraTile({ cam }: { cam: CctvClient }) {
         </div>
 
         <div className="cam-foot-links">
-          <a
-            href={cam.snapshot_path}
-            target="_blank"
-            rel="noreferrer"
-            className="cam-mini-btn"
-            title="Download full resolution JPEG snapshot"
-          >
-            Snap
-          </a>
-          <a
-            href={cam.hls_path}
-            target="_blank"
-            rel="noreferrer"
-            className="cam-mini-btn"
-            title="Open MediaMTX HLS playlist"
-          >
-            HLS
-          </a>
+          {cam.hls_path && (
+            <a
+              href={cam.hls_path}
+              target="_blank"
+              rel="noreferrer"
+              className="cam-foot-btn"
+              title="Open MediaMTX HLS Stream in new tab"
+            >
+              HLS Stream
+            </a>
+          )}
+          {cam.whep_path && (
+            <a
+              href={cam.whep_path}
+              target="_blank"
+              rel="noreferrer"
+              className="cam-foot-btn"
+              title="Open WebRTC WHEP endpoint"
+            >
+              WebRTC
+            </a>
+          )}
         </div>
       </div>
     </div>
@@ -214,18 +241,25 @@ export default function WallPage() {
 
   useEffect(() => {
     let stop = false;
+    let abortController: AbortController | null = null;
     const tick = async () => {
+      if (stop) return;
+      abortController?.abort();
+      abortController = new AbortController();
       try {
-        const next = await fetchClients();
+        const next = await fetchClients(abortController.signal);
         if (!stop) setClients(next);
-      } catch {
-        /* keep last */
+      } catch (err: any) {
+        if (err?.name !== "AbortError") {
+          /* keep last */
+        }
       }
     };
     void tick();
     const id = window.setInterval(() => void tick(), 1500);
     return () => {
       stop = true;
+      abortController?.abort();
       window.clearInterval(id);
     };
   }, []);
