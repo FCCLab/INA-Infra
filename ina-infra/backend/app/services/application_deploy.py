@@ -732,16 +732,79 @@ def generate_server_manifests(
         )
         dash_port = int(p.get("dashboard_port") or 8080)
 
+        def _read_dash(name: str) -> str:
+            path = f"/home/fcp/INA-Infra/applications/physical_ai/dashboard/{name}"
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            return ""
+
+        dash_cm_data = {
+            "app.py": _read_dash("app.py"),
+            "index.html": _read_dash("static/index.html"),
+        }
+        if any(dash_cm_data.values()):
+            dash_cm_manifest = {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "physical-ai-dashboard-code",
+                    "namespace": profile_name,
+                    "labels": labels,
+                },
+                "data": {k: v for k, v in dash_cm_data.items() if v},
+            }
+            manifests.append(dash_cm_manifest)
+
         pod_spec = {
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": node_sel,
             "runtimeClassName": "nvidia",
+            "volumes": [
+                {
+                    "name": "hf-token-vol",
+                    "secret": {
+                        "secretName": "ina-hf-token",
+                        "optional": True,
+                    },
+                },
+                {
+                    "name": "dashboard-code",
+                    "configMap": {
+                        "name": "physical-ai-dashboard-code",
+                        "defaultMode": 0o644,
+                    },
+                },
+                {
+                    "name": "dashboard-static",
+                    "emptyDir": {},
+                },
+            ],
             "containers": [
                 {
                     "name": "vllm",
                     "image": server_img,
                     "imagePullPolicy": "IfNotPresent",
+                    "command": [
+                        "/bin/bash",
+                        "-c",
+                        (
+                            "TOKEN_FILE=/var/run/secrets/hf-token/token\n"
+                            "echo \"[vllm-wrapper] Waiting for HF token at ${TOKEN_FILE}...\"\n"
+                            "while true; do\n"
+                            "  if [ -f \"${TOKEN_FILE}\" ] && [ -s \"${TOKEN_FILE}\" ]; then\n"
+                            "    echo \"[vllm-wrapper] Token found, starting vLLM.\"\n"
+                            "    break\n"
+                            "  fi\n"
+                            "  echo \"[vllm-wrapper] Token not ready, retrying in 10s. Enter via dashboard at :8080\"\n"
+                            "  sleep 10\n"
+                            "done\n"
+                            "export HF_TOKEN=$(cat \"${TOKEN_FILE}\")\n"
+                            "export HUGGING_FACE_HUB_TOKEN=\"${HF_TOKEN}\"\n"
+                            "exec /app/entrypoint-vllm.sh\n"
+                        ),
+                    ],
                     "env": [
                         *common_env,
                         {"name": "APP_NAME", "value": app_name},
@@ -773,6 +836,13 @@ def generate_server_manifests(
                             },
                         },
                     ],
+                    "volumeMounts": [
+                        {
+                            "name": "hf-token-vol",
+                            "mountPath": "/var/run/secrets/hf-token",
+                            "readOnly": True,
+                        },
+                    ],
                     "ports": [
                         {"name": "http", "containerPort": http_port},
                         {"name": "metrics", "containerPort": metrics_port},
@@ -785,13 +855,14 @@ def generate_server_manifests(
                 {
                     "name": "dashboard",
                     "image": dash_img,
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "env": [
                         {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
                         {"name": "MODEL_NAME", "value": model_name},
                         {"name": "VLLM_URL", "value": f"http://127.0.0.1:{http_port}"},
                         {"name": "HF_SECRET_NAME", "value": "ina-hf-token"},
                         {"name": "HF_DEPLOY_NAME", "value": app_name},
+                        {"name": "DASHBOARD_STATIC", "value": "/app/static"},
                     ],
                     "ports": [
                         {"name": "dashboard", "containerPort": dash_port, "hostPort": dash_port},
@@ -802,7 +873,7 @@ def generate_server_manifests(
                     },
                 },
                 _influx_pusher_container(metrics_port, app_name, sid, profile_name, app_type, target_cluster),
-            ]
+            ],
         }
 
         deploy_manifest = {
@@ -815,6 +886,7 @@ def generate_server_manifests(
             },
             "spec": {
                 "replicas": 1,
+                "strategy": {"type": "Recreate"},
                 "selector": {"matchLabels": labels},
                 "template": {
                     "metadata": {
