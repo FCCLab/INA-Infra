@@ -469,7 +469,7 @@ def generate_server_manifests(
                 "plugins": [
                     {
                         "type": "macvlan",
-                        "capabilities": {"ips": True},
+                        "capabilities": {"ips": True, "mac": True},
                         "master": master,
                         "mode": "bridge",
                         "ipam": {
@@ -493,12 +493,13 @@ def generate_server_manifests(
         },
     }
 
+    app_mac = f"02:42:0a:01:89:{160 + sid:02x}"
     net_annot = json.dumps([
         {
             "name": nad_name,
-            "interface": "net1",
             "ips": [f"{app_multus_ip}/24"],
-            "gateways": [gw],
+            "gateway": [gw],
+            "mac": app_mac,
         }
     ])
 
@@ -554,6 +555,7 @@ def generate_server_manifests(
             "api.py": _read_edge("api.py"),
             "mtx_publish.py": _read_edge("mtx_publish.py"),
             "mediamtx.yml": _read_edge("mediamtx.yml"),
+            "entrypoint.sh": _read_edge("entrypoint.sh"),
             "__init__.py": _read_edge("__init__.py"),
         }
 
@@ -589,7 +591,7 @@ def generate_server_manifests(
                 {
                     "name": "cctv",
                     "image": server_img,
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "volumeMounts": edge_mounts,
                     "env": [
                         *common_env,
@@ -608,10 +610,10 @@ def generate_server_manifests(
                         {"name": "FRAME_SKIP", "value": str(frame_skip)},
                         {"name": "METRICS_PORT", "value": str(metrics_port)},
                         {"name": "METRICS_ADDR", "value": "0.0.0.0"},
-                        {"name": "MTX_RTSP_URL", "value": f"rtsp://{app_name}-mediamtx:8555"},
-                        {"name": "MTX_HLS_URL", "value": f"http://{app_name}-mediamtx:8888"},
-                        {"name": "MTX_WHEP_URL", "value": f"http://{app_name}-mediamtx:8889"},
-                        {"name": "MTX_API_URL", "value": f"http://{app_name}-mediamtx:9997"},
+                        {"name": "MTX_RTSP_URL", "value": "rtsp://127.0.0.1:8555"},
+                        {"name": "MTX_HLS_URL", "value": "http://127.0.0.1:8888"},
+                        {"name": "MTX_WHEP_URL", "value": "http://127.0.0.1:8889"},
+                        {"name": "MTX_API_URL", "value": "http://127.0.0.1:9997"},
                         {"name": "START_MEDIAMTX", "value": "false"},
                         {"name": "LOG_INTERVAL_S", "value": "1"},
                     ],
