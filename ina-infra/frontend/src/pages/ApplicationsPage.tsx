@@ -191,7 +191,7 @@ export default function ApplicationsPage() {
       <Card className="tier">
         <SectionLabel kicker="Per application">Consoles</SectionLabel>
         <p className="hint" style={{ marginTop: 0 }}>
-          Each application has a control console and a Grafana metrics dashboard.
+          Each application has a control console and a Grafana dashboard (metrics).
         </p>
         <div className="app-console-grid">
           {APPLICATION_CONSOLE_LIST.map((app) => (

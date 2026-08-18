@@ -50,16 +50,25 @@ def flux_per_ue_latency(app_type: str) -> str:
     )
 
 
-def flux_per_ue_throughput(app_type: str) -> str:
-    """5G PDU (oaitun) rate reported by each UE client sidecar."""
+def flux_per_ue_throughput(app_type: str, direction: str | None = None) -> str:
+    """Per-UE 5G PDU on oaitun. direction is 'ul' (TX), 'dl' (RX), or both."""
+    if direction == "ul":
+        field = 'r._field == "throughput_ul_mbps"'
+        suffix = ""
+    elif direction == "dl":
+        field = 'r._field == "throughput_dl_mbps"'
+        suffix = ""
+    else:
+        field = 'r._field == "throughput_ul_mbps" or r._field == "throughput_dl_mbps"'
+        suffix = ' + " " + (if r._field == "throughput_ul_mbps" then "UL" else "DL")'
     return (
         'from(bucket: "default")\n'
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
         f'  |> filter(fn: (r) => r._measurement == "application_metrics" and r.app_type == "{app_type}")\n'
-        '  |> filter(fn: (r) => r._field == "throughput_mbps")\n'
+        f"  |> filter(fn: (r) => {field})\n"
         '  |> filter(fn: (r) => r.origin == "client")\n'
         "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
-        '  |> map(fn: (r) => ({ r with _field: if exists r.app_name and r.app_name != "" then r.app_name else r.ue_id }))\n'
+        f'  |> map(fn: (r) => ({{ r with _field: (if exists r.app_name and r.app_name != "" then r.app_name else r.ue_id){suffix} }}))\n'
         "  |> yield()"
     )
 
@@ -77,26 +86,59 @@ def flux_agg_latency(app_type: str) -> str:
     )
 
 
-def flux_agg_throughput(app_type: str) -> str:
-    """Sum of per-UE 5G interface throughput as a single Grafana series."""
+def flux_agg_throughput(app_type: str, direction: str | None = None) -> str:
+    """Sum of per-UE 5G oaitun rates. direction is 'ul', 'dl', or both.
+
+    Sidecar writes ~1 Hz with jitter, so a UE can miss a 1s bin. Use last()
+    per window and fill(usePrevious) so a missed bin still contributes that
+    UE's last rate. This is a native aggregateWindow (not overlapping
+    window(period: 2s), which is slow when Grafana picks a sub-second step).
+    """
+    if direction == "ul":
+        field = 'r._field == "throughput_ul_mbps"'
+        label = "UL"
+        group_cols = '["_time"]'
+        set_field = f'  |> set(key: "_field", value: "{label}")\n'
+    elif direction == "dl":
+        field = 'r._field == "throughput_dl_mbps"'
+        label = "DL"
+        group_cols = '["_time"]'
+        set_field = f'  |> set(key: "_field", value: "{label}")\n'
+    else:
+        field = 'r._field == "throughput_ul_mbps" or r._field == "throughput_dl_mbps"'
+        group_cols = '["_time", "_field"]'
+        set_field = (
+            '  |> map(fn: (r) => ({ r with _field: if r._field == "throughput_ul_mbps" then "UL" else "DL" }))\n'
+        )
     return (
         'from(bucket: "default")\n'
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
         f'  |> filter(fn: (r) => r._measurement == "application_metrics" and r.app_type == "{app_type}")\n'
-        '  |> filter(fn: (r) => r._field == "throughput_mbps")\n'
+        f"  |> filter(fn: (r) => {field})\n"
         '  |> filter(fn: (r) => r.origin == "client")\n'
-        "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
-        '  |> group(columns: ["_time"])\n'
+        "  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n"
+        "  |> fill(usePrevious: true)\n"
+        f"  |> group(columns: {group_cols})\n"
         "  |> sum()\n"
         "  |> group()\n"
-        '  |> set(key: "_field", value: "aggregated")\n'
+        f"{set_field}"
         '  |> set(key: "_measurement", value: "application_metrics")\n'
         "  |> yield()"
     )
 
 
-def timeseries(pid: int, title: str, x: int, y: int, w: int, h: int, query: str, unit: str = "short") -> dict:
-    return {
+def timeseries(
+    pid: int,
+    title: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    query: str,
+    unit: str = "short",
+    interval: str | None = None,
+) -> dict:
+    panel = {
         "datasource": DS,
         "fieldConfig": {
             "defaults": {
@@ -136,6 +178,9 @@ def timeseries(pid: int, title: str, x: int, y: int, w: int, h: int, query: str,
         "title": title,
         "type": "timeseries",
     }
+    if interval:
+        panel["interval"] = interval
+    return panel
 
 
 def stat(pid: int, title: str, x: int, y: int, query: str, unit: str = "short") -> dict:
@@ -170,7 +215,7 @@ def dashboard(uid: str, title: str, tags: list[str], panels: list[dict], refresh
         "schemaVersion": 40,
         "tags": tags,
         "templating": {"list": []},
-        "time": {"from": "now-15m", "to": "now"},
+        "time": {"from": "now-5m", "to": "now"},
         "timepicker": {"refresh_intervals": ["1s", "2s", "5s", "10s", "30s", "1m"]},
         "timezone": "browser",
         "title": title,
@@ -190,17 +235,20 @@ def write(name: str, payload: dict) -> None:
 
 
 def metrics_panels(app_type: str) -> list[dict]:
+    """DL row, UL row, then latency (per-UE | aggregated) — CCTV pattern."""
     return [
-        timeseries(1, "Per-UE latency", 0, 0, 12, 8, flux_per_ue_latency(app_type), "ms"),
-        timeseries(2, "Per-UE throughput (5G)", 12, 0, 12, 8, flux_per_ue_throughput(app_type), "Mbps"),
-        timeseries(3, "Aggregated latency", 0, 8, 12, 8, flux_agg_latency(app_type), "ms"),
-        timeseries(4, "Aggregated throughput (5G)", 12, 8, 12, 8, flux_agg_throughput(app_type), "Mbps"),
+        timeseries(1, "DL per UE (oaitun RX)", 0, 0, 12, 8, flux_per_ue_throughput(app_type, "dl"), "Mbps", interval="1s"),
+        timeseries(2, "DL aggregated (oaitun RX)", 12, 0, 12, 8, flux_agg_throughput(app_type, "dl"), "Mbps", interval="1s"),
+        timeseries(3, "UL per UE (oaitun TX)", 0, 8, 12, 8, flux_per_ue_throughput(app_type, "ul"), "Mbps", interval="1s"),
+        timeseries(4, "UL aggregated (oaitun TX)", 12, 8, 12, 8, flux_agg_throughput(app_type, "ul"), "Mbps", interval="1s"),
+        timeseries(5, "Per-UE latency", 0, 16, 12, 8, flux_per_ue_latency(app_type), "ms", interval="1s"),
+        timeseries(6, "Aggregated latency", 12, 16, 12, 8, flux_agg_latency(app_type), "ms", interval="1s"),
     ]
 
 
 def overview_panels(app_type: str, extra_fields: list[tuple[str, str, str]]) -> list[dict]:
     panels = [
-        stat(1, "Throughput (Mbps)", 0, 0, flux(app_type, 'r._field == "throughput_mbps"', extra='r.origin == "client"'), "Mbps"),
+        stat(1, "UL+DL (Mbps)", 0, 0, flux(app_type, 'r._field == "throughput_ul_mbps" or r._field == "throughput_dl_mbps"', extra='r.origin == "client"'), "Mbps"),
     ]
     for i, (title, pred, unit) in enumerate(extra_fields, start=2):
         panels.append(stat(i, title, (i - 1) * 6, 0, flux(app_type, pred), unit))
@@ -208,12 +256,12 @@ def overview_panels(app_type: str, extra_fields: list[tuple[str, str, str]]) -> 
         [
             timeseries(
                 10,
-                "Throughput",
+                "Per-UE 5G UL / DL (oaitun)",
                 0,
                 4,
                 12,
                 8,
-                flux(app_type, 'r._field =~ /throughput/'),
+                flux_per_ue_throughput(app_type),
                 "Mbps",
             ),
             timeseries(

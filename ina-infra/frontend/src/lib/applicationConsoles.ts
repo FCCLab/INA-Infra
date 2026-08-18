@@ -46,9 +46,9 @@ export const APPLICATION_CONSOLES: Record<
       title: "Open CCTV console & Swagger (10.1.137.211)",
     },
     grafana: {
-      href: grafanaUrl("ffvbyfvl0i29sd", "cctv-dashboard", "2s"),
-      label: "CCTV Dashboard",
-      title: "CCTV YOLO / e2e metrics on Grafana (10.1.137.105:3000)",
+      href: grafanaUrl("ina-cctv-metrics", "cctv-metrics"),
+      label: "Grafana Dashboard",
+      title: "Open CCTV Grafana dashboard (5G UL/DL and latency)",
     },
   },
   physical_ai: {
@@ -62,8 +62,8 @@ export const APPLICATION_CONSOLES: Record<
     },
     grafana: {
       href: grafanaUrl("ina-physical-ai", "physical-ai-metrics"),
-      label: "Physical AI Dashboard",
-      title: "Physical AI / vLLM metrics on Grafana",
+      label: "Grafana Dashboard",
+      title: "Open Physical AI Grafana dashboard (latency and throughput)",
     },
   },
   ott: {
@@ -77,8 +77,8 @@ export const APPLICATION_CONSOLES: Record<
     },
     grafana: {
       href: grafanaUrl("ina-ott-metrics", "ott-metrics"),
-      label: "OTT Dashboard",
-      title: "OTT time-series metrics on Grafana",
+      label: "Grafana Dashboard",
+      title: "Open OTT Grafana dashboard (5G UL/DL and latency)",
     },
   },
   iot: {
@@ -92,8 +92,8 @@ export const APPLICATION_CONSOLES: Record<
     },
     grafana: {
       href: grafanaUrl("ina-iot-metrics", "iot-metrics"),
-      label: "IoT Dashboard",
-      title: "IoT time-series metrics on Grafana",
+      label: "Grafana Dashboard",
+      title: "Open IoT Grafana dashboard (5G UL/DL and latency)",
     },
   },
 };

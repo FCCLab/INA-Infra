@@ -74,10 +74,10 @@ export default function App() {
           </a>
           <a
             className="docs-link"
-            href="http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv?orgId=1&refresh=2s"
+            href="http://10.1.137.105:3000/d/ina-cctv-metrics/cctv-metrics?orgId=1&refresh=5s"
             target="_blank"
             rel="noreferrer"
-            title="Open Grafana CCTV Dashboard"
+            title="Open Grafana CCTV Metrics"
           >
             Grafana
           </a>

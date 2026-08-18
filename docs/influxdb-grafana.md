@@ -45,7 +45,7 @@ Each application has **two** dashboards: an app UI (or Grafana overview) plus a 
 
 | App | UI dashboard | Grafana metrics |
 |-----|--------------|-----------------|
-| CCTV | [CCTV Dashboard](http://10.1.137.211/) | [cctv-dashboard](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s) |
+| CCTV | [CCTV Dashboard](http://10.1.137.211/) | [cctv-metrics](http://10.1.137.105:3000/d/ina-cctv-metrics/cctv-metrics?orgId=1&refresh=5s) |
 | Physical AI | [Physical AI Dashboard](http://10.1.137.212/) | [physical-ai-metrics](http://10.1.137.105:3000/d/ina-physical-ai/physical-ai-metrics?orgId=1&refresh=5s) |
 | OTT | [OTT Dashboard](http://10.1.137.213/) | [OTT Metrics](http://10.1.137.105:3000/d/ina-ott-metrics/ott-metrics?orgId=1&refresh=5s) |
 | IoT | [IoT Dashboard](http://10.1.137.214/) | [IoT Metrics](http://10.1.137.105:3000/d/ina-iot-metrics/iot-metrics?orgId=1&refresh=5s) |

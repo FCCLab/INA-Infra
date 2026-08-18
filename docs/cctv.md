@@ -16,7 +16,7 @@ Vision streaming over 5G: UE **publishers** push RTSP RECORD to the analyzer; YO
 |------|-----|
 | Video Wall Web Dashboard | [http://10.1.137.211/](http://10.1.137.211/) (Multus, not NodePort) |
 | Swagger API Docs | [http://10.1.137.211/docs](http://10.1.137.211/docs) |
-| Grafana CCTV Dashboard | [http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s) (`inainfra` / `inainfra`) — other apps: [influxdb-grafana.md](influxdb-grafana.md) |
+| Grafana CCTV Metrics | [http://10.1.137.105:3000/d/ina-cctv-metrics/cctv-metrics?orgId=1&refresh=5s](http://10.1.137.105:3000/d/ina-cctv-metrics/cctv-metrics?orgId=1&refresh=5s) (`inainfra` / `inainfra`) — other apps: [influxdb-grafana.md](influxdb-grafana.md) |
 | InfluxDB | [http://10.1.137.104:8086](http://10.1.137.104:8086) — see [influxdb-grafana.md](influxdb-grafana.md) |
 
 ## Data Path & Multi-Container Pod Architecture

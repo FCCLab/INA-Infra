@@ -89,12 +89,12 @@
         "collapsed": false,
         "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
         "id": 200,
-        "title": "Row 2: Throughput (Client Publish vs Server Publish)",
+        "title": "Row 2: 5G throughput (oaitun UL / DL per client)",
         "type": "row"
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Client Uplink Throughput measured directly on each UE 5G PDU session interface (oaitun_ue). Client published.",
+        "description": "Per-UE 5G PDU throughput from oaitun: UL = TX bytes, DL = RX bytes. Client sidecar.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
@@ -110,10 +110,10 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"edge\" and (r._field == \"throughput_client\" or r._field == \"throughput_mbps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Uplink (Mbps)\" }))\n  |> yield(name: \"client_tput\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"client\" and (r._field == \"throughput_ul_mbps\" or r._field == \"throughput_dl_mbps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + (if r._field == \"throughput_ul_mbps\" then \" UL\" else \" DL\") }))\n  |> yield(name: \"client_tput\")",
           "refId": "A"
         }],
-        "title": "Client Uplink Throughput (throughput_client)",
+        "title": "Per-client 5G UL / DL (oaitun)",
         "type": "timeseries"
       },
       {
@@ -255,7 +255,7 @@
     "schemaVersion": 40,
     "tags": ["cctv", "5g", "slice1", "yolo", "applications", "neuroran"],
     "templating": { "list": [] },
-    "time": { "from": "now-15m", "to": "now" },
+    "time": { "from": "now-5m", "to": "now" },
     "timepicker": { "refresh_intervals": ["1s", "2s", "5s", "10s", "30s", "1m"] },
     "timezone": "browser",
     "title": "CCTV Dashboard",
