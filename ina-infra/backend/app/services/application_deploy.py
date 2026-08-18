@@ -141,7 +141,7 @@ def iot_console_mac(slice_id: int, client_index: int) -> str:
     return site_ips.ue_console_mac(slice_id, client_index)
 
 
-OTT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/ott-ue-console:nws-v0.29-amd64"
+OTT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/ott-ue-console:nws-v0.33-amd64"
 OTT_CHROMIUM_IMAGE = os.environ.get(
     "OTT_CHROMIUM_IMAGE",
     "10.1.132.30:5000/linuxserver-chromium:latest",
@@ -210,7 +210,9 @@ def _influx_pusher_container(
     app_type: str,
     cluster: str,
     extra_env: Optional[list] = None,
+    ctr_name: str = "metrics-exporter",
 ) -> dict:
+
     # Edge shares a cluster with Influx; the 10.1.137.104 site VIP is not
     # reachable over TCP from gpu-a40 (ICMP works, :8086 does not).
     influx_url = (
@@ -237,19 +239,6 @@ def _influx_pusher_container(
         "clu = os.environ.get('TARGET_CLUSTER', 'edge')\n"
         "w_url = f'{url}/api/v2/write?org={org}&bucket={buc}&precision=ns'\n"
         "headers = {'Authorization': f'Token {tok}', 'Content-Type': 'text/plain; charset=utf-8'}\n"
-        "def get_net():\n"
-        "  s = {}\n"
-        "  try:\n"
-        "    with open('/proc/net/dev') as f:\n"
-        "      for l in f:\n"
-        "        if ':' not in l: continue\n"
-        "        iface, d = l.split(':', 1)\n"
-        "        p = d.split()\n"
-        "        s[iface.strip()] = (int(p[0]), int(p[8]))\n"
-        "  except Exception: pass\n"
-        "  return s\n"
-        "last_net = get_net()\n"
-        "last_t = time.time()\n"
         "last_ue_lat = {}\n"
         "def _parse_offset_to_ms(text):\n"
         "  m = re.search(r'Offset:\\s*([+-]?[0-9.]+)\\s*(ns|us|µs|ms|s)\\b', text or '')\n"
@@ -288,34 +277,7 @@ def _influx_pusher_container(
         "while True:\n"
         "  try:\n"
         "    fields = {}\n"
-        "    now_t = time.time()\n"
-        "    dt = max(0.5, now_t - last_t)\n"
-        "    curr_net = get_net()\n"
         "    is_client = ('client' in name)\n"
-        "    rx_sum = tx_sum = 0.0\n"
-        "    saw_iface = False\n"
-        "    for iface, (rx_b, tx_b) in curr_net.items():\n"
-        "      if is_client:\n"
-        "        if not iface.startswith('oaitun'): continue\n"
-        "      elif not (iface.startswith('oaitun') or iface.startswith('net1')):\n"
-        "        continue\n"
-        "      last_rx, last_tx = last_net.get(iface, (rx_b, tx_b))\n"
-        "      rx_sum += max(0.0, (rx_b - last_rx) * 8.0 / (dt * 1000000.0))\n"
-        "      tx_sum += max(0.0, (tx_b - last_tx) * 8.0 / (dt * 1000000.0))\n"
-        "      saw_iface = True\n"
-        "    if saw_iface:\n"
-        "      if is_client:\n"
-        "        tput = round(rx_sum + tx_sum, 3)\n"
-        "        fields['throughput_mbps'] = float(tput)\n"
-        "        fields['throughput_client'] = float(tput)\n"
-        "        fields['throughput_ul_mbps'] = float(round(tx_sum, 3))\n"
-        "        fields['throughput_dl_mbps'] = float(round(rx_sum, 3))\n"
-        "      else:\n"
-        "        tput = round(rx_sum, 3)\n"
-        "        fields['throughput_mbps'] = float(tput)\n"
-        "        fields['throughput_server'] = float(tput)\n"
-        "    last_net = curr_net\n"
-        "    last_t = now_t\n"
         "    koff = ntp_offset_ms()\n"
         "    if koff is not None:\n"
         "      if is_client:\n"
@@ -343,6 +305,8 @@ def _influx_pusher_container(
         "          try:\n"
         "            v = float(v_str)\n"
         "            if math.isnan(v) or math.isinf(v): continue\n"
+        "            if k in ('app_ue_rtt_ms', 'rtt_ms', 'throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client'):\n"
+        "              continue\n"
         "            ue_id = None\n"
         "            if lbls:\n"
         "              um = re.search(r'(?:ue_id|client)=\"([^\"]+)\"', lbls)\n"
@@ -358,8 +322,10 @@ def _influx_pusher_container(
         "                if 'latency_ms' not in slot and v != 0 and last_ue_lat.get(ue_id) != v:\n"
         "                  last_ue_lat[ue_id] = v\n"
         "                  slot['latency_ms'] = v\n"
-        "              elif k == 'app_ue_throughput_mbps':\n"
+        "              elif k in ('app_ue_throughput_mbps', 'app_ue_throughput_dl_mbps'):\n"
         "                slot['app_throughput_mbps'] = v\n"
+        "              elif k == 'app_ue_throughput_ul_mbps':\n"
+        "                slot['app_throughput_ul_mbps'] = v\n"
         "              short_k = k.replace('cctv_client_', '').replace('cctv_', '')\n"
         "              if short_k == 'ingress_fps': short_k = 'application_ingress_fps'\n"
         "              if short_k == 'egress_fps': short_k = 'application_egress_fps'\n"
@@ -372,7 +338,10 @@ def _influx_pusher_container(
         "              lbl_clean = re.sub(r'[^a-zA-Z0-9_]', '_', lbls)\n"
         "              k = f'{k}_{lbl_clean}'\n"
         "            k_clean = re.sub(r'[^a-zA-Z0-9_]', '_', k)\n"
-        "            fields[k_clean] = v\n"
+        "            if k_clean in ('app_ue_rtt_ms', 'rtt_ms', 'throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client'):\n"
+        "              pass\n"
+        "            else:\n"
+        "              fields[k_clean] = v\n"
         "          except Exception:\n"
         "            pass\n"
         "      if fields.get('cctv_ue_clock_offset_seconds'):\n"
@@ -384,12 +353,18 @@ def _influx_pusher_container(
         "          fields['clock_offset_server'] = float(fields[fk])\n"
         "        if fk.startswith('application_throughput_bytes_per_sec') and 'throughput_server' not in fields:\n"
         "          fields['throughput_server'] = round(float(fields[fk]) * 8.0 / 1e6, 3)\n"
-        "          fields.setdefault('throughput_mbps', fields['throughput_server'])\n"
+        "          if not is_client:\n"
+        "            fields.setdefault('throughput_mbps', fields['throughput_server'])\n"
         "      if fields.get('latency_ms') == 0:\n"
         "        fields.pop('latency_ms', None)\n"
         "      if is_client:\n"
+        "        for skip in ('throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client', 'app_ue_rtt_ms', 'rtt_ms'):\n"
+        "          fields.pop(skip, None)\n"
+        "      if is_client:\n"
         "        slot = per_client.setdefault(name, {})\n"
-        "        if 'latency_ms' in fields: slot['latency_ms'] = fields['latency_ms']\n"
+        "        for fk in ('latency_ms', 'app_ue_latency_ms'):\n"
+        "          if fk in fields and fk not in slot:\n"
+        "            slot[fk] = fields[fk]\n"
         "      if (not is_client) and typ == 'cctv':\n"
         "        keep = ('throughput_server', 'clock_offset_server', 'throughput_mbps', 'latency_ms', 'app_throughput_mbps', 'app_latency_ms')\n"
         "        fields = {k: v for k, v in fields.items() if k in keep or k.startswith('app_')}\n"
@@ -420,9 +395,10 @@ def _influx_pusher_container(
         "  time.sleep(1)\n"
     )
     container = {
-        "name": "metrics-exporter",
+        "name": ctr_name,
         "image": "docker.io/nicolaka/netshoot",
         "imagePullPolicy": "Always",
+
         "command": ["python3", "-c", pusher_code],
         "securityContext": {
             "privileged": True,
@@ -449,6 +425,79 @@ def _influx_pusher_container(
     if extra_env:
         container["env"].extend(extra_env)
     return container
+
+
+def _ue_influx_env(a_name: str, sid: int, profile_name: str, app_type: str, cluster: str) -> list:
+    influx_url = (
+        "http://influxdb.influxdb.svc:8086" if cluster == "edge" else "http://10.1.137.104:8086"
+    )
+    return [
+        {"name": "INFLUXDB_URL", "value": influx_url},
+        {"name": "INFLUXDB_TOKEN", "value": "ina-infra-influxdb-token"},
+        {"name": "INFLUXDB_ORG", "value": "ina-infra"},
+        {"name": "INFLUXDB_BUCKET", "value": "default"},
+        {"name": "INFLUXDB_MEASUREMENT", "value": "application_metrics"},
+        {"name": "SLICE_ID", "value": str(sid)},
+        {"name": "PROFILE_NAME", "value": profile_name},
+        {"name": "APP_TYPE", "value": app_type},
+        {"name": "APP_NAME", "value": a_name},
+        {"name": "TARGET_CLUSTER", "value": cluster},
+    ]
+
+
+def _rtt_probe_container(
+    a_name: str,
+    sid: int,
+    profile_name: str,
+    app_type: str,
+    cluster: str,
+    ping_target: str = "10.1.137.1",
+) -> dict:
+    """UE sidecar: ICMP RTT via dedicated rtt-probe image."""
+    env = _ue_influx_env(a_name, sid, profile_name, app_type, cluster)
+    env.append({"name": "RTT_PING_TARGET", "value": ping_target})
+    return {
+        "name": "rtt-probe",
+        "image": app_images.RTT_PROBE,
+        "imagePullPolicy": "Always",
+        "securityContext": {
+            "privileged": True,
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "env": env,
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "16Mi"},
+            "limits": {"cpu": "50m", "memory": "32Mi"},
+        },
+    }
+
+
+def _throughput_stats_container(
+    a_name: str,
+    sid: int,
+    profile_name: str,
+    app_type: str,
+    cluster: str,
+) -> dict:
+    """UE sidecar: oaitun RX/TX Mbps via dedicated throughput-statistics image."""
+    env = _ue_influx_env(a_name, sid, profile_name, app_type, cluster)
+    env.extend(
+        [
+            {"name": "IFACE", "value": ""},
+            {"name": "IFACE_PREFIX", "value": "oaitun"},
+            {"name": "SAMPLE_INTERVAL_S", "value": "1"},
+        ]
+    )
+    return {
+        "name": "throughput-statistics",
+        "image": app_images.THROUGHPUT_STATS,
+        "imagePullPolicy": "Always",
+        "env": env,
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "16Mi"},
+            "limits": {"cpu": "50m", "memory": "32Mi"},
+        },
+    }
 
 
 CONTROL_DASH_IMAGE = "10.1.132.30:5000/ina-control-dashboard:nws-v0.21-amd64"
@@ -1726,7 +1775,7 @@ def build_physical_ai_ue_containers(
             "limits": {"cpu": "500m", "memory": "256Mi"},
         },
     }
-    return [backend, frontend, build_client_metrics_container(profile_name, app_cfg, client_index)]
+    return [backend, frontend, *build_ue_metrics_sidecars(profile_name, app_cfg, client_index)]
 
 
 def build_iot_ue_containers(
@@ -1811,7 +1860,7 @@ def build_iot_ue_containers(
             "limits": {"cpu": "500m", "memory": "256Mi"},
         },
     }
-    return [backend, frontend, build_client_metrics_container(profile_name, app_cfg, client_index)]
+    return [backend, frontend, *build_ue_metrics_sidecars(profile_name, app_cfg, client_index)]
 
 
 def build_ott_ue_volumes() -> List[dict]:
@@ -1971,7 +2020,7 @@ def build_ott_ue_containers(
         backend,
         frontend,
         chromium,
-        build_client_metrics_container(profile_name, app_cfg, client_index),
+        *build_ue_metrics_sidecars(profile_name, app_cfg, client_index),
     ]
 
 
@@ -2004,7 +2053,57 @@ def build_client_metrics_container(
         profile_name,
         app_type,
         "edge",
+        ctr_name="metrics-exporter",
     )
+
+
+def build_client_rtt_probe_container(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    client_index: int = 1,
+) -> dict:
+    """Dedicated ICMP RTT sidecar (PDU ping). Separate from metrics-exporter."""
+    sid = app_cfg.slice_id
+    app_type = app_cfg.app_type.lower()
+    app_name = f"slice{sid}-{app_type}-client-{client_index}"
+    return _rtt_probe_container(
+        app_name,
+        sid,
+        profile_name,
+        app_type,
+        "edge",
+    )
+
+
+def build_client_throughput_stats_container(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    client_index: int = 1,
+) -> dict:
+    """Dedicated oaitun UL/DL Mbps sidecar. Separate from metrics-exporter."""
+    sid = app_cfg.slice_id
+    app_type = app_cfg.app_type.lower()
+    app_name = f"slice{sid}-{app_type}-client-{client_index}"
+    return _throughput_stats_container(
+        app_name,
+        sid,
+        profile_name,
+        app_type,
+        "edge",
+    )
+
+
+def build_ue_metrics_sidecars(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    client_index: int = 1,
+) -> List[dict]:
+    """metrics-exporter (scrape/NTP) + rtt-probe (ICMP) + throughput-statistics (oaitun)."""
+    return [
+        build_client_metrics_container(profile_name, app_cfg, client_index),
+        build_client_rtt_probe_container(profile_name, app_cfg, client_index),
+        build_client_throughput_stats_container(profile_name, app_cfg, client_index),
+    ]
 
 
 def patch_ue_pod_with_client(
@@ -2039,7 +2138,8 @@ def patch_ue_pod_with_client(
         if c.get("name") not in (
             "cctv-publisher", "aiperf", "ott-client", "iot-client", "custom-client",
             "backend", "frontend",
-            "metrics-exporter", f"app-client-metrics-{sid}",
+            "metrics-exporter", "rtt-probe", "throughput-statistics",
+            f"app-client-metrics-{sid}",
         )
     ]
 
@@ -2297,10 +2397,10 @@ def deploy_application_stream(
                     client_ctr = build_client_container(
                         profile_name, app, server_ip=server_ip, client_index=c_idx
                     )
-                    metrics_ctr = build_client_metrics_container(
+                    metrics_sidecars = build_ue_metrics_sidecars(
                         profile_name, app, client_index=c_idx
                     )
-                    client_containers = [c for c in [client_ctr, metrics_ctr] if c]
+                    client_containers = [c for c in [client_ctr, *metrics_sidecars] if c]
 
                 if app.app_type == "cctv":
                     _src, _url, vlabel = cctv_videos.clip_for_client(

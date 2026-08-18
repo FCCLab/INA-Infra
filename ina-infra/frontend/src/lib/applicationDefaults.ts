@@ -56,17 +56,18 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   ott: {
     name: "OTT HD Video Streaming",
     server_image: `${REG}/application-ott:nws-v0.10-amd64`,
-    client_image: `${REG}/ott-ue-console:nws-v0.29-amd64`,
+    client_image: `${REG}/ott-ue-console:nws-v0.33-amd64`,
     server_port: 8554,
     metrics_port: 9103,
     server_params: {
       stream_protocol: "rtsp",
-      resolution: "1080p",
+      resolution: "4k",
     },
     client_params: {
       client_count: 1,
       bitrate_kbps: 6000,
       stream_path: "live/hd",
+      play_quality: "4k",
     },
   },
   iot: {

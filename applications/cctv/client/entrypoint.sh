@@ -58,8 +58,9 @@ check_chrony() {
 }
 
 pin_pdu_routes_once() {
-  # Pin each PDU_ROUTE_HOSTS entry via the PDU tunnel (idempotent).
+  # Pin each PDU_ROUTE_HOSTS entry + 10.1.137.1 via the PDU tunnel (idempotent).
   local h ok=0
+  ip route replace "10.1.137.1/32" dev "$PDU_IFACE" 2>/dev/null || true
   IFS=',' read -ra _hosts <<< "$PDU_ROUTE_HOSTS"
   for h in "${_hosts[@]}"; do
     [ -z "$h" ] && continue
@@ -69,6 +70,7 @@ pin_pdu_routes_once() {
   done
   [ "$ok" -gt 0 ]
 }
+
 
 resolve_pdu_iface() {
   # OAI often names the tunnel oaitun_ue1 regardless of slice id.

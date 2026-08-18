@@ -8,8 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CONSOLE_ROLE=backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl iproute2 python3 \
+      ca-certificates curl iproute2 iputils-ping python3 \
     && rm -rf /var/lib/apt/lists/*
+
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv \

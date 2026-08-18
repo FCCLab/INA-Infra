@@ -61,6 +61,9 @@ if Gauge is not None:
     APP_UE_LATENCY_MS = Gauge(
         "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
     )
+    APP_UE_RTT_MS = Gauge(
+        "app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"]
+    )
     APP_UE_THROUGHPUT_MBPS = Gauge(
         "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
     )
@@ -69,7 +72,8 @@ if Gauge is not None:
         "app_throughput_mbps", "Aggregated application throughput (Mbps)"
     )
 else:
-    APP_UE_LATENCY_MS = APP_UE_THROUGHPUT_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+    APP_UE_LATENCY_MS = APP_UE_RTT_MS = APP_UE_THROUGHPUT_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+
 
 _lock = threading.Lock()
 _exchanges: deque[dict[str, Any]] = deque(maxlen=LOG_LIMIT)
@@ -303,7 +307,7 @@ def _discover_pdu_iface() -> Optional[str]:
 
 
 def _server_hosts() -> list[str]:
-    hosts: list[str] = []
+    hosts: list[str] = ["10.1.137.1"]
     for h in str(PDU_ROUTE_HOSTS).split(","):
         h = h.strip()
         if h and h not in hosts:
@@ -311,6 +315,32 @@ def _server_hosts() -> list[str]:
     if BROKER_HOST and BROKER_HOST not in hosts:
         hosts.append(BROKER_HOST)
     return hosts
+
+
+def _ping_loop() -> None:
+    while True:
+        try:
+            with _lock:
+                ready = bool(_state.get("pdu_ready"))
+            if ready:
+                res = subprocess.run(
+                    ["ping", "-c", "1", "-W", "1", "10.1.137.1"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if res.returncode == 0:
+                    import re
+
+                    m = re.search(r"time=([0-9.]+)\s*ms", res.stdout)
+                    if m:
+                        rtt = float(m.group(1))
+                        if APP_UE_RTT_MS is not None:
+                            APP_UE_RTT_MS.labels(ue_id=UE_ID).set(rtt)
+        except Exception:
+            pass
+        time.sleep(1.0)
+
 
 
 def _pin_pdu() -> bool:
@@ -468,6 +498,8 @@ def _mqtt_on_message(_client, _userdata, msg):
             if APP_LATENCY_MS is not None:
                 APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(avg)
                 APP_LATENCY_MS.set(avg)
+
+
             # Keep the console log readable: sample probes, always log spikes.
             if (_probe_seq % 10 == 0) or (rtt_ms >= 40.0):
                 _record(
@@ -809,4 +841,6 @@ def _startup() -> None:
             start_http_server(METRICS_PORT, addr="0.0.0.0")
         except Exception:
             pass
+    threading.Thread(target=_ping_loop, name="iot-ue-ping-loop", daemon=True).start()
     threading.Thread(target=_loop, name="iot-ue-loop", daemon=True).start()
+

@@ -19,9 +19,11 @@ CCTV_CLIENT = f"{REG}/application-cctv-publisher:nws-v0.10-amd64"
 PHYSICAL_AI_SERVER = f"{REG}/cosmo3-vllm:nws-v0.7"
 PHYSICAL_AI_CLIENT = f"{REG}/cosmo3-ue-console:nws-v0.18-amd64"
 OTT_SERVER = f"{REG}/application-ott:nws-v0.10-amd64"
-OTT_CLIENT = f"{REG}/ott-ue-console:nws-v0.29-amd64"
+OTT_CLIENT = f"{REG}/ott-ue-console:nws-v0.33-amd64"
 IOT_SERVER = f"{REG}/sliced-edge:nws-v0.9-amd64"
 IOT_CLIENT = f"{REG}/iot-ue-console:nws-v0.10-amd64"
+RTT_PROBE = f"{REG}/rtt-probe:nws-v0.1-amd64"
+THROUGHPUT_STATS = f"{REG}/throughput-statistics:nws-v0.2-amd64"
 
 STALE_SERVER_REPOS = frozenset({"slicea-analyzer", "hd-stream-server"})
 STALE_CLIENT_REPOS = frozenset(
@@ -82,10 +84,10 @@ def resolve_client_image(app_type: str, stored: Optional[str] = None) -> str:
     if _image_repo(img) in STALE_CLIENT_REPOS:
         return canonical
     img = _prefer_newer_nws(img, canonical)
-    # OTT: force roll when console lacks portal→Chromium heartbeat control (< v0.26).
+    # OTT: force roll when 4K is not re-pinned after ads (< v0.33).
     if (app_type or "").lower() == "ott" and _image_repo(img) == "ott-ue-console":
         m = _nws_minor(img)
-        if m is not None and m < 29:
+        if m is not None and m < 33:
             return canonical
     return img
 
@@ -185,7 +187,8 @@ def preset_config(slice_id: int) -> SliceApplicationConfig:
                 "stream_protocol": "rtsp",
                 "stream_path": "live/hd",
                 "bitrate_kbps": 6000,
-                "resolution": "1080p",
+                "resolution": "4k",
+                "play_quality": "4k",
                 "client_count": 1,
             },
         )

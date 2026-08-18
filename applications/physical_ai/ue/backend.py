@@ -58,6 +58,9 @@ if Gauge is not None:
     APP_UE_LATENCY_MS = Gauge(
         "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
     )
+    APP_UE_RTT_MS = Gauge(
+        "app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"]
+    )
     APP_UE_THROUGHPUT_MBPS = Gauge(
         "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
     )
@@ -66,7 +69,8 @@ if Gauge is not None:
         "app_throughput_mbps", "Aggregated application throughput (Mbps)"
     )
 else:
-    APP_UE_LATENCY_MS = APP_UE_THROUGHPUT_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+    APP_UE_LATENCY_MS = APP_UE_RTT_MS = APP_UE_THROUGHPUT_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+
 
 _lock = threading.Lock()
 _exchanges: deque[dict[str, Any]] = deque(maxlen=LOG_LIMIT)
@@ -167,7 +171,7 @@ def _discover_pdu_iface() -> Optional[str]:
 
 
 def _server_hosts() -> list[str]:
-    hosts: list[str] = []
+    hosts: list[str] = ["10.1.137.1"]
     for h in PDU_ROUTE_HOSTS.split(","):
         h = h.strip()
         if h and h not in hosts:
@@ -182,6 +186,32 @@ def _server_hosts() -> list[str]:
     except Exception:
         pass
     return hosts
+
+
+def _ping_loop() -> None:
+    while True:
+        try:
+            with _lock:
+                ready = bool(_state.get("pdu_ready"))
+            if ready:
+                res = subprocess.run(
+                    ["ping", "-c", "1", "-W", "1", "10.1.137.1"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if res.returncode == 0:
+                    import re
+
+                    m = re.search(r"time=([0-9.]+)\s*ms", res.stdout)
+                    if m:
+                        rtt = float(m.group(1))
+                        if APP_UE_RTT_MS is not None:
+                            APP_UE_RTT_MS.labels(ue_id=UE_ID).set(rtt)
+        except Exception:
+            pass
+        time.sleep(1.0)
+
 
 
 def _pin_pdu() -> bool:
@@ -384,7 +414,9 @@ def _record(result: dict[str, Any]) -> dict[str, Any]:
         if lat is not None:
             APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(float(lat))
             APP_LATENCY_MS.set(float(lat))
+
     return entry
+
 
 
 def _send_once() -> dict[str, Any]:
@@ -514,4 +546,6 @@ def _startup() -> None:
             start_http_server(METRICS_PORT, addr="0.0.0.0")
         except Exception:
             pass
+    threading.Thread(target=_ping_loop, name="ue-ping-loop", daemon=True).start()
     threading.Thread(target=_loop, name="ue-send-loop", daemon=True).start()
+

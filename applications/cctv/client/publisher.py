@@ -28,6 +28,8 @@ from gi.repository import GLib, Gst, GstRtp  # noqa: E402
 
 from common import metrics  # noqa: E402
 from prometheus_client import Counter, Gauge, Histogram  # noqa: E402
+import re
+import subprocess
 
 Gst.init(None)
 
@@ -60,6 +62,7 @@ METRICS_ADDR = _env("METRICS_ADDR", "0.0.0.0")
 LOG_INTERVAL_S = float(_env("LOG_INTERVAL_S", "1"))
 CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
 UE_ID = _env("APP_NAME", STREAM_PATH or "cctv-ue")
+PING_TARGET = _env("PING_TARGET", "10.1.137.1")
 
 RTSP_URI = f"rtsp://{RTSP_TARGET_HOST}:{RTSP_PORT}/{STREAM_PATH}"
 
@@ -72,9 +75,13 @@ FPS_GAUGE = Gauge("cctv_ue_fps", "Frames per second (UE publisher)")
 APP_UE_LATENCY_MS = Gauge(
     "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
 )
+APP_UE_RTT_MS = Gauge(
+    "app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"]
+)
 APP_UE_THROUGHPUT_MBPS = Gauge(
     "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
 )
+
 APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
 APP_THROUGHPUT_MBPS = Gauge(
     "app_throughput_mbps", "Aggregated application throughput (Mbps)"
@@ -88,6 +95,32 @@ CLOCK_OFFSET = Gauge(
     "cctv_ue_clock_offset_seconds",
     "Absolute chrony clock offset (client)",
 )
+
+_live_rtt_ms = 0.0
+
+
+def _ping_loop() -> None:
+    global _live_rtt_ms
+    while True:
+        try:
+            res = subprocess.run(
+                ["ping", "-c", "1", "-W", "1", PING_TARGET],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if res.returncode == 0:
+                m = re.search(r"time=([0-9.]+)", res.stdout)
+                if m:
+                    rtt = float(m.group(1))
+                    _live_rtt_ms = rtt
+                    if APP_UE_RTT_MS is not None:
+                        APP_UE_RTT_MS.labels(ue_id=UE_ID).set(rtt)
+        except Exception:
+            pass
+        time.sleep(1.0)
+
+
 
 
 class Publisher:
@@ -358,6 +391,8 @@ class Publisher:
             APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(tput)
             APP_LATENCY_MS.set(encode_ms)
             APP_THROUGHPUT_MBPS.set(tput)
+
+
             self._last_frame_count = count
             self._last_report = now
             metrics.log_json(
@@ -373,8 +408,10 @@ class Publisher:
     def run(self) -> None:
         metrics.start_metrics_server(METRICS_PORT, METRICS_ADDR)
         metrics.start_chrony_offset_updater(CLOCK_OFFSET, host=CHRONYC_HOST)
+        threading.Thread(target=_ping_loop, daemon=True).start()
         self._prepare_source()
         threading.Thread(target=self._report_loop, daemon=True).start()
+
 
         metrics.log_json(
             "info",

@@ -24,9 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gstreamer1.0-rtsp \
       chrony \
       iproute2 \
+      iputils-ping \
       curl \
       ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
+
     && gst-inspect-1.0 rtspclientsink > /dev/null
 
 WORKDIR /app

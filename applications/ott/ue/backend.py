@@ -57,12 +57,14 @@ PDU_ROUTE_HOSTS = os.environ.get(
     "PDU_ROUTE_HOSTS",
     ",".join(
         h for h in [
+            "10.1.137.1",
             SERVER_RTSP_HOST,
             os.environ.get("TARGET_SERVER_IP", ""),
         ]
         if h
     ),
 )
+
 BACKEND_PORT = int(os.environ.get("BACKEND_PORT", "8090"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9111"))
 UE_ID = os.environ.get("APP_NAME") or CLIENT_ID
@@ -74,15 +76,25 @@ if Gauge is not None:
     APP_UE_LATENCY_MS = Gauge(
         "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
     )
+    APP_UE_RTT_MS = Gauge(
+        "app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"]
+    )
     APP_UE_THROUGHPUT_MBPS = Gauge(
         "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
+    )
+    APP_UE_THROUGHPUT_DL_MBPS = Gauge(
+        "app_ue_throughput_dl_mbps", "Per-UE downlink throughput (Mbps)", ["ue_id"]
+    )
+    APP_UE_THROUGHPUT_UL_MBPS = Gauge(
+        "app_ue_throughput_ul_mbps", "Per-UE uplink throughput (Mbps)", ["ue_id"]
     )
     APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
     APP_THROUGHPUT_MBPS = Gauge(
         "app_throughput_mbps", "Aggregated application throughput (Mbps)"
     )
 else:
-    APP_UE_LATENCY_MS = APP_UE_THROUGHPUT_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+    APP_UE_LATENCY_MS = APP_UE_RTT_MS = APP_UE_THROUGHPUT_MBPS = APP_UE_THROUGHPUT_DL_MBPS = APP_UE_THROUGHPUT_UL_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+
 
 app = FastAPI(title=f"{UE_NAME} backend", docs_url="/docs")
 app.add_middleware(
@@ -93,7 +105,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_lock = threading.Lock()
+# RLock: _log_event also takes this lock; a nested acquire must not deadlock.
+_lock = threading.RLock()
+# Serialise Chromium CDP so heartbeat never shares a WS with the watchdog.
+_cdp_lock = threading.RLock()
 _state: Dict[str, Any] = {
     "streaming_enabled": False,
     "assigned_channel": "",
@@ -121,6 +136,7 @@ _state: Dict[str, Any] = {
     "last_frame_time": 0.0,
     "yt_quality": "",
     "play_quality": os.environ.get("OTT_PLAY_QUALITY", "4k"),
+    "video_height": 0,
     "chrome_url": "",
     "chrome_ui": os.environ.get("CHROME_HTTP_URL", f"https://{CONSOLE_IP}"),
     "socks_bytes_up": 0,
@@ -133,6 +149,7 @@ _state: Dict[str, Any] = {
     "watchdog_last_action": "initialized",
     "ads_skipped_count": 0,
     "resumed_count": 0,
+    "watchdog_reload_count": 0,
 }
 
 _delays: collections.deque = collections.deque(maxlen=30)
@@ -153,8 +170,12 @@ class WatchdogToggleIn(BaseModel):
 DEFAULT_PLAY_QUALITY = os.environ.get("OTT_PLAY_QUALITY", "4k")
 LATENCY_PROBE_PERIOD_S = float(os.environ.get("LATENCY_PROBE_PERIOD_S") or "0.5")
 LATENCY_PROBE_ENABLED = os.environ.get("LATENCY_PROBE_ENABLED", "1") not in ("0", "false", "False")
+WATCHDOG_PERIOD_S = float(os.environ.get("OTT_WATCHDOG_PERIOD_S") or "2")
+WATCHDOG_RELOAD_AFTER = int(os.environ.get("OTT_WATCHDOG_RELOAD_AFTER") or "2")
+WATCHDOG_RELOAD_COOLDOWN_S = float(os.environ.get("OTT_WATCHDOG_RELOAD_COOLDOWN_S") or "20")
 
 _last_socks_down = 0
+_last_socks_up = 0
 _last_socks_t = 0.0
 _probe_rtts: collections.deque[float] = collections.deque(maxlen=8)
 
@@ -164,11 +185,20 @@ def _set_slo_gauges() -> None:
         return
     with _lock:
         lat = float(_state.get("last_delay_ms") or 0.0)
+        rtt = float(_state.get("probe_rtt_ms") or _state.get("last_delay_ms") or 0.0)
         tput = float(_state.get("rx_bitrate_mbps") or 0.0)
+        tput_ul = float(_state.get("tx_bitrate_mbps") or 0.0)
     APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
+    if APP_UE_RTT_MS is not None:
+        APP_UE_RTT_MS.labels(ue_id=UE_ID).set(rtt)
     APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(tput)
+    if APP_UE_THROUGHPUT_DL_MBPS is not None:
+        APP_UE_THROUGHPUT_DL_MBPS.labels(ue_id=UE_ID).set(tput)
+    if APP_UE_THROUGHPUT_UL_MBPS is not None:
+        APP_UE_THROUGHPUT_UL_MBPS.labels(ue_id=UE_ID).set(tput_ul)
     APP_LATENCY_MS.set(lat)
     APP_THROUGHPUT_MBPS.set(tput)
+
 
 
 def _log_event(event_type: str, msg: str, **kwargs):
@@ -352,7 +382,7 @@ def _wait_for_pdu():
 
 def _heartbeat_loop():
     """Register with app server; apply portal Start/Stop/channel to Chromium."""
-    global _last_socks_down, _last_socks_t
+    global _last_socks_down, _last_socks_up, _last_socks_t
     last_cmd_channel = ""
     last_cmd_state = ""
     while True:
@@ -360,12 +390,17 @@ def _heartbeat_loop():
             socks = PDU_SOCKS.stats()
             now = time.time()
             bd = int(socks.get("bytes_down") or 0)
-            bitrate = 0.0
+            bu = int(socks.get("bytes_up") or 0)
+            bitrate_dl = 0.0
+            bitrate_ul = 0.0
             if _last_socks_t > 0 and now > _last_socks_t:
                 dt = now - _last_socks_t
                 db = max(0, bd - _last_socks_down)
-                bitrate = (db * 8.0) / (dt * 1e6)
+                dub = max(0, bu - _last_socks_up)
+                bitrate_dl = (db * 8.0) / (dt * 1e6)
+                bitrate_ul = (dub * 8.0) / (dt * 1e6)
             _last_socks_down = bd
+            _last_socks_up = bu
             _last_socks_t = now
 
             with _lock:
@@ -376,10 +411,14 @@ def _heartbeat_loop():
                 streaming = _state.get("streaming_enabled")
                 client_st = "STREAMING" if streaming else "IDLE"
                 _state["socks_bytes_down"] = bd
-                if bitrate > 0:
-                    _state["rx_bitrate_mbps"] = round(bitrate, 2)
+                _state["socks_bytes_up"] = bu
+                if bitrate_dl > 0:
+                    _state["rx_bitrate_mbps"] = round(bitrate_dl, 2)
+                if bitrate_ul > 0:
+                    _state["tx_bitrate_mbps"] = round(bitrate_ul, 2)
                 bitrate = float(_state.get("rx_bitrate_mbps") or 0.0)
                 fps = float(_state.get("rx_fps") or 0.0)
+
 
             data = _http_json(
                 "POST",
@@ -430,34 +469,26 @@ def _heartbeat_loop():
                 _state["server_last_ok"] = time.time()
                 _state["server_error"] = ""
 
-            # Portal commands → Chromium (once per change).
-            if srv_state == "STOPPED" and last_cmd_state != "STOPPED":
-                with _lock:
-                    _state["streaming_enabled"] = False
-                try:
-                    chrome_ctl.blank()
-                except Exception as exc:
-                    logger.warning("portal STOP blank failed: %s", exc)
+            # Portal desired-state only. Chromium load/play is the watchdog thread
+            # so a hung CDP session cannot stall heartbeats (UEs vanishing from the portal).
+            if srv_state == "STOPPED":
+                if last_cmd_state != "STOPPED":
+                    with _lock:
+                        _state["streaming_enabled"] = False
+                    last_cmd_channel = ""
+                    _log_event("control", "App server STOPPED — watchdog will blank Chromium")
                 last_cmd_state = "STOPPED"
-                last_cmd_channel = ""
-                _log_event("control", "App server STOPPED — Chromium blanked")
             elif srv_state == "STREAMING":
                 want = vid or str(os.environ.get("DEFAULT_CHANNEL") or "").strip()
-                if want and (want != last_cmd_channel or last_cmd_state != "STREAMING"):
-                    if not chrome_ctl.cdp_ready(timeout=0.5):
-                        logger.info("portal STREAMING deferred — Chromium CDP not ready")
-                    else:
-                        try:
-                            _play_chromium(want, quality=DEFAULT_PLAY_QUALITY)
-                            last_cmd_channel = want
-                            last_cmd_state = "STREAMING"
-                            _log_event("control", f"App server STREAMING — playing {want}")
-                        except Exception as exc:
-                            logger.warning("portal STREAMING play failed: %s", exc)
-                else:
-                    last_cmd_state = "STREAMING"
-                    with _lock:
-                        _state["streaming_enabled"] = True
+                with _lock:
+                    _state["streaming_enabled"] = True
+                    if want:
+                        _state["selected_video_id"] = want
+                        _state["assigned_channel"] = want
+                if want and want != last_cmd_channel:
+                    _log_event("control", f"App server STREAMING — watchdog will play {want}")
+                last_cmd_channel = want
+                last_cmd_state = "STREAMING"
             elif srv_state:
                 last_cmd_state = srv_state
 
@@ -597,72 +628,235 @@ def _latency_probe_loop() -> None:
         if not ready:
             time.sleep(1.0)
             continue
-        t_send = time.time()
         try:
-            data = _http_json(
-                "POST",
-                "/api/v1/probe",
-                {"client_id": CLIENT_ID, "t_send": t_send},
-                timeout=2.0,
+            res = subprocess.run(
+                ["ping", "-c", "1", "-W", "1", "10.1.137.1"],
+                capture_output=True,
+                text=True,
+                timeout=3,
             )
-            now = time.time()
-            rtt_ms = max(0.0, (now - t_send) * 1000.0)
-            t_recv = data.get("t_recv")
-            owd_ms = None
-            if isinstance(t_recv, (int, float)):
-                owd_ms = max(0.0, (float(t_recv) - t_send) * 1000.0)
-            with _lock:
-                _probe_rtts.append(rtt_ms)
-                avg = sum(_probe_rtts) / len(_probe_rtts)
-                _state["last_delay_ms"] = round(avg, 2)
-                _state["probe_rtt_ms"] = round(avg, 2)
-                _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
-            _set_slo_gauges()
-            n_ok = int(_state.get("probe_ok") or 0)
-            if n_ok <= 2 or n_ok % 20 == 0 or rtt_ms >= 1000.0:
-                _log_event(
-                    "probe",
-                    f"path RTT {rtt_ms:.1f}ms"
-                    + (f" OWD {owd_ms:.1f}ms" if owd_ms is not None else ""),
-                )
+            if res.returncode == 0:
+                m = re.search(r"time=([0-9.]+)", res.stdout)
+                if m:
+                    rtt_ms = float(m.group(1))
+                    with _lock:
+                        _probe_rtts.append(rtt_ms)
+                        avg = sum(_probe_rtts) / len(_probe_rtts)
+                        _state["last_delay_ms"] = round(avg, 2)
+                        _state["probe_rtt_ms"] = round(avg, 2)
+                        _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
+                    _set_slo_gauges()
+
+            else:
+                with _lock:
+                    _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
         except Exception as exc:
             with _lock:
                 _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
-            logger.debug("latency probe failed: %s", exc)
+            logger.debug("ping probe failed: %s", exc)
         time.sleep(period)
 
 
+
+def _watchdog_reload_page(video_id: str, youtube_id: str, quality: str) -> None:
+    """Navigate Chromium back to the assigned watch URL (or full select if unknown)."""
+    yt_id = (youtube_id or "").strip()
+    if not yt_id:
+        _play_chromium(video_id, quality=quality)
+        return
+    yt_q = chrome_ctl.normalize_quality(quality)
+    vq = chrome_ctl.youtube_vq_param(yt_q)
+    play_url = f"https://www.youtube.com/watch?v={yt_id}"
+    if vq:
+        play_url = f"{play_url}&vq={vq}"
+    chrome_ctl.navigate(play_url)
+    with _lock:
+        _state["chrome_url"] = play_url
+        _state["embed_url"] = play_url
+        _state["streaming_enabled"] = True
+
+
 def _playback_watchdog_loop() -> None:
-    """Check every 5s if YouTube video is playing; if not, resume it; auto-skip ads."""
-    logger.info("Playback & ad-skipping watchdog started (period: 5s)")
+    """Dedicated thread: page loaded + video playing; reload if Chromium never loaded.
+
+    Must not run CDP on the heartbeat thread. Never call _log_event while holding
+    _lock around Chromium I/O.
+    """
+    period = max(1.0, WATCHDOG_PERIOD_S)
+    logger.info(
+        "Playback watchdog thread started (period=%.0fs ad_poll=0.75s reload_after=%s cooldown=%.0fs)",
+        period,
+        WATCHDOG_RELOAD_AFTER,
+        WATCHDOG_RELOAD_COOLDOWN_S,
+    )
+    bad_ticks = 0
+    stall_ticks = 0
+    last_current_time = -1.0
+    last_reload = 0.0
+    last_blank = 0.0
+    prev_action = "initialized"
     while True:
+        event_msg = None
+        action = "idle"
+        res: Dict[str, Any] = {}
         try:
             with _lock:
                 enabled = bool(_state.get("periodic_check_enabled"))
                 streaming = bool(_state.get("streaming_enabled"))
                 quality = str(_state.get("play_quality") or DEFAULT_PLAY_QUALITY or "4k")
                 pdu_ready = bool(_state.get("pdu_ready"))
+                expect_yt = str(_state.get("youtube_id") or "").strip()
+                video_id = str(
+                    _state.get("selected_video_id")
+                    or _state.get("assigned_channel")
+                    or os.environ.get("DEFAULT_CHANNEL")
+                    or ""
+                ).strip()
 
-            if enabled and streaming and pdu_ready and chrome_ctl.cdp_ready(timeout=1.0):
-                res = chrome_ctl.check_and_heal_playback(quality=quality)
-                with _lock:
-                    _state["watchdog_last_check"] = time.time()
-                    if res.get("ok"):
-                        if res.get("ad_skipped"):
-                            _state["ads_skipped_count"] = int(_state.get("ads_skipped_count") or 0) + 1
-                            _state["watchdog_last_action"] = "ad_skipped"
-                            _log_event("watchdog", "Advertisement detected & automatically skipped")
-                        elif res.get("resumed"):
-                            _state["resumed_count"] = int(_state.get("resumed_count") or 0) + 1
-                            _state["watchdog_last_action"] = "playback_resumed"
-                            _log_event("watchdog", "YouTube was paused/stalled — auto-resumed playback")
-                        else:
-                            _state["watchdog_last_action"] = "playing_ok" if res.get("playing") else "idle"
+            now = time.time()
+            if not enabled:
+                action = "disabled"
+            elif not streaming:
+                action = "not_streaming"
+                chrome = chrome_ctl.status()
+                cur = str(chrome.get("url") or "")
+                if cur and "about:blank" not in cur.lower() and (now - last_blank) > 10.0:
+                    try:
+                        with _cdp_lock:
+                            chrome_ctl.blank()
+                        last_blank = now
+                        action = "blanked"
+                        event_msg = "Watchdog blanked Chromium (streaming stopped)"
+                    except Exception as exc:
+                        action = f"blank_failed: {exc}"
+            elif not pdu_ready:
+                action = "waiting_pdu"
+            elif not chrome_ctl.cdp_ready(timeout=1.0):
+                action = "waiting_cdp"
+                bad_ticks += 1
+            else:
+                with _cdp_lock:
+                    res = chrome_ctl.check_and_heal_playback(
+                        quality=quality, video_id=expect_yt or None
+                    )
+                url = str(res.get("url") or res.get("page_url") or "")
+                url_l = url.lower()
+                page_yt = str(res.get("page_video_id") or "").strip()
+                page_loaded = bool(res.get("page_loaded")) and "youtube.com/watch" in url_l
+                has_video = bool(res.get("has_video") or res.get("has_player"))
+                playing = bool(res.get("playing"))
+                paused = bool(res.get("paused"))
+                chrome_error = bool(res.get("chrome_error"))
+                ad = bool(res.get("ad_detected") or res.get("ad_skipped"))
+                buffering = bool(res.get("waiting")) and not paused
+                wrong_video = bool(expect_yt and page_yt and page_yt != expect_yt)
+                ct = float(res.get("current_time") or 0.0)
+
+                if ad or buffering:
+                    stall_ticks = 0
+                    last_current_time = ct if ct else last_current_time
+                elif playing and page_loaded and not wrong_video:
+                    if ct > 0 and last_current_time >= 0 and abs(ct - last_current_time) < 0.15:
+                        stall_ticks += 1
                     else:
-                        _state["watchdog_last_action"] = f"error: {res.get('error') or res.get('detail')}"
+                        stall_ticks = 0
+                    last_current_time = ct
+                else:
+                    stall_ticks = 0
+
+                stalled = stall_ticks >= 4
+                not_loaded = (
+                    not ad
+                    and not buffering
+                    and (
+                        not res.get("ok")
+                        or chrome_error
+                        or not page_loaded
+                        or not has_video
+                        or wrong_video
+                        or stalled
+                        or "youtube.com/watch" not in url_l
+                    )
+                )
+
+                if ad:
+                    clicked = bool(res.get("ad_skipped"))
+                    action = "ad_skipped" if clicked else "ad"
+                    if clicked and prev_action != "ad_skipped":
+                        event_msg = "Advertisement detected — skip click sent"
+                    bad_ticks = 0
+                elif buffering:
+                    action = "buffering"
+                    bad_ticks = 0
+                elif playing and page_loaded and not wrong_video and not stalled:
+                    action = "playing_ok"
+                    bad_ticks = 0
+                elif res.get("resumed"):
+                    action = "playback_resumed"
+                    event_msg = "YouTube was paused — auto-resumed playback"
+                    bad_ticks = 0
+                elif not_loaded:
+                    bad_ticks += 1
+                    if chrome_error or not page_loaded:
+                        action = "page_not_loaded"
+                    elif stalled:
+                        action = "video_stalled"
+                    elif wrong_video:
+                        action = "wrong_video"
+                    else:
+                        action = "video_not_running"
+                else:
+                    action = "idle"
+                    bad_ticks = 0
+
+                need_reload = (
+                    not_loaded
+                    and bad_ticks >= WATCHDOG_RELOAD_AFTER
+                    and bool(video_id)
+                    and (now - last_reload) >= WATCHDOG_RELOAD_COOLDOWN_S
+                )
+                if need_reload:
+                    ticks_before = bad_ticks
+                    try:
+                        with _cdp_lock:
+                            _watchdog_reload_page(video_id, expect_yt, quality)
+                        last_reload = now
+                        bad_ticks = 0
+                        stall_ticks = 0
+                        last_current_time = -1.0
+                        action = "reloaded"
+                        event_msg = (
+                            f"Watchdog reloaded Chromium "
+                            f"(url={url[:80] or 'empty'} ticks={ticks_before})"
+                        )
+                    except Exception as exc:
+                        action = f"reload_failed: {exc}"
+                        event_msg = f"Watchdog reload failed: {exc}"
+
+            with _lock:
+                _state["watchdog_last_check"] = now
+                _state["watchdog_last_action"] = action
+                qinfo = res.get("quality") if isinstance(res, dict) else None
+                if isinstance(qinfo, dict):
+                    if qinfo.get("current"):
+                        _state["yt_quality"] = qinfo.get("current")
+                    if qinfo.get("height"):
+                        _state["video_height"] = int(qinfo.get("height") or 0)
+                if action == "ad_skipped" and prev_action != "ad_skipped":
+                    _state["ads_skipped_count"] = int(_state.get("ads_skipped_count") or 0) + 1
+                elif action == "playback_resumed":
+                    _state["resumed_count"] = int(_state.get("resumed_count") or 0) + 1
+                elif action == "reloaded":
+                    _state["watchdog_reload_count"] = int(_state.get("watchdog_reload_count") or 0) + 1
+
+            if event_msg:
+                _log_event("watchdog", event_msg)
+            prev_action = action
         except Exception as exc:
-            logger.debug("Playback watchdog loop check failed: %s", exc)
-        time.sleep(5.0)
+            logger.warning("Playback watchdog tick failed: %s", exc)
+            prev_action = "error"
+        sleep_for = 0.75 if action in ("ad", "ad_skipped") else period
+        time.sleep(sleep_for)
 
 
 @app.on_event("startup")
@@ -684,7 +878,9 @@ def on_startup():
     threading.Thread(target=_socks_pdu_refresh_loop, daemon=True).start()
     threading.Thread(target=_chrome_autostart_loop, daemon=True, name="chrome-autostart").start()
     threading.Thread(target=_latency_probe_loop, daemon=True, name="latency-probe").start()
-    threading.Thread(target=_playback_watchdog_loop, daemon=True, name="playback-watchdog").start()
+    threading.Thread(
+        target=_playback_watchdog_loop, daemon=True, name="ott-playback-watchdog"
+    ).start()
 
 
 def _socks_pdu_refresh_loop() -> None:
@@ -902,11 +1098,12 @@ def _play_chromium(video_id: str, quality: str | None = None) -> Dict[str, Any]:
     if vq:
         play_url = f"{play_url}&vq={vq}"
     try:
-        nav = chrome_ctl.navigate(play_url)
-        try:
-            chrome_ctl.play_youtube(quality=yt_q)
-        except Exception:
-            pass
+        with _cdp_lock:
+            nav = chrome_ctl.navigate(play_url)
+            try:
+                chrome_ctl.play_youtube(quality=yt_q)
+            except Exception:
+                pass
     except Exception as exc:
         raise RuntimeError(f"Chromium navigate failed: {exc}") from exc
 
@@ -1060,11 +1257,12 @@ def get_watchdog():
         return {
             "ok": True,
             "periodic_check_enabled": bool(_state.get("periodic_check_enabled")),
-            "interval_s": 5,
+            "interval_s": WATCHDOG_PERIOD_S,
             "watchdog_last_check": _state.get("watchdog_last_check") or 0.0,
             "watchdog_last_action": _state.get("watchdog_last_action") or "",
             "ads_skipped_count": _state.get("ads_skipped_count") or 0,
             "resumed_count": _state.get("resumed_count") or 0,
+            "watchdog_reload_count": _state.get("watchdog_reload_count") or 0,
         }
 
 
