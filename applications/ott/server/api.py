@@ -117,11 +117,13 @@ class ClientHeartbeatRequest(BaseModel):
     console_mac: Optional[str] = None
     name: Optional[str] = None
     pdu_ip: Optional[str] = None
+    state: Optional[str] = None
     net_delay_ms: Optional[float] = None
     rx_fps: Optional[float] = None
     rx_bitrate_mbps: Optional[float] = None
     dropped_frames: Optional[int] = None
     total_frames: Optional[int] = None
+
 
 
 @app.get("/api/v1/health", tags=["System"])
@@ -298,12 +300,14 @@ async def client_heartbeat(req: ClientHeartbeatRequest):
         console_mac=req.console_mac,
         name=req.name,
         pdu_ip=req.pdu_ip,
+        state=req.state,
         net_delay_ms=req.net_delay_ms,
         rx_fps=req.rx_fps,
         rx_bitrate_mbps=req.rx_bitrate_mbps,
         dropped_frames=req.dropped_frames,
         total_frames=req.total_frames,
     )
+
     ch = get_channel(cl.assigned_channel) if cl.assigned_channel else None
     urls = ch.play_urls() if ch else {
         "hls_url": cl.play_hls_url,

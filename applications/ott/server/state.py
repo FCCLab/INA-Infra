@@ -286,10 +286,27 @@ def set_client_channel(client_id: str, channel_id: str) -> bool:
         return True
 
 
+def resolve_channel_for_client(video_or_channel_id: str, client_id: str = "") -> Optional[OttChannel]:
+    with GLOBAL_LOCK:
+        ch = CHANNELS.get(video_or_channel_id)
+        if ch and ch.is_active:
+            return ch
+        # If requested video_id (e.g. channel_5) does not exist, rotate modulo active channels
+        active = [c for c in CHANNELS.values() if c.is_active]
+        if not active:
+            return None
+        m = re.search(r"(\d+)", video_or_channel_id) or (re.search(r"(\d+)", client_id) if client_id else None)
+        if m:
+            num = int(m.group(1))
+            idx = (num - 1) % len(active)
+            return active[idx]
+        return active[0]
+
+
 def select_video_for_client(client_id: str, video_id: str) -> Optional[dict]:
     """UE selects a video → return YouTube-direct play info (default)."""
     with GLOBAL_LOCK:
-        ch = CHANNELS.get(video_id)
+        ch = resolve_channel_for_client(video_id, client_id)
         if not ch or not ch.is_active:
             return None
         if client_id not in CONNECTED_CLIENTS:
@@ -299,8 +316,8 @@ def select_video_for_client(client_id: str, video_id: str) -> Optional[dict]:
             )
         cl = CONNECTED_CLIENTS[client_id]
         urls = ch.play_urls()
-        cl.assigned_channel = video_id
-        cl.selected_video_id = video_id
+        cl.assigned_channel = ch.id
+        cl.selected_video_id = ch.id
         cl.play_hls_url = urls.get("youtube_url") or urls.get("hls_url") or ""
         cl.play_rtsp_url = urls.get("rtsp_url") or ""
         cl.state = "STREAMING"
@@ -312,6 +329,7 @@ def select_video_for_client(client_id: str, video_id: str) -> Optional[dict]:
             "video": ch.to_dict(),
             **urls,
         }
+
 
 
 def update_client_heartbeat(
@@ -326,6 +344,7 @@ def update_client_heartbeat(
     console_ip: Optional[str] = None,
     console_mac: Optional[str] = None,
     name: Optional[str] = None,
+    state: Optional[str] = None,
 ) -> ConnectedClient:
     with GLOBAL_LOCK:
         if client_id not in CONNECTED_CLIENTS:
@@ -339,6 +358,8 @@ def update_client_heartbeat(
             cl.name = name
         if ip:
             cl.ip = ip
+        if state:
+            cl.state = state
         if console_ip:
             cl.console_ip = console_ip
             cl.console_url = _http_url(console_ip, cl.console_port)
@@ -352,9 +373,21 @@ def update_client_heartbeat(
             cl.rx_fps = rx_fps
         if rx_bitrate_mbps is not None:
             cl.rx_bitrate_mbps = rx_bitrate_mbps
-        if dropped_frames is not None:
-            cl.dropped_frames = dropped_frames
-        if total_frames is not None:
-            cl.total_frames_received = total_frames
+
+        if not cl.assigned_channel:
+            active_channels = [c for c in CHANNELS.values() if c.is_active]
+            if active_channels:
+                # Extract client number (e.g. ue1 -> 1, slice3-ott-client-5 -> 5)
+                m = re.search(r"(\d+)", client_id)
+                num = int(m.group(1)) if m else (len(CONNECTED_CLIENTS))
+                # Rotate across available channels if there are more UEs than videos
+                idx = (num - 1) % len(active_channels)
+                picked = active_channels[idx]
+                cl.assigned_channel = picked.id
+                cl.selected_video_id = picked.id
+                urls = picked.play_urls()
+                cl.play_hls_url = urls.get("youtube_url") or urls.get("hls_url") or ""
+                cl.play_rtsp_url = urls.get("rtsp_url") or ""
         cl.last_heartbeat = time.time()
         return cl
+

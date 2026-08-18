@@ -77,6 +77,7 @@
       <span class="pill" id="pill-server">App server: —</span>
       <span class="pill" id="pill-chrome">Chrome: —</span>
       <span class="pill" id="pill-socks">SOCKS: —</span>
+      <span class="pill ok" id="pill-watchdog" style="cursor:pointer" title="Click to toggle 5s auto-play and ad-skip check">Watchdog 5s: ON</span>
     </div>
   </header>
   <main>
@@ -85,7 +86,7 @@
       <div class="kpi-card"><div class="kpi-label">5G PDU</div><div class="kpi-value mono" id="kpi-pdu">—</div></div>
       <div class="kpi-card"><div class="kpi-label">YouTube ID</div><div class="kpi-value mono" id="kpi-ytid">—</div></div>
       <div class="kpi-card"><div class="kpi-label">SOCKS via 5G</div><div class="kpi-value mono" id="kpi-socks">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">CDP</div><div class="kpi-value mono" id="kpi-cdp">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Auto-Skip Ads</div><div class="kpi-value mono" id="kpi-watchdog">ON (0 ads)</div></div>
       <div class="kpi-card"><div class="kpi-label">Path RTT</div><div class="kpi-value mono" id="kpi-rtt">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Mode</div><div class="kpi-value mono" id="kpi-mode">chromium_5g</div></div>
     </div>
@@ -108,6 +109,7 @@
             </select>
             <button type="button" id="btn-play">▶ Play</button>
             <button type="button" class="danger" id="btn-stop">⏹ Stop</button>
+            <button type="button" class="secondary" id="btn-watchdog" title="Toggle 5s periodic playback & ad-skip check">🛡 Auto-Play/Skip: ON</button>
             <button type="button" class="secondary" id="btn-refresh">↻ Refresh</button>
             <a class="secondary" id="btn-open-chrome" href="#" target="_blank" rel="noopener" style="text-decoration:none;padding:9px 14px;border-radius:8px;border:1px solid var(--border)">Open Chrome UI</a>
           </div>
@@ -127,6 +129,7 @@
             <tr><th>Quality</th><td id="st-quality">4k</td></tr>
             <tr><th>App server</th><td id="st-server">—</td></tr>
             <tr><th>Transport</th><td>console → CDP → Chromium → SOCKS5 → PDU → YouTube<br/>UE backend → PDU → app server (catalog / heartbeat / select)</td></tr>
+            <tr><th>5s Auto-Check</th><td id="st-watchdog">Enabled (auto-play + skip ads)</td></tr>
             <tr><th>Path RTT</th><td id="st-rtt">—</td></tr>
             <tr><th>YouTube URL</th><td id="st-yturl">—</td></tr>
             <tr><th>Chrome page</th><td id="st-chrome">—</td></tr>
@@ -142,6 +145,7 @@
       </div>
     </div>
   </main>
+
   <script>
     const $ = (id) => document.getElementById(id);
     let videos = [], selectedId = "", currentYtId = "", chromeUi = "", lastError = "";
@@ -240,6 +244,21 @@
         $("pill-chrome").textContent=chrome.cdp_ready?`Chrome: ${chrome.title||"CDP up"}`:"Chrome: starting…";
         $("pill-socks").className=`pill ${socks.running?"ok":"bad"}`;
         $("pill-socks").textContent=socks.running?`SOCKS: ${socks.pdu_ip||"—"}`:"SOCKS: down";
+        
+        const wdEnabled = st.periodic_check_enabled !== false;
+        const wdAction = st.watchdog_last_action || "";
+        const skipped = st.ads_skipped_count || 0;
+        $("pill-watchdog").className = `pill ${wdEnabled ? "ok" : "warn"}`;
+        $("pill-watchdog").textContent = `Watchdog 5s: ${wdEnabled ? "ON" : "OFF"}`;
+        $("kpi-watchdog").textContent = `${wdEnabled ? "ON" : "OFF"} (${skipped} skipped)`;
+        if ($("btn-watchdog")) {
+          $("btn-watchdog").className = wdEnabled ? "secondary" : "danger";
+          $("btn-watchdog").textContent = wdEnabled ? "🛡 Auto-Play/Skip: ON" : "🛡 Auto-Play/Skip: OFF";
+        }
+        $("st-watchdog").textContent = wdEnabled 
+          ? `Enabled (auto-play + skip ads) · Last: ${wdAction || "active"}` 
+          : "Disabled";
+
         selectedId=st.selected_video_id||selectedId;
         currentYtId=st.youtube_id||currentYtId;
         $("st-video").textContent=st.selected_video_id||"—";
@@ -266,9 +285,18 @@
       }catch(err){lastError=String(err.message||err)}
     }
 
+    async function toggleWatchdog(){
+      try{
+        await req("/api/watchdog/toggle",{method:"POST",body:JSON.stringify({})});
+        await fetchStatus();
+      }catch(err){alert("Watchdog toggle failed: "+(err.message||err));}
+    }
+
     $("btn-refresh").onclick=()=>loadVideos().catch(e=>alert(e.message));
     $("btn-play").onclick=()=>playSelected($("sel-channel").value||selectedId||(videos[0]&&videos[0].id)).catch(e=>alert(e.message));
     $("btn-stop").onclick=()=>stopPlayback().catch(e=>alert(e.message));
+    if ($("btn-watchdog")) $("btn-watchdog").onclick=toggleWatchdog;
+    if ($("pill-watchdog")) $("pill-watchdog").onclick=toggleWatchdog;
     $("sel-channel").onchange=e=>{if(e.target.value) playSelected(e.target.value).catch(err=>alert(err.message))};
     $("sel-quality").onchange=()=>{
       const vid=$("sel-channel").value||selectedId;
@@ -285,3 +313,4 @@
   </script>
 </body>
 </html>
+

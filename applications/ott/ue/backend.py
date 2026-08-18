@@ -96,8 +96,8 @@ app.add_middleware(
 _lock = threading.Lock()
 _state: Dict[str, Any] = {
     "streaming_enabled": False,
-    "assigned_channel": os.environ.get("DEFAULT_CHANNEL", ""),
-    "selected_video_id": os.environ.get("DEFAULT_CHANNEL", ""),
+    "assigned_channel": "",
+    "selected_video_id": "",
     "play_mode": os.environ.get("OTT_PLAY_MODE", "youtube"),
     "youtube_id": "",
     "youtube_url": "",
@@ -113,6 +113,7 @@ _state: Dict[str, Any] = {
     "rx_fps": 0.0,
     "rx_bitrate_mbps": 0.0,
     "last_delay_ms": 0.0,
+
     "probe_rtt_ms": 0.0,
     "probe_ok": 0,
     "probe_fail": 0,
@@ -127,6 +128,11 @@ _state: Dict[str, Any] = {
     "server_ok": False,
     "server_last_ok": 0.0,
     "server_error": "",
+    "periodic_check_enabled": os.environ.get("OTT_PERIODIC_CHECK_ENABLED", "1") not in ("0", "false", "False"),
+    "watchdog_last_check": 0.0,
+    "watchdog_last_action": "initialized",
+    "ads_skipped_count": 0,
+    "resumed_count": 0,
 }
 
 _delays: collections.deque = collections.deque(maxlen=30)
@@ -137,6 +143,11 @@ _video_cache: List[dict] = []
 class PlayIn(BaseModel):
     video_id: str = Field(..., min_length=1)
     quality: str = Field(default_factory=lambda: os.environ.get("OTT_PLAY_QUALITY", "4k"))
+
+
+class WatchdogToggleIn(BaseModel):
+    enabled: Optional[bool] = None
+
 
 
 DEFAULT_PLAY_QUALITY = os.environ.get("OTT_PLAY_QUALITY", "4k")
@@ -362,6 +373,8 @@ def _heartbeat_loop():
                 drops = _state["dropped_frames"]
                 total = _state["frames_received"]
                 pdu_ip = _state["pdu_ip"]
+                streaming = _state.get("streaming_enabled")
+                client_st = "STREAMING" if streaming else "IDLE"
                 _state["socks_bytes_down"] = bd
                 if bitrate > 0:
                     _state["rx_bitrate_mbps"] = round(bitrate, 2)
@@ -378,6 +391,7 @@ def _heartbeat_loop():
                     "console_ip": CONSOLE_IP,
                     "console_mac": CONSOLE_MAC,
                     "pdu_ip": pdu_ip or None,
+                    "state": client_st,
                     "net_delay_ms": round(delay, 1),
                     "rx_fps": round(fps, 1),
                     "rx_bitrate_mbps": round(bitrate, 2),
@@ -386,6 +400,7 @@ def _heartbeat_loop():
                 },
                 timeout=3.0,
             )
+
 
             vid = str(data.get("selected_video_id") or data.get("assigned_channel") or "").strip()
             srv_state = str(data.get("state") or "").strip().upper()
@@ -616,6 +631,39 @@ def _latency_probe_loop() -> None:
         time.sleep(period)
 
 
+def _playback_watchdog_loop() -> None:
+    """Check every 5s if YouTube video is playing; if not, resume it; auto-skip ads."""
+    logger.info("Playback & ad-skipping watchdog started (period: 5s)")
+    while True:
+        try:
+            with _lock:
+                enabled = bool(_state.get("periodic_check_enabled"))
+                streaming = bool(_state.get("streaming_enabled"))
+                quality = str(_state.get("play_quality") or DEFAULT_PLAY_QUALITY or "4k")
+                pdu_ready = bool(_state.get("pdu_ready"))
+
+            if enabled and streaming and pdu_ready and chrome_ctl.cdp_ready(timeout=1.0):
+                res = chrome_ctl.check_and_heal_playback(quality=quality)
+                with _lock:
+                    _state["watchdog_last_check"] = time.time()
+                    if res.get("ok"):
+                        if res.get("ad_skipped"):
+                            _state["ads_skipped_count"] = int(_state.get("ads_skipped_count") or 0) + 1
+                            _state["watchdog_last_action"] = "ad_skipped"
+                            _log_event("watchdog", "Advertisement detected & automatically skipped")
+                        elif res.get("resumed"):
+                            _state["resumed_count"] = int(_state.get("resumed_count") or 0) + 1
+                            _state["watchdog_last_action"] = "playback_resumed"
+                            _log_event("watchdog", "YouTube was paused/stalled — auto-resumed playback")
+                        else:
+                            _state["watchdog_last_action"] = "playing_ok" if res.get("playing") else "idle"
+                    else:
+                        _state["watchdog_last_action"] = f"error: {res.get('error') or res.get('detail')}"
+        except Exception as exc:
+            logger.debug("Playback watchdog loop check failed: %s", exc)
+        time.sleep(5.0)
+
+
 @app.on_event("startup")
 def on_startup():
     if start_http_server is not None:
@@ -635,6 +683,7 @@ def on_startup():
     threading.Thread(target=_socks_pdu_refresh_loop, daemon=True).start()
     threading.Thread(target=_chrome_autostart_loop, daemon=True, name="chrome-autostart").start()
     threading.Thread(target=_latency_probe_loop, daemon=True, name="latency-probe").start()
+    threading.Thread(target=_playback_watchdog_loop, daemon=True, name="playback-watchdog").start()
 
 
 def _socks_pdu_refresh_loop() -> None:
@@ -643,6 +692,7 @@ def _socks_pdu_refresh_loop() -> None:
             _iface, pdu_ip = _pdu_coords()
             if pdu_ip:
                 PDU_SOCKS.set_pdu_ip(pdu_ip)
+
         except Exception:
             pass
         time.sleep(5.0)
@@ -794,19 +844,23 @@ def _pick_autostart_video_id() -> str:
         vid = str(_state.get("selected_video_id") or _state.get("assigned_channel") or "").strip()
     if vid:
         return vid
-    # Per-UE default from deploy (channel_1..N), then env override, then catalog[0].
-    for key in ("DEFAULT_CHANNEL", "OTT_AUTOSTART_VIDEO"):
-        raw = str(os.environ.get(key) or "").strip()
-        if raw:
-            return raw
+    # Check videos from server catalog first to allow modulo rotation across available channels
     try:
         data = _http_json("GET", "/api/v1/videos", timeout=5.0)
         videos = data.get("videos") or []
         if videos:
-            return str(videos[0].get("id") or "").strip() or "channel_1"
+            idx = (max(1, CLIENT_INDEX) - 1) % len(videos)
+            return str(videos[idx].get("id") or "").strip() or "channel_1"
     except Exception as exc:
         logger.debug("autostart catalog fetch failed: %s", exc)
+
+    # Per-UE default from deploy (channel_1..N), then env override, then channel_1.
+    for key in ("DEFAULT_CHANNEL", "OTT_AUTOSTART_VIDEO"):
+        raw = str(os.environ.get(key) or "").strip()
+        if raw:
+            return raw
     return "channel_1"
+
 
 
 def _play_chromium(video_id: str, quality: str | None = None) -> Dict[str, Any]:
@@ -999,7 +1053,40 @@ def set_channel(req: Dict[str, str]):
     return play_video(PlayIn(video_id=video_id, quality=quality))
 
 
+@app.get("/api/watchdog")
+def get_watchdog():
+    with _lock:
+        return {
+            "ok": True,
+            "periodic_check_enabled": bool(_state.get("periodic_check_enabled")),
+            "interval_s": 5,
+            "watchdog_last_check": _state.get("watchdog_last_check") or 0.0,
+            "watchdog_last_action": _state.get("watchdog_last_action") or "",
+            "ads_skipped_count": _state.get("ads_skipped_count") or 0,
+            "resumed_count": _state.get("resumed_count") or 0,
+        }
+
+
+@app.post("/api/watchdog/toggle")
+def toggle_watchdog(req: Optional[WatchdogToggleIn] = None):
+    with _lock:
+        if req and req.enabled is not None:
+            _state["periodic_check_enabled"] = bool(req.enabled)
+        else:
+            _state["periodic_check_enabled"] = not bool(_state.get("periodic_check_enabled"))
+        current = bool(_state["periodic_check_enabled"])
+
+    status_str = "ENABLED" if current else "DISABLED"
+    _log_event("watchdog", f"Periodic 5s video playback & ad-skipping check {status_str}")
+    return {
+        "ok": True,
+        "periodic_check_enabled": current,
+        "msg": f"Watchdog periodic check {status_str}",
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=BACKEND_PORT, log_level="info")
+

@@ -263,6 +263,153 @@ def play_youtube(quality: Optional[str] = None) -> Dict[str, Any]:
     return {"ok": True, "quality": yt_q, "result": result}
 
 
+def check_and_heal_playback(quality: Optional[str] = None) -> Dict[str, Any]:
+    """Check if YouTube is playing; if paused/stalled, play it; auto-skip ads."""
+    page = _pick_page()
+    if not page or not page.get("webSocketDebuggerUrl"):
+        return {"ok": False, "detail": "no Chromium page"}
+    ws_url = page["webSocketDebuggerUrl"]
+    yt_q = normalize_quality(quality)
+    prefer = [
+        yt_q,
+        "hd2160",
+        "highres",
+        "hd1440",
+        "hd1080",
+        "hd720",
+        "large",
+        "medium",
+        "auto",
+    ]
+    seen = set()
+    prefer_list = []
+    for q in prefer:
+        if q and q not in seen:
+            seen.add(q)
+            prefer_list.append(q)
+    prefer_js = json.dumps(prefer_list)
+    target_js = json.dumps(yt_q)
+
+    expr = f"""
+    (function(){{
+      const result = {{
+        playing: false,
+        ad_detected: false,
+        ad_skipped: false,
+        resumed: false,
+        quality: null,
+        error: null,
+        url: window.location.href
+      }};
+
+      try {{
+        // 1. Detect & Skip Advertisements
+        const adSkipSelectors = [
+          '.ytp-ad-skip-button',
+          '.ytp-ad-skip-button-modern',
+          'button.ytp-ad-skip-button',
+          'button.ytp-ad-skip-button-modern',
+          '.ytp-skip-ad-button',
+          '.ytp-ad-skip-button-slot button',
+          '.ytp-ad-overlay-close-button',
+          'button[id^="skip-button"]',
+          '.videoAdUiSkipButton',
+          '.ytp-ad-text.ytp-ad-preview-text'
+        ];
+
+        const adElement = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+        if (adElement) {{
+          result.ad_detected = true;
+        }}
+
+        for (const sel of adSkipSelectors) {{
+          const btn = document.querySelector(sel);
+          if (btn && btn.offsetParent !== null) {{
+            try {{
+              btn.click();
+              result.ad_skipped = true;
+              result.ad_detected = true;
+            }} catch(e) {{}}
+          }}
+        }}
+
+        // If ad is playing but skip button is not clickable yet, fast-forward ad video
+        const v = document.querySelector('video');
+        if (result.ad_detected && v && !result.ad_skipped) {{
+          try {{
+            if (v.currentTime < v.duration - 0.5) {{
+              v.currentTime = v.duration || v.currentTime;
+            }}
+          }} catch(e) {{}}
+        }}
+
+        // 2. Dismiss 'Video paused. Continue watching?' confirmation dialogs if any
+        const confirmButtons = document.querySelectorAll(
+          'yt-confirm-dialog-renderer #confirm-button, paper-dialog #confirm-button, ytd-popup-container button#confirm-button'
+        );
+        confirmButtons.forEach(b => {{
+          try {{ b.click(); result.resumed = true; }} catch(e) {{}}
+        }});
+
+        // 3. Check HTML5 video state & Resume playback if paused / stalled
+        const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+        if (v) {{
+          try {{ v.muted = true; v.volume = 0; }} catch(e) {{}}
+
+          if (v.paused || v.ended || v.playbackRate === 0) {{
+            try {{
+              v.play();
+              result.resumed = true;
+            }} catch(e) {{}}
+
+            const playBtn = document.querySelector('button.ytp-large-play-button, button[aria-label^="Play"], .ytp-play-button');
+            if (playBtn) {{
+              try {{ playBtn.click(); result.resumed = true; }} catch(e) {{}}
+            }}
+          }}
+
+          result.playing = !v.paused && !v.ended;
+        }}
+
+        // 4. Quality re-assertion if needed
+        if (player) {{
+          try {{
+            const prefer = {prefer_js};
+            const target = {target_js};
+            const levels = (player.getAvailableQualityLevels && player.getAvailableQualityLevels()) || [];
+            let pick = target;
+            if (target !== 'auto' && levels.length) {{
+              pick = prefer.find(q => q === 'auto' || levels.includes(q)) || levels[0];
+            }}
+            if (player.setPlaybackQualityRange) {{
+              try {{ player.setPlaybackQualityRange(pick, pick); }} catch(e) {{}}
+            }}
+            if (player.setPlaybackQuality) {{
+              try {{ player.setPlaybackQuality(pick); }} catch(e) {{}}
+            }}
+            result.quality = player.getPlaybackQuality ? player.getPlaybackQuality() : pick;
+          }} catch(e) {{}}
+        }}
+      }} catch(err) {{
+        result.error = String(err);
+      }}
+
+      return result;
+    }})()
+    """
+    try:
+        res = _ws_send(
+            ws_url,
+            "Runtime.evaluate",
+            {"expression": expr, "awaitPromise": False, "returnByValue": True},
+            timeout=8.0,
+        )
+        val = (res or {}).get("result", {}).get("value") or {}
+        return {"ok": True, **val}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def blank() -> Dict[str, Any]:
     return navigate("about:blank")
 
@@ -284,3 +431,4 @@ def status() -> Dict[str, Any]:
         "url": (page or {}).get("url") or "",
         "title": (page or {}).get("title") or "",
     }
+
