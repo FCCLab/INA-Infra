@@ -113,6 +113,9 @@ _state: Dict[str, Any] = {
     "rx_fps": 0.0,
     "rx_bitrate_mbps": 0.0,
     "last_delay_ms": 0.0,
+    "probe_rtt_ms": 0.0,
+    "probe_ok": 0,
+    "probe_fail": 0,
     "dropped_frames": 0,
     "last_frame_time": 0.0,
     "yt_quality": "",
@@ -137,9 +140,12 @@ class PlayIn(BaseModel):
 
 
 DEFAULT_PLAY_QUALITY = os.environ.get("OTT_PLAY_QUALITY", "4k")
+LATENCY_PROBE_PERIOD_S = float(os.environ.get("LATENCY_PROBE_PERIOD_S") or "0.5")
+LATENCY_PROBE_ENABLED = os.environ.get("LATENCY_PROBE_ENABLED", "1") not in ("0", "false", "False")
 
 _last_socks_down = 0
 _last_socks_t = 0.0
+_probe_rtts: collections.deque[float] = collections.deque(maxlen=8)
 
 
 def _set_slo_gauges() -> None:
@@ -558,6 +564,58 @@ def _video_stream_loop():
             time.sleep(2.0)
 
 
+def _latency_probe_loop() -> None:
+    """Indirect OTT latency: small HTTP echo over the PDU.
+
+    Chromium/YouTube fills the 5G downlink; this probe's RTT rises with queueing
+    even though YouTube itself has no timestamp metadata.
+    """
+    if not LATENCY_PROBE_ENABLED:
+        logger.info("Latency probe disabled (LATENCY_PROBE_ENABLED=0)")
+        return
+    period = max(0.1, LATENCY_PROBE_PERIOD_S)
+    logger.info("Latency probe every %.2fs via %s", period, SERVER_URL)
+    while True:
+        with _lock:
+            ready = bool(_state.get("pdu_ready"))
+        if not ready:
+            time.sleep(1.0)
+            continue
+        t_send = time.time()
+        try:
+            data = _http_json(
+                "POST",
+                "/api/v1/probe",
+                {"client_id": CLIENT_ID, "t_send": t_send},
+                timeout=2.0,
+            )
+            now = time.time()
+            rtt_ms = max(0.0, (now - t_send) * 1000.0)
+            t_recv = data.get("t_recv")
+            owd_ms = None
+            if isinstance(t_recv, (int, float)):
+                owd_ms = max(0.0, (float(t_recv) - t_send) * 1000.0)
+            with _lock:
+                _probe_rtts.append(rtt_ms)
+                avg = sum(_probe_rtts) / len(_probe_rtts)
+                _state["last_delay_ms"] = round(avg, 2)
+                _state["probe_rtt_ms"] = round(avg, 2)
+                _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
+            _set_slo_gauges()
+            n_ok = int(_state.get("probe_ok") or 0)
+            if n_ok <= 2 or n_ok % 20 == 0 or rtt_ms >= 1000.0:
+                _log_event(
+                    "probe",
+                    f"path RTT {rtt_ms:.1f}ms"
+                    + (f" OWD {owd_ms:.1f}ms" if owd_ms is not None else ""),
+                )
+        except Exception as exc:
+            with _lock:
+                _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
+            logger.debug("latency probe failed: %s", exc)
+        time.sleep(period)
+
+
 @app.on_event("startup")
 def on_startup():
     if start_http_server is not None:
@@ -576,6 +634,7 @@ def on_startup():
     threading.Thread(target=_video_stream_loop, daemon=True).start()
     threading.Thread(target=_socks_pdu_refresh_loop, daemon=True).start()
     threading.Thread(target=_chrome_autostart_loop, daemon=True, name="chrome-autostart").start()
+    threading.Thread(target=_latency_probe_loop, daemon=True, name="latency-probe").start()
 
 
 def _socks_pdu_refresh_loop() -> None:

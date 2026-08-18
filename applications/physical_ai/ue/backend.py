@@ -222,6 +222,18 @@ def _wait_pdu() -> None:
         _state["last_error"] = f"PDU (prefer {PDU_IFACE_CFG}) not ready after {PDU_WAIT_TIMEOUT}s"
 
 
+def _one_way_ms(parsed: Any) -> Optional[float]:
+    if not isinstance(parsed, dict):
+        return None
+    ina = parsed.get("ina")
+    if not isinstance(ina, dict):
+        return None
+    try:
+        return float(ina.get("latency_ms"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     image_b64 = None
@@ -242,14 +254,28 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
         "max_tokens": MAX_TOKENS,
         "stream": False,
     }
+    t_send = time.time()
+    body["ina"] = {
+        "t_send": t_send,
+        "app_name": UE_ID,
+        "client_index": CLIENT_INDEX,
+        "ue": UE_NAME,
+    }
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{SERVER_URL}/v1/chat/completions",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-INA-T-Send": str(t_send),
+            "X-INA-App-Name": UE_ID,
+            "X-INA-Client-Index": str(CLIENT_INDEX),
+        },
         method="POST",
     )
     t0 = time.monotonic()
+    parsed: Any = {}
+    code = 0
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             raw = resp.read().decode() or "{}"
@@ -263,11 +289,12 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
             parsed = {"message": raw[:400]}
         code = exc.code
         parsed = parsed if isinstance(parsed, dict) else {"message": str(parsed)}
-        latency_ms = int((time.monotonic() - t0) * 1000)
+        rtt_ms = int((time.monotonic() - t0) * 1000)
         return {
             "ok": False,
             "http_status": code,
-            "latency_ms": latency_ms,
+            "http_rtt_ms": rtt_ms,
+            "latency_ms": _one_way_ms(parsed),
             "sent_bytes": len(payload),
             "image_bytes": image_bytes,
             "include_image": include_image,
@@ -277,11 +304,12 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
             "raw": parsed,
         }
     except urllib.error.URLError as exc:
-        latency_ms = int((time.monotonic() - t0) * 1000)
+        rtt_ms = int((time.monotonic() - t0) * 1000)
         return {
             "ok": False,
             "http_status": 0,
-            "latency_ms": latency_ms,
+            "http_rtt_ms": rtt_ms,
+            "latency_ms": None,
             "sent_bytes": len(payload),
             "image_bytes": image_bytes,
             "include_image": include_image,
@@ -290,7 +318,7 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
             "error": str(exc.reason),
             "raw": {},
         }
-    latency_ms = int((time.monotonic() - t0) * 1000)
+    rtt_ms = int((time.monotonic() - t0) * 1000)
     choices = (parsed or {}).get("choices") or []
     text = ""
     if choices:
@@ -299,7 +327,8 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
     return {
         "ok": code == 200,
         "http_status": code,
-        "latency_ms": latency_ms,
+        "http_rtt_ms": rtt_ms,
+        "latency_ms": _one_way_ms(parsed),
         "sent_bytes": len(payload),
         "image_bytes": image_bytes,
         "include_image": include_image,
@@ -307,7 +336,7 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
         "text": text,
         "error": None if code == 200 else str(parsed)[:400],
         "usage": usage,
-        "raw": {"id": parsed.get("id"), "usage": usage},
+        "raw": {"id": parsed.get("id"), "usage": usage, "ina": (parsed or {}).get("ina")},
     }
 
 
@@ -330,6 +359,7 @@ def _record(result: dict[str, Any]) -> dict[str, Any]:
             "text": result.get("text") or "",
             "error": result.get("error"),
             "latency_ms": result.get("latency_ms"),
+            "http_rtt_ms": result.get("http_rtt_ms"),
             "usage": result.get("usage") or {},
         },
     }
@@ -344,14 +374,16 @@ def _record(result: dict[str, Any]) -> dict[str, Any]:
             _state["prompt_tokens"] = int(_state.get("prompt_tokens") or 0) + prompt_tok
             _state["completion_tokens"] = int(_state.get("completion_tokens") or 0) + completion_tok
             _state["total_tokens"] = int(_state.get("total_tokens") or 0) + total_tok
-    lat = float(result.get("latency_ms") or 0.0)
+    lat = result.get("latency_ms")
     sent_b = float(result.get("sent_bytes") or 0.0)
-    mbps = (sent_b * 8.0) / (max(lat, 1.0) * 1e3) if lat else 0.0  # bytes / ms -> Mbps
+    rtt = float(result.get("http_rtt_ms") or 0.0)
+    mbps = (sent_b * 8.0) / (max(rtt, 1.0) * 1e3) if rtt else 0.0
     if APP_LATENCY_MS is not None:
-        APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
         APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(mbps)
-        APP_LATENCY_MS.set(lat)
         APP_THROUGHPUT_MBPS.set(mbps)
+        if lat is not None:
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(float(lat))
+            APP_LATENCY_MS.set(float(lat))
     return entry
 
 
@@ -430,6 +462,7 @@ def api_status() -> dict:
     return {
         "ok": True,
         "ue": UE_NAME,
+        "app_name": UE_ID,
         "slice_id": SLICE_ID,
         "client_index": CLIENT_INDEX,
         "console_ip": CONSOLE_IP,

@@ -85,9 +85,16 @@ LOG_LEVEL=DEBUG docker compose up -d
 Each payload carries `t_send` (unix epoch seconds, float) stamped immediately
 before publish. The receiver computes `delay = t_recv - t_send`. This is a valid
 **one-way** delay **only because both containers are chrony-synced to the same
-NTP source over `ens0`** — never over the OTA path being measured. Measurement
-accuracy is bounded by the clock offset, exported as
-`sliced_clock_offset_seconds`.
+NTP source over `ens0`** — never over the OTA path being measured.
+
+A **separate probe thread** on each UE also sends a tiny `slice_d/probe/<dev>`
+message (timestamp only, ~100 B) every `LATENCY_PROBE_PERIOD_S` (default 0.5 s).
+The controller echoes `slice_d/probe-ack/<dev>` immediately. The UE records
+**RTT = t_ack - t_send** (clock-independent). When bulk MQTT fills the PDU,
+that probe RTT rises — the same method OTT uses as an indirect YouTube-path
+latency (HTTP echo competing with Chromium downlink).
+
+Grafana `app_ue_latency_ms` is fed from the probe, not from large sensor payloads.
 
 Negative delays (receiver clock behind sender) are clamped to `0` and counted in
 `sliced_clock_skew_events_total`, so a skewed clock is visible rather than
@@ -110,7 +117,7 @@ OTA**, counted per direction as Prometheus counters and surfaced via `rate()`.
 | `DL_PAYLOAD_BYTES` | `256` | edge | DL payload size |
 | `DEVICE_TTL_S` | `7200` | edge | Drop a device from DL fan-out after this idle time (2× slow period) |
 | `MQTT_QOS` | `0` | both | `0` (best-effort) or `1` |
-| `LOG_INTERVAL_S` | `30` | both | Terminal summary period |
+| `LATENCY_PROBE_PERIOD_S` | `0.5` | client | Dedicated timestamped probe interval |
 | `JITTER_FRAC` | `0.1` | client | ±fraction randomisation of periods (avoids lockstep) |
 | `LOG_LEVEL` | `INFO` | both | `DEBUG` adds per-message lines |
 | `CHRONYC_HOST` / `CHRONY_MAX_OFFSET_MS` | (empty) / `5` | both | chrony query host + skew warn threshold |

@@ -91,9 +91,9 @@ export default function ConsoleView({
 
               {/* 4. Live 5G Downlink Telemetry */}
               <div className="telemetry-strip">
-                <div className="telemetry-chip" title="Downlink Network Transit Latency">
-                  <span className="lbl">DL Latency</span>
-                  <span className="val">{isStreaming ? `${cl.net_delay_ms.toFixed(1)} ms` : "—"}</span>
+                <div className="telemetry-chip" title="HTTP probe RTT over the 5G PDU (rises when YouTube saturates the path)">
+                  <span className="lbl">Path RTT</span>
+                  <span className="val">{`${cl.net_delay_ms.toFixed(1)} ms`}</span>
                 </div>
                 <div className="telemetry-chip" title="Received Frames Per Second">
                   <span className="lbl">RX FPS</span>

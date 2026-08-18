@@ -17,11 +17,11 @@ CCTV_SERVER = f"{REG}/application-cctv:nws-v0.9-amd64"
 CCTV_FRONTEND = f"{REG}/application-cctv-frontend:nws-v0.15-amd64"
 CCTV_CLIENT = f"{REG}/application-cctv-publisher:nws-v0.10-amd64"
 PHYSICAL_AI_SERVER = f"{REG}/cosmo3-vllm:nws-v0.7"
-PHYSICAL_AI_CLIENT = f"{REG}/cosmo3-ue-console:nws-v0.17-amd64"
+PHYSICAL_AI_CLIENT = f"{REG}/cosmo3-ue-console:nws-v0.18-amd64"
 OTT_SERVER = f"{REG}/application-ott:nws-v0.10-amd64"
-OTT_CLIENT = f"{REG}/ott-ue-console:nws-v0.28-amd64"
-IOT_SERVER = f"{REG}/sliced-edge:nws-v0.7-amd64"
-IOT_CLIENT = f"{REG}/iot-ue-console:nws-v0.8-amd64"
+OTT_CLIENT = f"{REG}/ott-ue-console:nws-v0.29-amd64"
+IOT_SERVER = f"{REG}/sliced-edge:nws-v0.9-amd64"
+IOT_CLIENT = f"{REG}/iot-ue-console:nws-v0.10-amd64"
 
 STALE_SERVER_REPOS = frozenset({"slicea-analyzer", "hd-stream-server"})
 STALE_CLIENT_REPOS = frozenset(
@@ -85,7 +85,7 @@ def resolve_client_image(app_type: str, stored: Optional[str] = None) -> str:
     # OTT: force roll when console lacks portal→Chromium heartbeat control (< v0.26).
     if (app_type or "").lower() == "ott" and _image_repo(img) == "ott-ue-console":
         m = _nws_minor(img)
-        if m is not None and m < 28:
+        if m is not None and m < 29:
             return canonical
     return img
 

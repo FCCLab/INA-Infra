@@ -113,7 +113,7 @@ def _physical_ai_server_image(image: Optional[str], gpu_arch: str) -> str:
     return f"{repo}:nws-v0.7-arm64-cu128"
 
 
-PHYSICAL_AI_UE_CONSOLE_IMAGE = "10.1.132.30:5000/cosmo3-ue-console:nws-v0.17-amd64"
+PHYSICAL_AI_UE_CONSOLE_IMAGE = "10.1.132.30:5000/cosmo3-ue-console:nws-v0.18-amd64"
 PHYSICAL_AI_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
 PHYSICAL_AI_BACKEND_PORT = 8090
 
@@ -128,7 +128,7 @@ def physical_ai_console_mac(slice_id: int, client_index: int) -> str:
 
 IOT_MOSQUITTO_IMAGE = "10.1.132.30:5000/iot-mosquitto:nws-v0.1-amd64"
 IOT_MOSQUITTO_CONTROL_PORT = 1884
-IOT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/iot-ue-console:nws-v0.8-amd64"
+IOT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/iot-ue-console:nws-v0.10-amd64"
 IOT_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
 IOT_BACKEND_PORT = 8090
 
@@ -141,7 +141,7 @@ def iot_console_mac(slice_id: int, client_index: int) -> str:
     return site_ips.ue_console_mac(slice_id, client_index)
 
 
-OTT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/ott-ue-console:nws-v0.28-amd64"
+OTT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/ott-ue-console:nws-v0.29-amd64"
 OTT_CHROMIUM_IMAGE = os.environ.get(
     "OTT_CHROMIUM_IMAGE",
     "10.1.132.30:5000/linuxserver-chromium:latest",
@@ -250,6 +250,7 @@ def _influx_pusher_container(
         "  return s\n"
         "last_net = get_net()\n"
         "last_t = time.time()\n"
+        "last_ue_lat = {}\n"
         "def _parse_offset_to_ms(text):\n"
         "  m = re.search(r'Offset:\\s*([+-]?[0-9.]+)\\s*(ns|us|µs|ms|s)\\b', text or '')\n"
         "  if not m: return None\n"
@@ -349,10 +350,14 @@ def _influx_pusher_container(
         "            if ue_id:\n"
         "              slot = per_client.setdefault(ue_id, {})\n"
         "              if k in ('app_ue_latency_ms', 'cctv_client_e2e_delay_ms'):\n"
-        "                slot['latency_ms'] = v\n"
+        "                if v != 0 and last_ue_lat.get(ue_id) != v:\n"
+        "                  last_ue_lat[ue_id] = v\n"
+        "                  slot['latency_ms'] = v\n"
         "              elif k == 'cctv_client_net_delay_ms':\n"
-        "                slot.setdefault('latency_ms', v)\n"
         "                slot['net_delay_ms'] = v\n"
+        "                if 'latency_ms' not in slot and v != 0 and last_ue_lat.get(ue_id) != v:\n"
+        "                  last_ue_lat[ue_id] = v\n"
+        "                  slot['latency_ms'] = v\n"
         "              elif k == 'app_ue_throughput_mbps':\n"
         "                slot['app_throughput_mbps'] = v\n"
         "              short_k = k.replace('cctv_client_', '').replace('cctv_', '')\n"
@@ -360,7 +365,7 @@ def _influx_pusher_container(
         "              if short_k == 'egress_fps': short_k = 'application_egress_fps'\n"
         "              slot[short_k] = v\n"
         "            if k == 'app_latency_ms':\n"
-        "              fields['latency_ms'] = v\n"
+        "              continue\n"
         "            if k == 'app_throughput_mbps':\n"
         "              fields['app_throughput_mbps'] = v\n"
         "            if lbls:\n"
@@ -380,6 +385,8 @@ def _influx_pusher_container(
         "        if fk.startswith('application_throughput_bytes_per_sec') and 'throughput_server' not in fields:\n"
         "          fields['throughput_server'] = round(float(fields[fk]) * 8.0 / 1e6, 3)\n"
         "          fields.setdefault('throughput_mbps', fields['throughput_server'])\n"
+        "      if fields.get('latency_ms') == 0:\n"
+        "        fields.pop('latency_ms', None)\n"
         "      if is_client:\n"
         "        slot = per_client.setdefault(name, {})\n"
         "        if 'latency_ms' in fields: slot['latency_ms'] = fields['latency_ms']\n"
@@ -831,6 +838,7 @@ def generate_server_manifests(
             or "10.1.132.30:5000/cosmo3-dashboard:nws-v0.11-amd64"
         )
         dash_port = int(p.get("dashboard_port") or site_ips.CONSOLE_PORT)
+        latency_proxy_port = int(p.get("latency_proxy_port") or 18080)
 
         def _read_dash(name: str) -> str:
             path = f"/home/fcp/INA-Infra/applications/physical_ai/dashboard/{name}"
@@ -856,8 +864,18 @@ def generate_server_manifests(
             }
             manifests.append(dash_cm_manifest)
 
+        route_init = site_ips.multus_src_route_init(app_multus_ip, "net1")
+        route_init["command"][2] = (
+            str(route_init["command"][2]).rstrip()
+            + "\n"
+            + f"iptables -t nat -C PREROUTING -i net1 -p tcp --dport {http_port} "
+            f"-j REDIRECT --to-port {latency_proxy_port} 2>/dev/null || "
+            f"iptables -t nat -A PREROUTING -i net1 -p tcp --dport {http_port} "
+            f"-j REDIRECT --to-port {latency_proxy_port} || true\n"
+            "iptables -t nat -L PREROUTING -n || true\n"
+        )
         pod_spec = {
-            "initContainers": [site_ips.multus_src_route_init(app_multus_ip, "net1")],
+            "initContainers": [route_init],
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": node_sel,
@@ -962,6 +980,7 @@ def generate_server_manifests(
                         {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
                         {"name": "MODEL_NAME", "value": model_name},
                         {"name": "VLLM_URL", "value": f"http://127.0.0.1:{http_port}"},
+                        {"name": "LATENCY_PROXY_PORT", "value": str(latency_proxy_port)},
                         {"name": "HF_SECRET_NAME", "value": "ina-hf-token"},
                         {"name": "HF_DEPLOY_NAME", "value": app_name},
                         {"name": "DASHBOARD_STATIC", "value": "/app/static"},
@@ -1205,7 +1224,7 @@ def generate_server_manifests(
                 # Container 3: Dedicated Nginx + React OTT Portal Frontend
                 {
                     "name": APP_CONSOLE_CONTAINER,
-                    "image": "10.1.132.30:5000/application-ott-frontend:nws-v0.15-amd64",
+                    "image": "10.1.132.30:5000/application-ott-frontend:nws-v0.16-amd64",
                     "imagePullPolicy": "Always",
                     "ports": [{"name": "web", "containerPort": 80}],
                     "resources": {
@@ -1728,12 +1747,7 @@ def build_iot_ue_containers(
     ue_name = f"oai-ue-slice-{sid}-client-{idx}"
     raw_client = (app_cfg.client_image or "").strip()
     override = str(p.get("ue_console_image") or "").strip()
-    if override:
-        img = override
-    elif "ue-console" in raw_client:
-        img = raw_client
-    else:
-        img = IOT_UE_CONSOLE_IMAGE
+    img = app_images.resolve_client_image("iot", override or raw_client or IOT_UE_CONSOLE_IMAGE)
     msgs = p.get("messages") or p.get("iot_messages")
     messages_json = json.dumps(msgs) if msgs else ""
     common = [

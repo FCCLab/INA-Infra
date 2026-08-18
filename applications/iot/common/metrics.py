@@ -41,14 +41,37 @@ APP_THROUGHPUT_MBPS = Gauge(
 )
 
 
+def set_ue_latency(ue_id: str, latency_ms: float) -> None:
+    APP_UE_LATENCY_MS.labels(ue_id=str(ue_id or "ue")).set(float(latency_ms or 0.0))
+
+
+def clear_ue_latency(ue_id: str) -> None:
+    try:
+        APP_UE_LATENCY_MS.remove(str(ue_id or "ue"))
+    except KeyError:
+        pass
+
+
+def set_agg_latency(latency_ms: float) -> None:
+    APP_LATENCY_MS.set(float(latency_ms or 0.0))
+
+
+def clear_agg_latency() -> None:
+    APP_LATENCY_MS.set(float("nan"))
+
+
+def set_agg_latency(latency_ms: float) -> None:
+    APP_LATENCY_MS.set(float(latency_ms or 0.0))
+
+
 def set_ue_slo(ue_id: str, latency_ms: float, throughput_mbps: float) -> None:
     uid = str(ue_id or "ue")
-    APP_UE_LATENCY_MS.labels(ue_id=uid).set(float(latency_ms or 0.0))
+    set_ue_latency(uid, latency_ms)
     APP_UE_THROUGHPUT_MBPS.labels(ue_id=uid).set(float(throughput_mbps or 0.0))
 
 
 def set_agg_slo(latency_ms: float, throughput_mbps: float) -> None:
-    APP_LATENCY_MS.set(float(latency_ms or 0.0))
+    set_agg_latency(latency_ms)
     APP_THROUGHPUT_MBPS.set(float(throughput_mbps or 0.0))
 
 # Delay histogram buckets (seconds). Best-effort semantics -> a wide range from

@@ -22,21 +22,28 @@ def flux(app_type: str, field_pred: str, extra: str = "") -> str:
     )
 
 
-def flux_per_ue_latency(app_type: str) -> str:
-    """Per-UE latency (legend: sliceN-<app>-client-M).
+def _latency_source(app_type: str) -> tuple[str, str, str]:
+    """origin, extra filter, field predicate for per-UE latency points.
 
-    IoT/OTT/Physical AI measure RTT on the UE sidecar (origin=client).
-    CCTV e2e (capture → YOLO) is measured on the analyzer and scraped as
-    origin=server with a ue_id tag — the UE only exports encode time.
+    CCTV e2e, IoT MQTT uplink, and Physical AI HTTP uplink are measured on
+    the server (ue_id tag). OTT still uses the UE sidecar (origin=client).
     """
-    if app_type == "cctv":
-        origin = "server"
-        extra = '  |> filter(fn: (r) => exists r.ue_id and r.ue_id != "")\n'
-        field = 'r._field == "latency_ms" or r._field == "e2e_delay_ms"'
-    else:
-        origin = "client"
-        extra = ""
-        field = 'r._field == "latency_ms"'
+    if app_type in ("cctv", "iot", "physical_ai"):
+        return (
+            "server",
+            '  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n',
+            'r._field == "latency_ms" or r._field == "e2e_delay_ms"',
+        )
+    return (
+        "client",
+            '  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n',
+        'r._field == "latency_ms"',
+    )
+
+
+def flux_per_ue_latency(app_type: str) -> str:
+    """Per-UE latency (legend: sliceN-<app>-client-M)."""
+    origin, extra, field = _latency_source(app_type)
     return (
         'from(bucket: "default")\n'
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
@@ -67,32 +74,48 @@ def flux_per_ue_throughput(app_type: str, direction: str | None = None) -> str:
         f'  |> filter(fn: (r) => r._measurement == "application_metrics" and r.app_type == "{app_type}")\n'
         f"  |> filter(fn: (r) => {field})\n"
         '  |> filter(fn: (r) => r.origin == "client")\n'
+        '  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n'
         "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
         f'  |> map(fn: (r) => ({{ r with _field: (if exists r.app_name and r.app_name != "" then r.app_name else r.ue_id){suffix} }}))\n'
         "  |> yield()"
     )
 
 
-def flux_agg_latency(app_type: str) -> str:
+def flux_avg_latency(app_type: str) -> str:
+    """Mean of per-UE latency (equal weight per UE), same layout as throughput.
+
+    Throughput aggregated sums per-UE oaitun rates. Latency averages the same
+    per-UE series instead of using the MQTT/server ``app_latency_ms`` gauge
+    (message-weighted, no ue_id). Do not fill(usePrevious): a stopped UE's last
+    delay would otherwise hold forever while throughput is already 0.
+    """
+    origin, extra, field = _latency_source(app_type)
     return (
         'from(bucket: "default")\n'
         "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
         f'  |> filter(fn: (r) => r._measurement == "application_metrics" and r.app_type == "{app_type}")\n'
-        '  |> filter(fn: (r) => r._field == "latency_ms")\n'
-        '  |> filter(fn: (r) => r.origin == "server")\n'
-        '  |> filter(fn: (r) => not exists r.ue_id or r.ue_id == "")\n'
+        f"  |> filter(fn: (r) => {field})\n"
+        f'  |> filter(fn: (r) => r.origin == "{origin}")\n'
+        f"{extra}"
         "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+        '  |> map(fn: (r) => ({ r with _field: if exists r.app_name and r.app_name != "" then r.app_name else r.ue_id }))\n'
+        '  |> group(columns: ["_time", "_field"])\n'
+        "  |> mean()\n"
+        '  |> group(columns: ["_time"])\n'
+        "  |> mean()\n"
+        "  |> filter(fn: (r) => exists r._value)\n"
+        "  |> group()\n"
+        '  |> set(key: "_field", value: "Average")\n'
+        '  |> set(key: "_measurement", value: "application_metrics")\n'
         "  |> yield()"
     )
 
 
 def flux_agg_throughput(app_type: str, direction: str | None = None) -> str:
-    """Sum of per-UE 5G oaitun rates. direction is 'ul', 'dl', or both.
+    """Sum of the same per-UE oaitun series shown on the left.
 
-    Sidecar writes ~1 Hz with jitter, so a UE can miss a 1s bin. Use last()
-    per window and fill(usePrevious) so a missed bin still contributes that
-    UE's last rate. This is a native aggregateWindow (not overlapping
-    window(period: 2s), which is slow when Grafana picks a sub-second step).
+    Do not fill(usePrevious): that holds a stopped UE's last rate until the
+    end of the Grafana window, so aggregated stays green while per-UE is empty.
     """
     if direction == "ul":
         field = 'r._field == "throughput_ul_mbps"'
@@ -116,10 +139,11 @@ def flux_agg_throughput(app_type: str, direction: str | None = None) -> str:
         f'  |> filter(fn: (r) => r._measurement == "application_metrics" and r.app_type == "{app_type}")\n'
         f"  |> filter(fn: (r) => {field})\n"
         '  |> filter(fn: (r) => r.origin == "client")\n'
-        "  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n"
-        "  |> fill(usePrevious: true)\n"
+        '  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n'
+        "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
         f"  |> group(columns: {group_cols})\n"
         "  |> sum()\n"
+        "  |> filter(fn: (r) => exists r._value)\n"
         "  |> group()\n"
         f"{set_field}"
         '  |> set(key: "_measurement", value: "application_metrics")\n'
@@ -137,6 +161,9 @@ def timeseries(
     query: str,
     unit: str = "short",
     interval: str | None = None,
+    span_nulls: bool = True,
+    show_points: str = "auto",
+    legend_calcs: list[str] | None = None,
 ) -> dict:
     panel = {
         "datasource": DS,
@@ -147,8 +174,8 @@ def timeseries(
                     "fillOpacity": 12,
                     "lineInterpolation": "smooth",
                     "lineWidth": 2,
-                    "showPoints": "auto",
-                    "spanNulls": True,
+                    "showPoints": show_points,
+                    "spanNulls": span_nulls,
                 },
                 "min": 0,
                 "unit": unit,
@@ -159,7 +186,7 @@ def timeseries(
         "id": pid,
         "options": {
             "legend": {
-                "calcs": ["lastNotNull", "mean", "max"],
+                "calcs": legend_calcs or ["lastNotNull", "mean", "max"],
                 "displayMode": "table",
                 "placement": "bottom",
                 "showLegend": True,
@@ -235,14 +262,14 @@ def write(name: str, payload: dict) -> None:
 
 
 def metrics_panels(app_type: str) -> list[dict]:
-    """DL row, UL row, then latency (per-UE | aggregated) — CCTV pattern."""
+    """DL row, UL row, then latency (per-UE | average of those UEs)."""
     return [
-        timeseries(1, "DL per UE (oaitun RX)", 0, 0, 12, 8, flux_per_ue_throughput(app_type, "dl"), "Mbps", interval="1s"),
-        timeseries(2, "DL aggregated (oaitun RX)", 12, 0, 12, 8, flux_agg_throughput(app_type, "dl"), "Mbps", interval="1s"),
-        timeseries(3, "UL per UE (oaitun TX)", 0, 8, 12, 8, flux_per_ue_throughput(app_type, "ul"), "Mbps", interval="1s"),
-        timeseries(4, "UL aggregated (oaitun TX)", 12, 8, 12, 8, flux_agg_throughput(app_type, "ul"), "Mbps", interval="1s"),
-        timeseries(5, "Per-UE latency", 0, 16, 12, 8, flux_per_ue_latency(app_type), "ms", interval="1s"),
-        timeseries(6, "Aggregated latency", 12, 16, 12, 8, flux_agg_latency(app_type), "ms", interval="1s"),
+        timeseries(1, "DL per UE (oaitun RX)", 0, 0, 12, 8, flux_per_ue_throughput(app_type, "dl"), "Mbps", interval="1s", span_nulls=False),
+        timeseries(2, "DL aggregated (oaitun RX)", 12, 0, 12, 8, flux_agg_throughput(app_type, "dl"), "Mbps", interval="1s", span_nulls=False),
+        timeseries(3, "UL per UE (oaitun TX)", 0, 8, 12, 8, flux_per_ue_throughput(app_type, "ul"), "Mbps", interval="1s", span_nulls=False),
+        timeseries(4, "UL aggregated (oaitun TX)", 12, 8, 12, 8, flux_agg_throughput(app_type, "ul"), "Mbps", interval="1s", span_nulls=False),
+        timeseries(5, "Per-UE latency", 0, 16, 12, 8, flux_per_ue_latency(app_type), "ms", interval="1s", span_nulls=False, show_points="always", legend_calcs=["last", "mean", "max"]),
+        timeseries(6, "Average latency", 12, 16, 12, 8, flux_avg_latency(app_type), "ms", interval="1s", span_nulls=False, show_points="always", legend_calcs=["last", "mean", "max"]),
     ]
 
 

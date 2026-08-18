@@ -86,6 +86,7 @@
       <div class="kpi-card"><div class="kpi-label">YouTube ID</div><div class="kpi-value mono" id="kpi-ytid">—</div></div>
       <div class="kpi-card"><div class="kpi-label">SOCKS via 5G</div><div class="kpi-value mono" id="kpi-socks">—</div></div>
       <div class="kpi-card"><div class="kpi-label">CDP</div><div class="kpi-value mono" id="kpi-cdp">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Path RTT</div><div class="kpi-value mono" id="kpi-rtt">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Mode</div><div class="kpi-value mono" id="kpi-mode">chromium_5g</div></div>
     </div>
     <div class="layout">
@@ -126,6 +127,7 @@
             <tr><th>Quality</th><td id="st-quality">4k</td></tr>
             <tr><th>App server</th><td id="st-server">—</td></tr>
             <tr><th>Transport</th><td>console → CDP → Chromium → SOCKS5 → PDU → YouTube<br/>UE backend → PDU → app server (catalog / heartbeat / select)</td></tr>
+            <tr><th>Path RTT</th><td id="st-rtt">—</td></tr>
             <tr><th>YouTube URL</th><td id="st-yturl">—</td></tr>
             <tr><th>Chrome page</th><td id="st-chrome">—</td></tr>
             <tr><th>SOCKS up / down</th><td id="st-socks">—</td></tr>
@@ -224,6 +226,8 @@
         $("kpi-socks").innerText=`↑${fmtBytes(socks.bytes_up||st.socks_bytes_up||0)} ↓${fmtBytes(socks.bytes_down||st.socks_bytes_down||0)}`;
         $("kpi-cdp").innerText=chrome.cdp_ready?"ready":"waiting";
         $("kpi-mode").innerText=st.play_mode||"—";
+        $("kpi-rtt").innerText=(st.probe_rtt_ms||st.last_delay_ms)?`${Number(st.probe_rtt_ms||st.last_delay_ms).toFixed(1)} ms`:"—";
+        $("st-rtt").textContent=(st.probe_rtt_ms||st.last_delay_ms)?`${Number(st.probe_rtt_ms||st.last_delay_ms).toFixed(1)} ms (HTTP probe via PDU)`:"—";
         $("pill-pdu").className=`pill ${st.pdu_ready?"ok":"bad"}`;
         $("pill-pdu").innerText=st.pdu_ready?`5G PDU: ${st.pdu_ip}`:"5G PDU: connecting…";
         const srv=data.server||{};

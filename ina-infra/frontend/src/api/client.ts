@@ -800,7 +800,7 @@ export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
     enabled: true,
     target_cluster: "edge",
     server_image: "10.1.132.30:5000/cosmo3-vllm:nws-v0.7",
-    client_image: "10.1.132.30:5000/cosmo3-ue-console:nws-v0.17-amd64",
+    client_image: "10.1.132.30:5000/cosmo3-ue-console:nws-v0.18-amd64",
     server_port: 8000,
     metrics_port: 8002,
     params: {
@@ -822,7 +822,7 @@ export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
     enabled: true,
     target_cluster: "auto",
     server_image: "10.1.132.30:5000/application-ott:nws-v0.10-amd64",
-    client_image: "10.1.132.30:5000/ott-ue-console:nws-v0.28-amd64",
+    client_image: "10.1.132.30:5000/ott-ue-console:nws-v0.29-amd64",
     server_port: 8554,
     metrics_port: 9103,
     params: {
@@ -839,8 +839,8 @@ export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
     name: "Background IoT (MQTT)",
     enabled: true,
     target_cluster: "auto",
-    server_image: "10.1.132.30:5000/sliced-edge:nws-v0.7-amd64",
-    client_image: "10.1.132.30:5000/iot-ue-console:nws-v0.8-amd64",
+    server_image: "10.1.132.30:5000/sliced-edge:nws-v0.9-amd64",
+    client_image: "10.1.132.30:5000/iot-ue-console:nws-v0.10-amd64",
     server_port: 1883,
     metrics_port: 9105,
     params: {

@@ -16,6 +16,7 @@ server binds to the metrics interface (``METRICS_BIND_IP``, i.e. ens0).
 from __future__ import annotations
 
 import logging
+import json
 import os
 import random
 import signal
@@ -159,6 +160,7 @@ class IoTClient:
         M.connected.set(1)
         for dev in self._devices:
             client.subscribe(f"slice_d/dl/{dev}", qos=MQTT_QOS)
+            client.subscribe(f"slice_d/probe-ack/{dev}", qos=MQTT_QOS)
         log.info(
             "connected to %s:%d (reconnect=%s), subscribed %d downlink topics",
             BROKER_HOST,
@@ -177,6 +179,15 @@ class IoTClient:
         recv = time.time()
         parsed = metrics.parse_payload(msg.payload)
         if parsed is None:
+            return
+        topic = str(msg.topic or "")
+        if topic.startswith("slice_d/probe-ack/"):
+            t_send = parsed.get("t_send")
+            if isinstance(t_send, (int, float)) and t_send > 0:
+                rtt = max(0.0, recv - float(t_send))
+                M.delay.labels(tier="probe").observe(rtt)
+                with self._lock:
+                    self._dl_delays.append(rtt)
             return
         tier = parsed.get("tier", "unknown")
         delay, skew = metrics.compute_delay(parsed, now=recv)
@@ -219,6 +230,30 @@ class IoTClient:
                 log.debug("ul publish failed dev=%s tier=%s rc=%s", device_id, tier, info.rc)
             jittered = period * random.uniform(1 - JITTER_FRAC, 1 + JITTER_FRAC)
             self._stop.wait(jittered)
+
+    def _probe_loop(self) -> None:
+        """Small timestamped pings; path delay rises when bulk MQTT saturates the PDU."""
+        period = max(0.1, float(os.environ.get("LATENCY_PROBE_PERIOD_S") or "0.5"))
+        seq = 0
+        self._stop.wait(period)
+        while not self._stop.is_set():
+            for device_id in self._devices:
+                seq += 1
+                body = {
+                    "device_id": device_id,
+                    "seq": seq,
+                    "kind": "probe",
+                    "app_name": UE_ID,
+                    "t_send": time.time(),
+                }
+                payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+                info = self._client.publish(f"slice_d/probe/{device_id}", payload, qos=MQTT_QOS)
+                if info.rc == mqtt.MQTT_ERR_SUCCESS:
+                    M.bytes_sent.labels(tier="probe").inc(len(payload))
+                    M.msgs_sent.labels(tier="probe").inc()
+                else:
+                    M.publish_errors.inc()
+            self._stop.wait(period)
 
     # -- Summary logging ------------------------------------------------------
     def _report_loop(self) -> None:
@@ -274,6 +309,7 @@ class IoTClient:
                     daemon=True,
                 ).start()
 
+        threading.Thread(target=self._probe_loop, name="latency-probe", daemon=True).start()
         threading.Thread(target=self._report_loop, name="report", daemon=True).start()
 
         log.info(

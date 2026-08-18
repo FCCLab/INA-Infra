@@ -254,7 +254,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\" or r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) + \" \" + (if r._field == \"throughput_ul_mbps\" then \"UL\" else \"DL\") }))\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\" or r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) + \" \" + (if r._field == \"throughput_ul_mbps\" then \"UL\" else \"DL\") }))\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"

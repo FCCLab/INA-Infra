@@ -271,6 +271,23 @@ async def client_select_video(client_id: str, req: SelectVideoRequest):
     return result
 
 
+class ProbeRequest(BaseModel):
+    client_id: str = ""
+    t_send: float = 0.0
+
+
+@app.post("/api/v1/probe", tags=["Clients"])
+async def latency_probe(req: ProbeRequest):
+    """Tiny echo for UE probe thread. RTT rises when YouTube saturates the PDU."""
+    now = time.time()
+    return {
+        "ok": True,
+        "client_id": req.client_id,
+        "t_send": req.t_send,
+        "t_recv": now,
+    }
+
+
 @app.post("/api/v1/clients/heartbeat", tags=["Clients"])
 async def client_heartbeat(req: ClientHeartbeatRequest):
     """Called by UE clients to register, update telemetry, and sync play state."""

@@ -18,7 +18,7 @@
               "lineInterpolation": "smooth",
               "lineWidth": 2,
               "showPoints": "auto",
-              "spanNulls": true
+              "spanNulls": false
             },
             "min": 0,
             "unit": "Mbps"
@@ -54,7 +54,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) }))\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) }))\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
@@ -77,7 +77,7 @@
               "lineInterpolation": "smooth",
               "lineWidth": 2,
               "showPoints": "auto",
-              "spanNulls": true
+              "spanNulls": false
             },
             "min": 0,
             "unit": "Mbps"
@@ -113,7 +113,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> set(key: \"_field\", value: \"DL\")\n  |> set(key: \"_measurement\", value: \"application_metrics\")\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> filter(fn: (r) => exists r._value)\n  |> group()\n  |> set(key: \"_field\", value: \"DL\")\n  |> set(key: \"_measurement\", value: \"application_metrics\")\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
@@ -136,7 +136,7 @@
               "lineInterpolation": "smooth",
               "lineWidth": 2,
               "showPoints": "auto",
-              "spanNulls": true
+              "spanNulls": false
             },
             "min": 0,
             "unit": "Mbps"
@@ -172,7 +172,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) }))\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: (if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id) }))\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
@@ -195,7 +195,7 @@
               "lineInterpolation": "smooth",
               "lineWidth": 2,
               "showPoints": "auto",
-              "spanNulls": true
+              "spanNulls": false
             },
             "min": 0,
             "unit": "Mbps"
@@ -231,7 +231,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: true)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> group()\n  |> set(key: \"_field\", value: \"UL\")\n  |> set(key: \"_measurement\", value: \"application_metrics\")\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"throughput_ul_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> group(columns: [\"_time\"])\n  |> sum()\n  |> filter(fn: (r) => exists r._value)\n  |> group()\n  |> set(key: \"_field\", value: \"UL\")\n  |> set(key: \"_measurement\", value: \"application_metrics\")\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
@@ -253,8 +253,8 @@
               "fillOpacity": 12,
               "lineInterpolation": "smooth",
               "lineWidth": 2,
-              "showPoints": "auto",
-              "spanNulls": true
+              "showPoints": "always",
+              "spanNulls": false
             },
             "min": 0,
             "unit": "ms"
@@ -271,7 +271,7 @@
         "options": {
           "legend": {
             "calcs": [
-              "lastNotNull",
+              "last",
               "mean",
               "max"
             ],
@@ -290,7 +290,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id }))\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"latency_ms\" or r._field == \"e2e_delay_ms\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id }))\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
@@ -312,8 +312,8 @@
               "fillOpacity": 12,
               "lineInterpolation": "smooth",
               "lineWidth": 2,
-              "showPoints": "auto",
-              "spanNulls": true
+              "showPoints": "always",
+              "spanNulls": false
             },
             "min": 0,
             "unit": "ms"
@@ -330,7 +330,7 @@
         "options": {
           "legend": {
             "calcs": [
-              "lastNotNull",
+              "last",
               "mean",
               "max"
             ],
@@ -349,13 +349,13 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => not exists r.ue_id or r.ue_id == \"\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"physical_ai\")\n  |> filter(fn: (r) => r._field == \"latency_ms\" or r._field == \"e2e_delay_ms\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => exists r.ue_id and r.ue_id =~ /client-/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if exists r.app_name and r.app_name != \"\" then r.app_name else r.ue_id }))\n  |> group(columns: [\"_time\", \"_field\"])\n  |> mean()\n  |> group(columns: [\"_time\"])\n  |> mean()\n  |> filter(fn: (r) => exists r._value)\n  |> group()\n  |> set(key: \"_field\", value: \"Average\")\n  |> set(key: \"_measurement\", value: \"application_metrics\")\n  |> yield()",
             "queryType": "flux",
             "refId": "A",
             "resultFormat": "time_series"
           }
         ],
-        "title": "Aggregated latency",
+        "title": "Average latency",
         "type": "timeseries",
         "interval": "1s"
       }

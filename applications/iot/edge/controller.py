@@ -2,7 +2,9 @@
 
 Connects to the broker over ``LOCAL_BROKER_HOST:LOCAL_BROKER_PORT`` (loopback
 :1884 in the k8s pod, never the OTA path). It:
-  * subscribes ``slice_d/ul/#`` and computes uplink one-way delay per message,
+  * subscribes ``slice_d/ul/#`` and computes uplink one-way delay per message
+    (``recv - t_send``),
+  * publishes that delay on ``slice_d/latency/<dev>`` and as Prometheus gauges,
   * tracks the set of live devices (last-seen within a TTL),
   * fans downlink control messages out to ``slice_d/dl/<dev>`` on two cadences
     (fast/slow), and
@@ -13,12 +15,14 @@ UEs connect to Mosquitto's OTA listener (:1883) over the 5G PDU.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
 import sys
 import threading
 import time
+from collections import deque
 
 import paho.mqtt.client as mqtt
 
@@ -93,10 +97,25 @@ def _validate() -> None:
 M = metrics.build_side_metrics("edge")
 
 UL_TOPIC_PREFIX = "slice_d/ul/"
+LATENCY_TOPIC_PREFIX = "slice_d/latency/"
+PROBE_TOPIC_PREFIX = "slice_d/probe/"
+PROBE_ACK_PREFIX = "slice_d/probe-ack/"
 
 
 def _fmt_rate(bytes_per_s: float) -> str:
     return f"{bytes_per_s / 1024:.1f}kB/s"
+
+
+def _grafana_ue_id(parsed: dict, device_id: str) -> str:
+    """Map MQTT device_id to Grafana legend names (slice4-iot-client-N)."""
+    name = parsed.get("app_name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    try:
+        idx = int(parsed.get("client_index"))
+        return f"slice4-iot-client-{idx}"
+    except (TypeError, ValueError):
+        return str(device_id)
 
 
 class Controller:
@@ -112,6 +131,7 @@ class Controller:
         self._devices: dict[str, float] = {}
 
         self._ul_delays: list[float] = []
+        self._ul_delay_window: deque[float] = deque(maxlen=64)
         self._ul_bytes = 0
         self._dl_bytes = 0
         self._last_ul_bytes = 0
@@ -121,6 +141,7 @@ class Controller:
         self._dev_delay_ms: dict[str, float] = {}
         self._dev_bytes: dict[str, int] = {}
         self._dev_last_bytes: dict[str, int] = {}
+        self._dev_ue_id: dict[str, str] = {}
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -148,6 +169,7 @@ class Controller:
             M.reconnects.inc()
         M.connected.set(1)
         client.subscribe("slice_d/ul/#", qos=MQTT_QOS)
+        client.subscribe("slice_d/probe/#", qos=MQTT_QOS)
         log.info("connected to broker %s:%d (reconnect=%s)", LOCAL_BROKER_HOST, LOCAL_BROKER_PORT, is_reconnect)
 
     def _on_disconnect(self, _client, _userdata, _flags, reason_code, _properties):
@@ -156,14 +178,86 @@ class Controller:
         M.connected.set(0)
         log.warning("disconnected: %s (auto-reconnecting)", reason_code)
 
+    def _publish_latency(
+        self,
+        device_id: str,
+        ue_id: str,
+        parsed: dict,
+        recv: float,
+        delay_ms: float,
+    ) -> None:
+        body = {
+            "device_id": device_id,
+            "app_name": ue_id,
+            "seq": parsed.get("seq"),
+            "t_send": parsed.get("t_send"),
+            "t_recv": recv,
+            "latency_ms": round(delay_ms, 3),
+        }
+        payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        info = self._client.publish(
+            f"{LATENCY_TOPIC_PREFIX}{device_id}", payload, qos=MQTT_QOS
+        )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            M.publish_errors.inc()
+            log.debug("latency publish failed dev=%s rc=%s", device_id, info.rc)
+
+    def _echo_probe(
+        self,
+        device_id: str,
+        ue_id: str,
+        parsed: dict,
+        recv: float,
+        delay_ms: float,
+    ) -> None:
+        body = {
+            "device_id": device_id,
+            "app_name": ue_id,
+            "seq": parsed.get("seq"),
+            "t_send": parsed.get("t_send"),
+            "t_recv": recv,
+            "owd_ms": round(delay_ms, 3),
+            "kind": "probe-ack",
+        }
+        payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        info = self._client.publish(f"{PROBE_ACK_PREFIX}{device_id}", payload, qos=MQTT_QOS)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            M.publish_errors.inc()
+            log.debug("probe-ack failed dev=%s rc=%s", device_id, info.rc)
+
     def _on_message(self, _client, _userdata, msg):
         recv = time.time()
-        if not msg.topic.startswith(UL_TOPIC_PREFIX):
-            return
+        topic = str(msg.topic or "")
         parsed = metrics.parse_payload(msg.payload)
         if parsed is None:
             return
-        device_id = parsed.get("device_id") or msg.topic[len(UL_TOPIC_PREFIX):]
+
+        if topic.startswith(PROBE_TOPIC_PREFIX):
+            device_id = parsed.get("device_id") or topic[len(PROBE_TOPIC_PREFIX):]
+            delay, skew = metrics.compute_delay(parsed, now=recv)
+            if skew:
+                M.clock_skew.inc()
+            M.delay.labels(tier="probe").observe(delay)
+            nbytes = len(msg.payload)
+            M.bytes_received.labels(tier="probe").inc(nbytes)
+            M.msgs_received.labels(tier="probe").inc()
+            delay_ms = delay * 1000.0
+            ue_id = _grafana_ue_id(parsed, str(device_id))
+            with self._lock:
+                self._devices[str(device_id)] = time.monotonic()
+                self._dev_ue_id[str(device_id)] = ue_id
+                self._dev_delay_ms[ue_id] = delay_ms
+                self._ul_delay_window.append(delay)
+                window = list(self._ul_delay_window)
+            metrics.set_ue_latency(ue_id, delay_ms)
+            if window:
+                metrics.set_agg_latency(sum(window) / len(window) * 1000.0)
+            self._echo_probe(str(device_id), ue_id, parsed, recv, delay_ms)
+            return
+
+        if not topic.startswith(UL_TOPIC_PREFIX):
+            return
+        device_id = parsed.get("device_id") or topic[len(UL_TOPIC_PREFIX):]
         tier = parsed.get("tier", "unknown")
         delay, skew = metrics.compute_delay(parsed, now=recv)
         if skew:
@@ -172,13 +266,25 @@ class Controller:
         nbytes = len(msg.payload)
         M.bytes_received.labels(tier=tier).inc(nbytes)
         M.msgs_received.labels(tier=tier).inc()
+        delay_ms = delay * 1000.0
+        ue_id = _grafana_ue_id(parsed, str(device_id))
         with self._lock:
             self._devices[device_id] = time.monotonic()
+            self._dev_ue_id[str(device_id)] = ue_id
             self._ul_bytes += nbytes
             self._ul_delays.append(delay)
-            self._dev_delay_ms[device_id] = delay * 1000.0
-            self._dev_bytes[device_id] = self._dev_bytes.get(device_id, 0) + nbytes
-        log.debug("ul seq=%s tier=%s dev=%s delay=%.1fms", parsed.get("seq"), tier, device_id, delay * 1000)
+            self._dev_delay_ms[ue_id] = delay_ms
+            self._dev_bytes[ue_id] = self._dev_bytes.get(ue_id, 0) + nbytes
+        metrics.set_ue_latency(ue_id, delay_ms)
+        self._publish_latency(str(device_id), ue_id, parsed, recv, delay_ms)
+        log.debug(
+            "ul seq=%s tier=%s dev=%s ue=%s delay=%.1fms",
+            parsed.get("seq"),
+            tier,
+            device_id,
+            ue_id,
+            delay_ms,
+        )
 
     # -- Downlink fan-out -----------------------------------------------------
     def _live_devices(self) -> list[str]:
@@ -189,6 +295,7 @@ class Controller:
             for d in list(self._devices):
                 if self._devices[d] < cutoff:
                     del self._devices[d]
+                    self._dev_ue_id.pop(d, None)
         M.devices_active.set(len(live))
         return live
 
@@ -230,27 +337,41 @@ class Controller:
             self._last_report = now
             tp_ul = ul_delta / elapsed if elapsed > 0 else 0.0
             tp_dl = dl_delta / elapsed if elapsed > 0 else 0.0
-            avg_delay_ms = (sum(delays) / len(delays) * 1000) if delays else 0.0
+            avg_delay_ms = (sum(delays) / len(delays) * 1000) if delays else None
             tp_mbps = ((ul_delta + dl_delta) * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
-            metrics.set_agg_slo(avg_delay_ms, tp_mbps)
+            if avg_delay_ms is not None:
+                metrics.set_agg_slo(avg_delay_ms, tp_mbps)
+            else:
+                metrics.clear_agg_latency()
+                metrics.APP_THROUGHPUT_MBPS.set(tp_mbps)
             with self._lock:
-                live_ids = list(self._devices)
+                live_ids = list(self._dev_ue_id.values()) or list(self._devices)
                 delay_map = dict(self._dev_delay_ms)
                 byte_map = dict(self._dev_bytes)
                 last_map = dict(self._dev_last_bytes)
                 self._dev_last_bytes = dict(self._dev_bytes)
-            for did in live_ids:
-                d_bytes = byte_map.get(did, 0) - last_map.get(did, 0)
+                self._dev_delay_ms = {}
+            seen: set[str] = set()
+            for uid in live_ids:
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                d_bytes = byte_map.get(uid, 0) - last_map.get(uid, 0)
                 d_mbps = (d_bytes * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
-                metrics.set_ue_slo(did, delay_map.get(did, avg_delay_ms), d_mbps)
+                lat = delay_map.get(uid)
+                if lat is None:
+                    metrics.clear_ue_latency(uid)
+                    metrics.APP_UE_THROUGHPUT_MBPS.labels(ue_id=str(uid)).set(d_mbps)
+                else:
+                    metrics.set_ue_slo(uid, lat, d_mbps)
             log.info(
                 "[slice-d edge] up=%ds conn=%d tp_ul=%s tp_dl=%s "
-                "avg_ul_delay=%dms (n=%d) reconnects=%d devices=%d",
+                "avg_ul_delay=%sms (n=%d) reconnects=%d devices=%d",
                 int(now - self._start_time),
                 int(connected),
                 _fmt_rate(tp_ul),
                 _fmt_rate(tp_dl),
-                round(avg_delay_ms),
+                "n/a" if avg_delay_ms is None else str(round(avg_delay_ms)),
                 len(delays),
                 reconnects,
                 ndevices,

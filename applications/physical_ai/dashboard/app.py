@@ -10,7 +10,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
 
@@ -31,6 +33,10 @@ STATIC_DIR = Path(os.environ.get("DASHBOARD_STATIC", "/app/static"))
 SLICE_ID = int(os.environ.get("SLICE_ID", "2"))
 UE_CONSOLE_PORT = int(os.environ.get("UE_CONSOLE_PORT", "80"))
 UE_CONSOLE_IP_BASE = int(os.environ.get("UE_CONSOLE_IP_BASE", "200"))
+# OTA hits vLLM :8000; iptables REDIRECT net1:8000 → this proxy, then loopback vLLM.
+LATENCY_PROXY_PORT = int(os.environ.get("LATENCY_PROXY_PORT", "18080"))
+# Drop last-sample latency when no new UL request arrives (exporter scrape is 1s).
+LATENCY_STALE_S = float(os.environ.get("LATENCY_STALE_S", "2.5"))
 
 
 def _http_url(host: str, port: int = UE_CONSOLE_PORT) -> str:
@@ -442,15 +448,171 @@ async def ue_dash_proxy(idx: int, path: str, request: Request) -> Response:
 
 _slo_lock = threading.Lock()
 _slo = {
-    "latency_ms": 0.0,
+    "latency_ms": None,
     "throughput_mbps": 0.0,
-    "ues": {},  # ue_id -> {latency_ms, throughput_mbps}
+    "ues": {},  # ue_id -> {latency_ms?, throughput_mbps}
 }
+
+_ul_lock = threading.Lock()
+_ul_delay_ms: dict[str, float] = {}
+_ul_delay_at: dict[str, float] = {}
+_ul_window: deque[tuple[float, float]] = deque(maxlen=64)
+
+
+def _grafana_ue_id(app_name: Any, client_index: Any) -> str:
+    if isinstance(app_name, str) and app_name.strip():
+        return app_name.strip()
+    try:
+        return f"slice{SLICE_ID}-physical-ai-client-{int(client_index)}"
+    except (TypeError, ValueError):
+        return f"slice{SLICE_ID}-physical-ai-client"
+
+
+def _record_ul_latency(ue_id: str, delay_ms: float) -> None:
+    uid = str(ue_id or _grafana_ue_id(None, None))
+    now = time.time()
+    with _ul_lock:
+        _ul_delay_ms[uid] = float(delay_ms)
+        _ul_delay_at[uid] = now
+        _ul_window.append((now, float(delay_ms)))
+
+
+def _fresh_ul(now: Optional[float] = None) -> tuple[dict[str, float], list[float]]:
+    """Uplink delay from messages received within LATENCY_STALE_S. Omit otherwise."""
+    now = time.time() if now is None else now
+    cutoff = now - max(1.0, LATENCY_STALE_S)
+    with _ul_lock:
+        for uid in [u for u, ts in _ul_delay_at.items() if ts < cutoff]:
+            _ul_delay_ms.pop(uid, None)
+            _ul_delay_at.pop(uid, None)
+        window = [v for ts, v in _ul_window if ts >= cutoff]
+        return dict(_ul_delay_ms), window
+
+
+def _one_way_ms(_ue_id: str, raw_s: float) -> float:
+    """Radio one-way delay: ``t_recv − t_send`` in milliseconds.
+
+    Requires NTP-aligned UE host (usrp) and server host (gpu-a40). Negative
+    values are clock skew, not reverse flight time — clamp to 0 like IoT.
+    """
+    delay_ms = float(raw_s) * 1000.0
+    if delay_ms < 0:
+        return 0.0
+    return delay_ms
+
+
+class _LatencyProxyHandler(BaseHTTPRequestHandler):
+    """Stamp uplink one-way delay (recv − t_send) then forward to vLLM."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        return
+
+    def _vllm(self, method: str, path: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes, str]:
+        hdrs = {"Content-Type": headers.get("Content-Type") or "application/json"}
+        req = urllib.request.Request(
+            f"{VLLM_URL}{path}",
+            data=body if method not in ("GET", "HEAD") else None,
+            headers=hdrs,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                raw = resp.read()
+                ctype = resp.headers.get("Content-Type") or "application/json"
+                return int(resp.status), raw, ctype
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            ctype = (exc.headers.get("Content-Type") if exc.headers else None) or "application/json"
+            return int(exc.code), raw, ctype
+        except urllib.error.URLError as exc:
+            payload = json.dumps({"error": {"message": f"vLLM not ready: {exc.reason}"}}).encode()
+            return 503, payload, "application/json"
+
+    def _reply(self, code: int, raw: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = self.path or "/"
+        code, raw, ctype = self._vllm("GET", path, b"", dict(self.headers))
+        self._reply(code, raw, ctype)
+
+    def do_POST(self) -> None:  # noqa: N802
+        recv = time.time()
+        path = self.path or "/"
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        raw_in = self.rfile.read(length) if length > 0 else b""
+        fwd = raw_in
+        t_send = None
+        app_name = self.headers.get("X-INA-App-Name")
+        client_index = self.headers.get("X-INA-Client-Index")
+        hdr_t = self.headers.get("X-INA-T-Send")
+        if hdr_t:
+            try:
+                t_send = float(hdr_t)
+            except (TypeError, ValueError):
+                t_send = None
+        try:
+            parsed = json.loads(raw_in) if raw_in else None
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            ina = parsed.pop("ina", None)
+            if isinstance(ina, dict):
+                if t_send is None:
+                    try:
+                        t_send = float(ina.get("t_send"))
+                    except (TypeError, ValueError):
+                        t_send = None
+                app_name = app_name or ina.get("app_name")
+                if client_index is None:
+                    client_index = ina.get("client_index")
+            if "t_send" in parsed and t_send is None:
+                try:
+                    t_send = float(parsed.pop("t_send"))
+                except (TypeError, ValueError):
+                    parsed.pop("t_send", None)
+            fwd = json.dumps(parsed, separators=(",", ":")).encode("utf-8")
+        delay_ms = None
+        if t_send is not None:
+            delay_ms = _one_way_ms(_grafana_ue_id(app_name, client_index), recv - float(t_send))
+            _record_ul_latency(_grafana_ue_id(app_name, client_index), delay_ms)
+        code, raw_out, ctype = self._vllm("POST", path, fwd, dict(self.headers))
+        if delay_ms is not None and "json" in (ctype or ""):
+            try:
+                out = json.loads(raw_out.decode("utf-8") or "{}")
+            except (ValueError, TypeError, UnicodeDecodeError):
+                out = None
+            if isinstance(out, dict):
+                out["ina"] = {
+                    "t_send": t_send,
+                    "t_recv": recv,
+                    "latency_ms": round(delay_ms, 3),
+                    "app_name": _grafana_ue_id(app_name, client_index),
+                }
+                raw_out = json.dumps(out).encode("utf-8")
+        self._reply(code, raw_out, ctype)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.do_GET()
+
+
+def _start_latency_proxy() -> None:
+    server = ThreadingHTTPServer(("0.0.0.0", LATENCY_PROXY_PORT), _LatencyProxyHandler)
+    threading.Thread(target=server.serve_forever, name="ul-latency-proxy", daemon=True).start()
 
 
 def _slo_from_ues() -> None:
     ues = {}
-    lats = []
     tput = 0.0
     try:
         body = api_ues()
@@ -458,25 +620,26 @@ def _slo_from_ues() -> None:
         body = {"ues": []}
     for u in body.get("ues") or []:
         idx = u.get("client_index")
-        uid = str(u.get("name") or f"ue{idx}")
         st = u.get("status") or {}
+        uid = str(st.get("app_name") or u.get("name") or f"slice{SLICE_ID}-physical-ai-client-{idx}")
         last = st.get("last") or {}
-        rec = last.get("received") or {}
         sent = last.get("sent") or {}
-        lat = float(rec.get("latency_ms") or st.get("latency_ms") or 0.0)
         sent_b = float(sent.get("bytes") or 0.0)
         try:
             interval = float(st.get("interval_s") or 8)
         except (TypeError, ValueError):
             interval = 8.0
         mbps = (sent_b * 8.0) / (interval * 1e6) if interval > 0 and sent_b else 0.0
-        ues[uid] = {"latency_ms": lat, "throughput_mbps": mbps}
-        if lat:
-            lats.append(lat)
+        ues[uid] = {"throughput_mbps": mbps}
         tput += mbps
+    ul, window = _fresh_ul()
+    for uid, lat in ul.items():
+        slot = dict(ues.get(uid) or {"throughput_mbps": 0.0})
+        slot["latency_ms"] = lat
+        ues[uid] = slot
     with _slo_lock:
         _slo["ues"] = ues
-        _slo["latency_ms"] = (sum(lats) / len(lats)) if lats else 0.0
+        _slo["latency_ms"] = (sum(window) / len(window)) if window else None
         _slo["throughput_mbps"] = tput
 
 
@@ -492,25 +655,29 @@ def _slo_loop() -> None:
 @app.get("/metrics")
 def prometheus_metrics() -> Response:
     with _slo_lock:
-        agg_lat = _slo["latency_ms"]
         agg_tput = _slo["throughput_mbps"]
         ues = dict(_slo["ues"])
+    ul, _window = _fresh_ul()
     lines = [
-        "# HELP app_latency_ms Aggregated application latency (milliseconds)",
-        "# TYPE app_latency_ms gauge",
-        f"app_latency_ms {agg_lat}",
         "# HELP app_throughput_mbps Aggregated application throughput (Mbps)",
         "# TYPE app_throughput_mbps gauge",
         f"app_throughput_mbps {agg_tput}",
-        "# HELP app_ue_latency_ms Per-UE application latency (milliseconds)",
-        "# TYPE app_ue_latency_ms gauge",
         "# HELP app_ue_throughput_mbps Per-UE application throughput (Mbps)",
         "# TYPE app_ue_throughput_mbps gauge",
     ]
+    if ul:
+        lines.extend(
+            [
+                "# HELP app_ue_latency_ms Per-UE application latency (milliseconds)",
+                "# TYPE app_ue_latency_ms gauge",
+            ]
+        )
+        for uid, lat in ul.items():
+            safe = uid.replace('"', "")
+            lines.append(f'app_ue_latency_ms{{ue_id="{safe}"}} {lat}')
     for uid, vals in ues.items():
         safe = uid.replace('"', "")
-        lines.append(f'app_ue_latency_ms{{ue_id="{safe}"}} {vals["latency_ms"]}')
-        lines.append(f'app_ue_throughput_mbps{{ue_id="{safe}"}} {vals["throughput_mbps"]}')
+        lines.append(f'app_ue_throughput_mbps{{ue_id="{safe}"}} {vals.get("throughput_mbps") or 0.0}')
     return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
@@ -521,6 +688,10 @@ def index() -> FileResponse:
 
 @app.on_event("startup")
 def _start_slo_loop() -> None:
+    try:
+        _start_latency_proxy()
+    except Exception:
+        pass
     threading.Thread(target=_slo_loop, name="slo-metrics", daemon=True).start()
 
 

@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-nws-v0.8-amd64}"
+IMAGE_TAG="${IMAGE_TAG:-nws-v0.9-amd64}"
 LOCAL_TAG="iot-ue-console:${IMAGE_TAG}"
 REMOTE_TAG="${REGISTRY}/iot-ue-console:${IMAGE_TAG}"
 

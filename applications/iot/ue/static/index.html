@@ -136,6 +136,7 @@
       <div class="kpi-card"><div class="kpi-label">PDU</div><div class="kpi-value" id="kpi-pdu">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Publishing</div><div class="kpi-value" id="kpi-send">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Messages</div><div class="kpi-value mono" id="kpi-msgs">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Path RTT</div><div class="kpi-value mono" id="kpi-rtt">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Topics</div><div class="kpi-value mono" id="kpi-topics">—</div></div>
       <div class="kpi-card"><div class="kpi-label">Avg effective freq</div><div class="kpi-value mono" id="kpi-avg-freq">—</div></div>
     </div>
@@ -351,8 +352,8 @@
       const chronological = items.slice().reverse();
       box.innerHTML = chronological.map(e => {
         const dir = (e.direction || "ul").toLowerCase();
-        const dirCls = e.ok === false ? "err" : (dir.indexOf("down") >= 0 ? "dl" : "ul");
-        const dirLabel = dir.indexOf("down") >= 0 ? "DL" : "UL";
+        const dirCls = e.ok === false ? "err" : (dir.indexOf("probe") >= 0 ? "dl" : (dir.indexOf("down") >= 0 ? "dl" : "ul"));
+        const dirLabel = dir.indexOf("probe") >= 0 ? "PR" : (dir.indexOf("down") >= 0 ? "DL" : "UL");
         const body = typeof e.payload === "string" ? e.payload : JSON.stringify(e.payload || {});
         const lat = e.latency_ms != null ? `${e.latency_ms}ms` : "";
         const st = e.ok === false ? "ERR" : "ok";
@@ -373,6 +374,9 @@
         setText("kpi-pdu", s.pdu_ready ? `Ready (${s.pdu_iface})` : `Waiting (${s.pdu_iface})`);
         setText("kpi-send", s.send_enabled ? (s.mqtt_connected ? "On · MQTT up" : "On · connecting") : "Stopped");
         setText("kpi-msgs", `${s.message_count || (s.messages || []).length} · ${s.published || 0} tx`);
+        if (s.probe_rtt_ms != null) {
+          setText("kpi-rtt", `${Number(s.probe_rtt_ms).toFixed(1)} ms`);
+        }
         if ($("pills")) {
           $("pills").innerHTML =
             `<span class="pill ${s.pdu_ready ? "ok":"bad"}">${s.pdu_ready ? "PDU up" : "PDU wait"}</span>` +

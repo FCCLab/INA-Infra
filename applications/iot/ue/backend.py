@@ -48,6 +48,11 @@ METRICS_PORT = int(os.environ.get("METRICS_PORT", "9106"))
 UE_ID = os.environ.get("APP_NAME") or UE_NAME
 UL_TOPIC = os.environ.get("UL_TOPIC") or f"slice_d/ul/{DEVICE_ID}"
 DL_TOPIC = os.environ.get("DL_TOPIC") or f"slice_d/dl/{DEVICE_ID}"
+LATENCY_TOPIC = os.environ.get("LATENCY_TOPIC") or f"slice_d/latency/{DEVICE_ID}"
+PROBE_TOPIC = os.environ.get("PROBE_TOPIC") or f"slice_d/probe/{DEVICE_ID}"
+PROBE_ACK_TOPIC = os.environ.get("PROBE_ACK_TOPIC") or f"slice_d/probe-ack/{DEVICE_ID}"
+LATENCY_PROBE_PERIOD_S = float(os.environ.get("LATENCY_PROBE_PERIOD_S") or "0.5")
+LATENCY_PROBE_ENABLED = os.environ.get("LATENCY_PROBE_ENABLED", "1") not in ("0", "false", "False")
 
 _pdu_iface_live = PDU_IFACE_CFG
 _pdu_lock = threading.Lock()
@@ -73,8 +78,10 @@ _pub_stop = threading.Event()
 _mqtt_client: Any = None
 _mqtt_connected = False
 _seq = 0
+_probe_seq = 0
 _bytes_window = 0
 _window_t0 = time.monotonic()
+_probe_rtts: deque[float] = deque(maxlen=8)
 
 MIN_FREQ_HZ = 0.01
 MAX_FREQ_HZ = 5.0  # 0.2 s minimum interval
@@ -259,6 +266,11 @@ _state = {
     "loop_alive": False,
     "mqtt_connected": False,
     "published": 0,
+    "probe_rtt_ms": 0.0,
+    "probe_owd_ms": 0.0,
+    "last_delay_ms": 0.0,
+    "probe_ok": 0,
+    "probe_fail": 0,
 }
 
 
@@ -339,14 +351,14 @@ def _wait_pdu() -> None:
         _state["last_error"] = f"PDU (prefer {PDU_IFACE_CFG}) not ready after {PDU_WAIT_TIMEOUT}s"
 
 
-def _encode_payload(msg: dict[str, Any], seq: int) -> bytes:
+def _payload_body(msg: dict[str, Any], seq: int) -> dict[str, Any]:
     body: dict[str, Any] = {
         "device_id": DEVICE_ID,
         "seq": seq,
-        "t_send": time.time(),
         "tier": msg.get("id") or "msg",
         "msg_id": msg.get("id") or "msg",
         "ue": UE_NAME,
+        "app_name": UE_ID,
         "client_index": CLIENT_INDEX,
     }
     raw = msg.get("payload") or ""
@@ -358,6 +370,13 @@ def _encode_payload(msg: dict[str, Any], seq: int) -> bytes:
             body["payload"] = raw
     elif isinstance(raw, (dict, list)):
         body["payload"] = raw
+    return body
+
+
+def _encode_payload(msg: dict[str, Any], seq: int) -> bytes:
+    """Stamp ``t_send`` (unix seconds) immediately before serialize/publish."""
+    body = _payload_body(msg, seq)
+    body["t_send"] = time.time()
     return json.dumps(body, separators=(",", ":")).encode("utf-8")
 
 
@@ -366,7 +385,8 @@ def _record(entry: dict[str, Any]) -> None:
     with _lock:
         _exchanges.appendleft(entry)
         if entry.get("ok"):
-            _state["published"] = int(_state.get("published") or 0) + 1
+            if entry.get("direction") == "uplink":
+                _state["published"] = int(_state.get("published") or 0) + 1
             _state["last_error"] = None
         else:
             _state["last_error"] = entry.get("error")
@@ -380,12 +400,18 @@ def _record(entry: dict[str, Any]) -> None:
         if dt >= 5.0:
             _bytes_window = 0
             _window_t0 = now
-    lat = float(entry.get("latency_ms") or 0.0)
     if APP_LATENCY_MS is not None:
-        APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
         APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(mbps)
-        APP_LATENCY_MS.set(lat)
         APP_THROUGHPUT_MBPS.set(mbps)
+        # Path latency comes from the dedicated probe thread (RTT / OWD).
+        if entry.get("direction") == "probe" and entry.get("latency_ms") is not None:
+            lat = float(entry.get("latency_ms") or 0.0)
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
+            APP_LATENCY_MS.set(lat)
+        elif entry.get("direction") == "latency" and entry.get("latency_ms") is not None:
+            lat = float(entry.get("latency_ms") or 0.0)
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
+            APP_LATENCY_MS.set(lat)
 
 
 def _mqtt_on_connect(client, _userdata, _flags, reason_code, _properties=None):
@@ -399,6 +425,8 @@ def _mqtt_on_connect(client, _userdata, _flags, reason_code, _properties=None):
     if ok:
         try:
             client.subscribe(DL_TOPIC, qos=MQTT_QOS)
+            client.subscribe(LATENCY_TOPIC, qos=MQTT_QOS)
+            client.subscribe(PROBE_ACK_TOPIC, qos=MQTT_QOS)
         except Exception:
             pass
 
@@ -418,6 +446,64 @@ def _mqtt_on_message(_client, _userdata, msg):
         parsed = json.loads(raw)
     except Exception:
         parsed = None
+    topic = str(msg.topic or "")
+    if topic == PROBE_ACK_TOPIC or topic.startswith("slice_d/probe-ack/"):
+        t_send = parsed.get("t_send") if isinstance(parsed, dict) else None
+        t_recv = parsed.get("t_recv") if isinstance(parsed, dict) else None
+        rtt_ms = None
+        owd_ms = None
+        if isinstance(t_send, (int, float)) and t_send > 0:
+            rtt_ms = max(0.0, (recv - float(t_send)) * 1000.0)
+        if isinstance(t_send, (int, float)) and isinstance(t_recv, (int, float)):
+            owd_ms = max(0.0, (float(t_recv) - float(t_send)) * 1000.0)
+        if rtt_ms is not None:
+            with _lock:
+                _probe_rtts.append(rtt_ms)
+                avg = sum(_probe_rtts) / len(_probe_rtts)
+                _state["probe_rtt_ms"] = round(avg, 2)
+                if owd_ms is not None:
+                    _state["probe_owd_ms"] = round(owd_ms, 2)
+                _state["last_delay_ms"] = round(avg, 2)
+                _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
+            if APP_LATENCY_MS is not None:
+                APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(avg)
+                APP_LATENCY_MS.set(avg)
+            # Keep the console log readable: sample probes, always log spikes.
+            if (_probe_seq % 10 == 0) or (rtt_ms >= 40.0):
+                _record(
+                    {
+                        "ts": _now(),
+                        "direction": "probe",
+                        "ok": True,
+                        "topic": topic,
+                        "bytes": len(raw),
+                        "latency_ms": round(rtt_ms, 2),
+                        "owd_ms": round(owd_ms, 2) if owd_ms is not None else None,
+                        "seq": parsed.get("seq") if isinstance(parsed, dict) else None,
+                        "payload": parsed if parsed is not None else None,
+                    }
+                )
+        return
+    if topic == LATENCY_TOPIC or topic.startswith("slice_d/latency/"):
+        lat = None
+        if isinstance(parsed, dict) and parsed.get("latency_ms") is not None:
+            try:
+                lat = float(parsed["latency_ms"])
+            except (TypeError, ValueError):
+                lat = None
+        _record(
+            {
+                "ts": _now(),
+                "direction": "latency",
+                "ok": True,
+                "topic": topic,
+                "bytes": len(raw),
+                "latency_ms": lat,
+                "seq": parsed.get("seq") if isinstance(parsed, dict) else None,
+                "payload": parsed if parsed is not None else raw[:200].decode("utf-8", "replace"),
+            }
+        )
+        return
     t_send = None
     if isinstance(parsed, dict):
         t_send = parsed.get("t_send")
@@ -429,7 +515,7 @@ def _mqtt_on_message(_client, _userdata, msg):
             "ts": _now(),
             "direction": "downlink",
             "ok": True,
-            "topic": msg.topic,
+            "topic": topic,
             "bytes": len(raw),
             "latency_ms": lat,
             "payload": parsed if parsed is not None else raw[:200].decode("utf-8", "replace"),
@@ -465,7 +551,6 @@ def _publish_one(msg: dict[str, Any]) -> dict[str, Any]:
         _seq += 1
         seq = _seq
     payload = _encode_payload(msg, seq)
-    t0 = time.monotonic()
     try:
         client = _ensure_mqtt()
         info = client.publish(UL_TOPIC, payload, qos=MQTT_QOS)
@@ -474,7 +559,6 @@ def _publish_one(msg: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         ok = False
         err = str(exc)
-    latency_ms = int((time.monotonic() - t0) * 1000)
     entry = {
         "ts": _now(),
         "direction": "uplink",
@@ -483,7 +567,6 @@ def _publish_one(msg: dict[str, Any]) -> dict[str, Any]:
         "msg_id": msg.get("id"),
         "seq": seq,
         "bytes": len(payload),
-        "latency_ms": latency_ms,
         "period_s": msg.get("period_s"),
         "frequency_hz": msg.get("frequency_hz"),
         "payload": msg.get("payload"),
@@ -517,6 +600,48 @@ def _publish_loop(msg: dict[str, Any], stop: threading.Event) -> None:
         _pin_pdu()
 
 
+def _publish_probe() -> None:
+    """Tiny timestamped ping; server echoes so RTT tracks PDU queueing (rises under load)."""
+    global _probe_seq
+    with _lock:
+        _probe_seq += 1
+        seq = _probe_seq
+    body = {
+        "device_id": DEVICE_ID,
+        "seq": seq,
+        "kind": "probe",
+        "ue": UE_NAME,
+        "app_name": UE_ID,
+        "client_index": CLIENT_INDEX,
+        "t_send": time.time(),
+    }
+    payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    try:
+        client = _ensure_mqtt()
+        info = client.publish(PROBE_TOPIC, payload, qos=MQTT_QOS)
+        if mqtt is None or info.rc != mqtt.MQTT_ERR_SUCCESS:
+            with _lock:
+                _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
+    except Exception:
+        with _lock:
+            _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
+
+
+def _latency_probe_loop(stop: threading.Event) -> None:
+    period = max(0.1, LATENCY_PROBE_PERIOD_S)
+    stop.wait(min(period, 1.0))
+    while not stop.is_set():
+        with _lock:
+            ready = bool(_state["pdu_ready"])
+            connected = bool(_state["mqtt_connected"]) or _mqtt_connected
+        if ready and connected:
+            try:
+                _publish_probe()
+            except Exception:
+                pass
+        stop.wait(period)
+
+
 def _restart_publishers() -> None:
     global _pub_stop
     _pub_stop.set()
@@ -547,6 +672,13 @@ def _loop() -> None:
     with _lock:
         _state["loop_alive"] = True
     _restart_publishers()
+    if LATENCY_PROBE_ENABLED:
+        threading.Thread(
+            target=_latency_probe_loop,
+            args=(threading.Event(),),
+            name="iot-latency-probe",
+            daemon=True,
+        ).start()
     while True:
         time.sleep(5)
         _pin_pdu()
@@ -600,6 +732,8 @@ def api_status() -> dict:
         "broker": f"mqtt://{BROKER_HOST}:{BROKER_PORT}",
         "ul_topic": UL_TOPIC,
         "dl_topic": DL_TOPIC,
+        "probe_topic": PROBE_TOPIC,
+        "probe_period_s": LATENCY_PROBE_PERIOD_S,
         "pdu_iface": _pdu_iface_live or PDU_IFACE_CFG,
         "message_count": len(msgs),
         "messages": msgs,
