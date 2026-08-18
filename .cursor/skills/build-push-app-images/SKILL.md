@@ -30,8 +30,8 @@ Build/push progress:
 |---|---|---|---|
 | CCTV | `applications/cctv/` | `./build_push.sh` | `slicea-analyzer`, `slicea-publisher` |
 | IoT | `applications/iot/` | `./build_push.sh` | `sliced-edge`, `sliced-client` |
-| Physical AI dashboard | `applications/physical_ai/` | `./build-push-dashboard.sh` | `cosmo3-dashboard` (amd64 sidecar UI) |
-| OTT / IoT control dashboard | `applications/control_dashboard/` | `./build-push.sh` | `ina-control-dashboard` (amd64 sidecar UI) |
+| Physical AI console | `applications/physical_ai/` | `./build-push-dashboard.sh` | `cosmo3-dashboard` (amd64 sidecar UI) |
+| OTT / IoT control console | `applications/control_dashboard/` | `./build-push.sh` | `ina-control-dashboard` (amd64 sidecar UI) |
 | Physical AI server | `applications/physical_ai/` | `./build-push-vllm.sh` | `cosmo3-vllm` (**amd64 A40 + arm64 GH200**, multi-arch tag) |
 
 ```bash

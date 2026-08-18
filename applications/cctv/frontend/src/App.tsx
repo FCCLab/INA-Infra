@@ -33,7 +33,7 @@ const BRAND = {
   product: "NeuroRAN",
   title: "CCTV Vision AI · NeuroRAN",
   shortName: "CCTV",
-  logo: "/logos/NeuroRAN.svg",
+  logo: "/logos/NeuroRAN.png",
   logoPng: "/logos/NeuroRAN.png",
 };
 

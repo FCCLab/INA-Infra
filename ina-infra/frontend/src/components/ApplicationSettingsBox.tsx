@@ -13,7 +13,7 @@ import SectionLabel from "./ui/SectionLabel";
 import FieldHelp from "./FieldHelp";
 import { useDialog } from "./ui/Dialog";
 import { defaultClientImage } from "../lib/applicationDefaults";
-import { AppDashboardTags } from "./AppDashboardLinks";
+import { AppConsoleTags } from "./AppConsoleLinks";
 import {
   CCTV_CLIPS,
   defaultCctvClipIds,
@@ -441,7 +441,7 @@ export default function ApplicationSettingsBox({
                       >
                         Active UEs: {clientCount} {clientCount > 1 ? "Cameras" : "Camera"}
                       </span>
-                      <AppDashboardTags appType={cfg.app_type} />
+                      <AppConsoleTags appType={cfg.app_type} />
                       <span
                         className={livePillClass(live?.overall, cfg.deployed, cfg.last_error)}
                         style={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}

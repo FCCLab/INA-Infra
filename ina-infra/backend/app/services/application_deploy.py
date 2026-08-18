@@ -19,7 +19,7 @@ from app.schemas import (
     ProfileRecord,
     SliceApplicationConfig,
 )
-from app.services import cluster_status, cctv_videos, ip_allocator, multus_iface, profile_store, ran_workloads
+from app.services import app_images, cluster_status, cctv_videos, ip_allocator, multus_iface, profile_store, ran_workloads, site_ips
 from app.services.cmd_stream import error_event, log_event, result_event, status_event
 
 def resolve_target_cluster(
@@ -104,13 +104,58 @@ def _physical_ai_model(params: Dict[str, Any]) -> str:
 
 def _physical_ai_server_image(image: Optional[str], gpu_arch: str) -> str:
     """Pick the platform tag for this site. Rewrite stale arm64 tags on edge A40."""
-    img = (image or "").strip() or "10.1.132.30:5000/cosmo3-vllm:nws-v0.7"
+    img = app_images.resolve_server_image("physical_ai", image)
     repo, sep, tag = img.rpartition(":")
     if not sep or not tag.startswith("nws-v"):
         return img
     if gpu_arch == "amd64":
         return f"{repo}:nws-v0.7-amd64"
     return f"{repo}:nws-v0.7-arm64-cu128"
+
+
+PHYSICAL_AI_UE_CONSOLE_IMAGE = "10.1.132.30:5000/cosmo3-ue-console:nws-v0.17-amd64"
+PHYSICAL_AI_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
+PHYSICAL_AI_BACKEND_PORT = 8090
+
+
+def physical_ai_console_ip(client_index: int, slice_id: int = 2) -> str:
+    return site_ips.ue_console_ip(slice_id, client_index)
+
+
+def physical_ai_console_mac(slice_id: int, client_index: int) -> str:
+    return site_ips.ue_console_mac(slice_id, client_index)
+
+
+IOT_MOSQUITTO_IMAGE = "10.1.132.30:5000/iot-mosquitto:nws-v0.1-amd64"
+IOT_MOSQUITTO_CONTROL_PORT = 1884
+IOT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/iot-ue-console:nws-v0.8-amd64"
+IOT_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
+IOT_BACKEND_PORT = 8090
+
+
+def iot_console_ip(client_index: int, slice_id: int = 4) -> str:
+    return site_ips.ue_console_ip(slice_id, client_index)
+
+
+def iot_console_mac(slice_id: int, client_index: int) -> str:
+    return site_ips.ue_console_mac(slice_id, client_index)
+
+
+OTT_UE_CONSOLE_IMAGE = "10.1.132.30:5000/ott-ue-console:nws-v0.28-amd64"
+OTT_CHROMIUM_IMAGE = os.environ.get(
+    "OTT_CHROMIUM_IMAGE",
+    "10.1.132.30:5000/linuxserver-chromium:latest",
+)
+OTT_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
+OTT_BACKEND_PORT = 8090
+
+
+def ott_console_ip(client_index: int, slice_id: int = 3) -> str:
+    return site_ips.ue_console_ip(slice_id, client_index)
+
+
+def ott_console_mac(slice_id: int, client_index: int) -> str:
+    return site_ips.ue_console_mac(slice_id, client_index)
 
 
 def server_deployment_name(app_cfg: SliceApplicationConfig) -> str:
@@ -164,12 +209,23 @@ def _influx_pusher_container(
     profile_name: str,
     app_type: str,
     cluster: str,
+    extra_env: Optional[list] = None,
 ) -> dict:
+    # Edge shares a cluster with Influx; the 10.1.137.104 site VIP is not
+    # reachable over TCP from gpu-a40 (ICMP works, :8086 does not).
+    influx_url = (
+        "http://influxdb.influxdb.svc:8086" if cluster == "edge" else "http://10.1.137.104:8086"
+    )
+    route_setup = (
+        ""
+        if cluster == "edge"
+        else "os.system(\"ip route replace 10.1.137.104/32 via $(ip route show default | awk '{print $3}') dev eth0 2>/dev/null || true\")\n"
+    )
     pusher_code = (
         "import os, time, re, urllib.request, math, subprocess\n"
-        "os.system(\"ip route replace 10.1.137.104/32 via $(ip route show default | awk '{print $3}') dev eth0 2>/dev/null || true\")\n"
-        "port = os.environ.get('METRICS_PORT', '9102')\n"
-        "url = os.environ.get('INFLUXDB_URL', 'http://10.1.137.104:8086').rstrip('/')\n"
+        + route_setup
+        + "port = os.environ.get('METRICS_PORT', '9102')\n"
+        f"url = os.environ.get('INFLUXDB_URL', '{influx_url}').rstrip('/')\n"
         "tok = os.environ.get('INFLUXDB_TOKEN', 'ina-infra-influxdb-token')\n"
         "org = os.environ.get('INFLUXDB_ORG', 'ina-infra')\n"
         "buc = os.environ.get('INFLUXDB_BUCKET', 'default')\n"
@@ -234,20 +290,31 @@ def _influx_pusher_container(
         "    now_t = time.time()\n"
         "    dt = max(0.5, now_t - last_t)\n"
         "    curr_net = get_net()\n"
+        "    is_client = ('client' in name)\n"
+        "    rx_sum = tx_sum = 0.0\n"
+        "    saw_iface = False\n"
         "    for iface, (rx_b, tx_b) in curr_net.items():\n"
-        "      if iface.startswith('oaitun') or iface.startswith('net1'):\n"
-        "        last_rx, last_tx = last_net.get(iface, (rx_b, tx_b))\n"
-        "        rx_mbps = round(max(0.0, (rx_b - last_rx) * 8.0 / (dt * 1000000.0)), 3)\n"
-        "        tx_mbps = round(max(0.0, (tx_b - last_tx) * 8.0 / (dt * 1000000.0)), 3)\n"
-        "        tput = tx_mbps if (clu == 'edge' or 'client' in name) else rx_mbps\n"
+        "      if is_client:\n"
+        "        if not iface.startswith('oaitun'): continue\n"
+        "      elif not (iface.startswith('oaitun') or iface.startswith('net1')):\n"
+        "        continue\n"
+        "      last_rx, last_tx = last_net.get(iface, (rx_b, tx_b))\n"
+        "      rx_sum += max(0.0, (rx_b - last_rx) * 8.0 / (dt * 1000000.0))\n"
+        "      tx_sum += max(0.0, (tx_b - last_tx) * 8.0 / (dt * 1000000.0))\n"
+        "      saw_iface = True\n"
+        "    if saw_iface:\n"
+        "      if is_client:\n"
+        "        tput = round(rx_sum + tx_sum, 3)\n"
         "        fields['throughput_mbps'] = float(tput)\n"
-        "        if clu == 'edge' or 'client' in name:\n"
-        "          fields['throughput_client'] = float(tput)\n"
-        "        else:\n"
-        "          fields['throughput_server'] = float(tput)\n"
+        "        fields['throughput_client'] = float(tput)\n"
+        "        fields['throughput_ul_mbps'] = float(round(tx_sum, 3))\n"
+        "        fields['throughput_dl_mbps'] = float(round(rx_sum, 3))\n"
+        "      else:\n"
+        "        tput = round(rx_sum, 3)\n"
+        "        fields['throughput_mbps'] = float(tput)\n"
+        "        fields['throughput_server'] = float(tput)\n"
         "    last_net = curr_net\n"
         "    last_t = now_t\n"
-        "    is_client = (clu == 'edge' or 'client' in name)\n"
         "    koff = ntp_offset_ms()\n"
         "    if koff is not None:\n"
         "      if is_client:\n"
@@ -255,10 +322,17 @@ def _influx_pusher_container(
         "      else:\n"
         "        fields['clock_offset_server'] = koff\n"
         "    per_client = {}\n"
+        "    extra_url = os.environ.get('APP_METRICS_URL', '').strip()\n"
+        "    scrape_urls = [extra_url] if extra_url else [f'http://127.0.0.1:{port}/metrics']\n"
         "    try:\n"
-        "      req = urllib.request.Request(f'http://127.0.0.1:{port}/metrics')\n"
-        "      with urllib.request.urlopen(req, timeout=3) as resp:\n"
-        "        txt = resp.read().decode('utf-8', errors='replace')\n"
+        "      txt = ''\n"
+        "      for su in scrape_urls:\n"
+        "        try:\n"
+        "          req = urllib.request.Request(su)\n"
+        "          with urllib.request.urlopen(req, timeout=3) as resp:\n"
+        "            txt += resp.read().decode('utf-8', errors='replace') + '\\n'\n"
+        "        except Exception as se:\n"
+        "          print(f'[metrics-exporter] scrape {su}: {se}', flush=True)\n"
         "      for line in txt.splitlines():\n"
         "        line = line.strip()\n"
         "        if not line or line.startswith('#'): continue\n"
@@ -268,14 +342,27 @@ def _influx_pusher_container(
         "          try:\n"
         "            v = float(v_str)\n"
         "            if math.isnan(v) or math.isinf(v): continue\n"
-        "            if lbls and 'client=\"' in lbls:\n"
-        "              cm = re.search(r'client=\"([^\"]+)\"', lbls)\n"
-        "              if cm:\n"
-        "                cl_name = cm.group(1)\n"
-        "                short_k = k.replace('cctv_client_', '').replace('cctv_', '')\n"
-        "                if short_k == 'ingress_fps': short_k = 'application_ingress_fps'\n"
-        "                if short_k == 'egress_fps': short_k = 'application_egress_fps'\n"
-        "                per_client.setdefault(cl_name, {})[short_k] = v\n"
+        "            ue_id = None\n"
+        "            if lbls:\n"
+        "              um = re.search(r'(?:ue_id|client)=\"([^\"]+)\"', lbls)\n"
+        "              if um: ue_id = um.group(1)\n"
+        "            if ue_id:\n"
+        "              slot = per_client.setdefault(ue_id, {})\n"
+        "              if k in ('app_ue_latency_ms', 'cctv_client_e2e_delay_ms'):\n"
+        "                slot['latency_ms'] = v\n"
+        "              elif k == 'cctv_client_net_delay_ms':\n"
+        "                slot.setdefault('latency_ms', v)\n"
+        "                slot['net_delay_ms'] = v\n"
+        "              elif k == 'app_ue_throughput_mbps':\n"
+        "                slot['app_throughput_mbps'] = v\n"
+        "              short_k = k.replace('cctv_client_', '').replace('cctv_', '')\n"
+        "              if short_k == 'ingress_fps': short_k = 'application_ingress_fps'\n"
+        "              if short_k == 'egress_fps': short_k = 'application_egress_fps'\n"
+        "              slot[short_k] = v\n"
+        "            if k == 'app_latency_ms':\n"
+        "              fields['latency_ms'] = v\n"
+        "            if k == 'app_throughput_mbps':\n"
+        "              fields['app_throughput_mbps'] = v\n"
         "            if lbls:\n"
         "              lbl_clean = re.sub(r'[^a-zA-Z0-9_]', '_', lbls)\n"
         "              k = f'{k}_{lbl_clean}'\n"
@@ -292,22 +379,26 @@ def _influx_pusher_container(
         "          fields['clock_offset_server'] = float(fields[fk])\n"
         "        if fk.startswith('application_throughput_bytes_per_sec') and 'throughput_server' not in fields:\n"
         "          fields['throughput_server'] = round(float(fields[fk]) * 8.0 / 1e6, 3)\n"
-        "          fields['throughput_mbps'] = fields['throughput_server']\n"
+        "          fields.setdefault('throughput_mbps', fields['throughput_server'])\n"
+        "      if is_client:\n"
+        "        slot = per_client.setdefault(name, {})\n"
+        "        if 'latency_ms' in fields: slot['latency_ms'] = fields['latency_ms']\n"
         "      if (not is_client) and typ == 'cctv':\n"
-        "        keep = ('throughput_server', 'clock_offset_server', 'throughput_mbps')\n"
-        "        fields = {k: v for k, v in fields.items() if k in keep}\n"
+        "        keep = ('throughput_server', 'clock_offset_server', 'throughput_mbps', 'latency_ms', 'app_throughput_mbps', 'app_latency_ms')\n"
+        "        fields = {k: v for k, v in fields.items() if k in keep or k.startswith('app_')}\n"
         "    except Exception as e:\n"
         "      print(f'[metrics-exporter] scrape error: {e}', flush=True)\n"
         "    lines_to_send = []\n"
         "    now_ns = time.time_ns()\n"
-        "    orig = 'client' if (clu == 'edge' or 'client' in name) else 'server'\n"
+        "    orig = 'client' if is_client else 'server'\n"
         "    if fields:\n"
-        "      tags = f'profile_name={prof},slice_id={sid},app_type={typ},app_name={name},cluster={clu},origin={orig}'\n"
+        "      ue_tag = f',ue_id={name}' if is_client else ''\n"
+        "      tags = f'profile_name={prof},slice_id={sid},app_type={typ},app_name={name},cluster={clu},origin={orig}{ue_tag}'\n"
         "      f_str = ','.join(f'{k}={v}' for k, v in sorted(fields.items()) if not k.startswith('_') and isinstance(v, (int, float)))\n"
         "      if f_str:\n"
         "        lines_to_send.append(f'{meas},{tags} {f_str} {now_ns}')\n"
         "    for cl_name, cl_flds in per_client.items():\n"
-        "      cl_orig = 'server'\n"
+        "      cl_orig = 'client' if is_client else 'server'\n"
         "      cl_tags = f'profile_name={prof},slice_id={sid},app_type={typ},app_name={cl_name},ue_id={cl_name},cluster={clu},origin={cl_orig}'\n"
         "      cl_f_str = ','.join(f'{k}={v}' for k, v in sorted(cl_flds.items()) if not k.startswith('_') and isinstance(v, (int, float)))\n"
         "      if cl_f_str:\n"
@@ -321,9 +412,10 @@ def _influx_pusher_container(
         "    print(f'[metrics-exporter] loop error: {e}', flush=True)\n"
         "  time.sleep(1)\n"
     )
-    return {
+    container = {
         "name": "metrics-exporter",
         "image": "docker.io/nicolaka/netshoot",
+        "imagePullPolicy": "Always",
         "command": ["python3", "-c", pusher_code],
         "securityContext": {
             "privileged": True,
@@ -331,7 +423,7 @@ def _influx_pusher_container(
         },
         "env": [
             {"name": "METRICS_PORT", "value": str(m_port)},
-            {"name": "INFLUXDB_URL", "value": "http://10.1.137.104:8086"},
+            {"name": "INFLUXDB_URL", "value": influx_url},
             {"name": "INFLUXDB_TOKEN", "value": "ina-infra-influxdb-token"},
             {"name": "INFLUXDB_ORG", "value": "ina-infra"},
             {"name": "INFLUXDB_BUCKET", "value": "default"},
@@ -347,9 +439,14 @@ def _influx_pusher_container(
             "limits": {"cpu": "100m", "memory": "64Mi"},
         },
     }
+    if extra_env:
+        container["env"].extend(extra_env)
+    return container
 
 
-CONTROL_DASH_IMAGE = "10.1.132.30:5000/ina-control-dashboard:nws-v0.7-amd64"
+CONTROL_DASH_IMAGE = "10.1.132.30:5000/ina-control-dashboard:nws-v0.21-amd64"
+APP_BACKEND_CONTAINER = "application-backend"
+APP_CONSOLE_CONTAINER = "application-console"
 
 
 def _control_dashboard_container(
@@ -372,9 +469,10 @@ def _control_dashboard_container(
     if extra_env:
         env.extend(extra_env)
     return {
-        "name": "dashboard",
+        "name": APP_CONSOLE_CONTAINER,
         "image": CONTROL_DASH_IMAGE,
-        "imagePullPolicy": "IfNotPresent",
+        "imagePullPolicy": "Always",
+        "command": ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", str(dash_port)],
         "env": env,
         "ports": [{"name": "dashboard", "containerPort": dash_port}],
         "resources": {
@@ -436,9 +534,9 @@ def generate_server_manifests(
         "ina.lab/role": "server",
     }
 
-    # Data Network (N6) IP: base 160 + sid (e.g. 10.1.137.161 for slice 1)
-    app_multus_ip = f"10.1.137.{160 + sid}"
-    gw = "10.1.137.1"
+    # Static N6 / console IP outside Glass DHCP .160–.199 (slice 1 → .211).
+    app_multus_ip = site_ips.application_multus_ip(sid)
+    gw = site_ips.SITE_GW
 
     if app_type == "physical_ai":
         gpu_arch = _physical_ai_gpu_arch(target_cluster.lower(), p)
@@ -493,12 +591,13 @@ def generate_server_manifests(
         },
     }
 
-    app_mac = f"02:42:0a:01:89:{160 + sid:02x}"
+    app_mac = site_ips.application_multus_mac(sid)
     net_annot = json.dumps([
         {
             "name": nad_name,
+            "interface": "net1",
             "ips": [f"{app_multus_ip}/24"],
-            "gateway": [gw],
+            "gateways": [gw],
             "mac": app_mac,
         }
     ])
@@ -536,10 +635,7 @@ def generate_server_manifests(
         yolo_device = str(p.get("yolo_device") or "auto")
         frame_skip = str(p.get("frame_skip") or 1)
 
-        server_img = (
-            app_cfg.server_image
-            or "10.1.132.30:5000/application-cctv:nws-v0.9-amd64"
-        )
+        server_img = app_images.resolve_server_image("cctv", app_cfg.server_image)
 
         def _read_edge(name: str) -> str:
             path = f"/home/fcp/INA-Infra/applications/cctv/edge/{name}"
@@ -576,6 +672,7 @@ def generate_server_manifests(
         ]
 
         pod_spec: dict = {
+            "initContainers": [site_ips.multus_src_route_init(app_multus_ip, "net1")],
             "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
             "hostPID": True,
             "volumes": [
@@ -589,7 +686,7 @@ def generate_server_manifests(
             ],
             "containers": [
                 {
-                    "name": "cctv",
+                    "name": APP_BACKEND_CONTAINER,
                     "image": server_img,
                     "imagePullPolicy": "Always",
                     "volumeMounts": edge_mounts,
@@ -614,12 +711,15 @@ def generate_server_manifests(
                         {"name": "MTX_HLS_URL", "value": "http://127.0.0.1:8888"},
                         {"name": "MTX_WHEP_URL", "value": "http://127.0.0.1:8889"},
                         {"name": "MTX_API_URL", "value": "http://127.0.0.1:9997"},
+                        {"name": "MTX_PUBLISH_BITRATE_KBPS", "value": "12000"},
+                        {"name": "MTX_X264_PRESET", "value": "veryfast"},
+                        {"name": "MTX_X264_PROFILE", "value": "high"},
                         {"name": "START_MEDIAMTX", "value": "false"},
                         {"name": "LOG_INTERVAL_S", "value": "1"},
                     ],
                     "ports": [
                         {"name": "rtsp", "containerPort": rtsp_port},
-                        {"name": "http", "containerPort": http_port, "hostPort": http_port},
+                        {"name": "http", "containerPort": http_port},
                         {"name": "metrics", "containerPort": metrics_port},
                     ],
                     "resources": {
@@ -630,7 +730,7 @@ def generate_server_manifests(
                 {
                     "name": "mediamtx",
                     "image": "docker.io/bluenviron/mediamtx:1.12.2",
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "args": ["/app/edge/mediamtx.yml"],
                     "ports": [
                         {"name": "rtsp-publish", "containerPort": 8555},
@@ -648,8 +748,8 @@ def generate_server_manifests(
                 },
                 # Container 3: Dedicated Nginx + React Video Wall Frontend Sidecar
                 {
-                    "name": "frontend",
-                    "image": "10.1.132.30:5000/application-cctv-frontend:nws-v0.9-amd64",
+                    "name": APP_CONSOLE_CONTAINER,
+                    "image": "10.1.132.30:5000/application-cctv-frontend:nws-v0.15-amd64",
                     "imagePullPolicy": "Always",
                     "ports": [{"name": "web", "containerPort": 80}],
                     "resources": {
@@ -694,13 +794,13 @@ def generate_server_manifests(
                 "labels": labels,
             },
             "spec": {
-                "type": "NodePort",
+                "type": "ClusterIP",
                 "selector": labels,
                 "ports": [
-                    {"name": "web", "port": 80, "targetPort": 80, "nodePort": 30080},
-                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port, "nodePort": 30160},
+                    {"name": "web", "port": 80, "targetPort": 80},
+                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port},
                     {"name": "http", "port": http_port, "targetPort": http_port},
-                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port, "nodePort": 32431},
+                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port},
                 ],
             },
         }
@@ -728,9 +828,9 @@ def generate_server_manifests(
 
         dash_img = str(
             p.get("dashboard_image")
-            or "10.1.132.30:5000/cosmo3-dashboard:nws-v0.7-amd64"
+            or "10.1.132.30:5000/cosmo3-dashboard:nws-v0.11-amd64"
         )
-        dash_port = int(p.get("dashboard_port") or 8080)
+        dash_port = int(p.get("dashboard_port") or site_ips.CONSOLE_PORT)
 
         def _read_dash(name: str) -> str:
             path = f"/home/fcp/INA-Infra/applications/physical_ai/dashboard/{name}"
@@ -757,6 +857,7 @@ def generate_server_manifests(
             manifests.append(dash_cm_manifest)
 
         pod_spec = {
+            "initContainers": [site_ips.multus_src_route_init(app_multus_ip, "net1")],
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": node_sel,
@@ -783,9 +884,9 @@ def generate_server_manifests(
             ],
             "containers": [
                 {
-                    "name": "vllm",
+                    "name": APP_BACKEND_CONTAINER,
                     "image": server_img,
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "command": [
                         "/bin/bash",
                         "-c",
@@ -797,7 +898,7 @@ def generate_server_manifests(
                             "    echo \"[vllm-wrapper] Token found, starting vLLM.\"\n"
                             "    break\n"
                             "  fi\n"
-                            "  echo \"[vllm-wrapper] Token not ready, retrying in 10s. Enter via dashboard at :8080\"\n"
+                            "  echo \"[vllm-wrapper] Token not ready, retrying in 10s. Enter via console at :80\"\n"
                             "  sleep 10\n"
                             "done\n"
                             "export HF_TOKEN=$(cat \"${TOKEN_FILE}\")\n"
@@ -853,9 +954,10 @@ def generate_server_manifests(
                     },
                 },
                 {
-                    "name": "dashboard",
+                    "name": APP_CONSOLE_CONTAINER,
                     "image": dash_img,
                     "imagePullPolicy": "Always",
+                    "command": ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", str(dash_port)],
                     "env": [
                         {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
                         {"name": "MODEL_NAME", "value": model_name},
@@ -863,16 +965,39 @@ def generate_server_manifests(
                         {"name": "HF_SECRET_NAME", "value": "ina-hf-token"},
                         {"name": "HF_DEPLOY_NAME", "value": app_name},
                         {"name": "DASHBOARD_STATIC", "value": "/app/static"},
+                        {"name": "SLICE_ID", "value": str(sid)},
+                        {"name": "DASHBOARD_PORT", "value": str(dash_port)},
+                        {"name": "UE_CONSOLE_PORT", "value": str(PHYSICAL_AI_CONSOLE_PORT)},
+                    ],
+                    "volumeMounts": [
+                        {
+                            "name": "dashboard-code",
+                            "mountPath": "/app/app.py",
+                            "subPath": "app.py",
+                        },
+                        {
+                            "name": "dashboard-code",
+                            "mountPath": "/app/static/index.html",
+                            "subPath": "index.html",
+                        },
                     ],
                     "ports": [
-                        {"name": "dashboard", "containerPort": dash_port, "hostPort": dash_port},
+                        {"name": "dashboard", "containerPort": dash_port},
                     ],
                     "resources": {
                         "requests": {"cpu": "50m", "memory": "64Mi"},
                         "limits": {"cpu": "500m", "memory": "256Mi"},
                     },
                 },
-                _influx_pusher_container(metrics_port, app_name, sid, profile_name, app_type, target_cluster),
+                _influx_pusher_container(
+                    metrics_port,
+                    app_name,
+                    sid,
+                    profile_name,
+                    app_type,
+                    target_cluster,
+                    extra_env=[{"name": "APP_METRICS_URL", "value": f"http://127.0.0.1:{dash_port}/metrics"}],
+                ),
             ],
         }
 
@@ -909,11 +1034,11 @@ def generate_server_manifests(
                 "labels": labels,
             },
             "spec": {
-                "type": "NodePort",
+                "type": "ClusterIP",
                 "selector": labels,
                 "ports": [
                     {"name": "http", "port": http_port, "targetPort": http_port},
-                    {"name": "dashboard", "port": dash_port, "targetPort": dash_port, "nodePort": 30082},
+                    {"name": "dashboard", "port": dash_port, "targetPort": dash_port},
                     {"name": "metrics", "port": metrics_port, "targetPort": metrics_port},
                 ],
             },
@@ -938,8 +1063,12 @@ def generate_server_manifests(
                 {
                     "apiGroups": ["apps"],
                     "resources": ["deployments"],
-                    "resourceNames": [app_name],
-                    "verbs": ["get", "patch"],
+                    "verbs": ["get", "list", "patch"],
+                },
+                {
+                    "apiGroups": [""],
+                    "resources": ["pods"],
+                    "verbs": ["get", "list"],
                 },
             ],
         }
@@ -966,10 +1095,7 @@ def generate_server_manifests(
         bitrate = str(p.get("bitrate_kbps") or "6000")
         fps = str(p.get("fps") or "25")
 
-        server_img = (
-            app_cfg.server_image
-            or "10.1.132.30:5000/application-ott:nws-v0.9-amd64"
-        )
+        server_img = app_images.resolve_server_image("ott", app_cfg.server_image)
 
         def _read_ott(name: str) -> str:
             path = f"/home/fcp/INA-Infra/applications/ott/server/{name}"
@@ -1006,6 +1132,7 @@ def generate_server_manifests(
         ]
 
         pod_spec = {
+            "initContainers": [site_ips.multus_src_route_init(app_multus_ip, "net1")],
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
@@ -1020,7 +1147,7 @@ def generate_server_manifests(
             ],
             "containers": [
                 {
-                    "name": "ott-server",
+                    "name": APP_BACKEND_CONTAINER,
                     "image": server_img,
                     "imagePullPolicy": "Always",
                     "volumeMounts": ott_mounts,
@@ -1038,6 +1165,12 @@ def generate_server_manifests(
                         {"name": "MTX_WHEP_URL", "value": "http://127.0.0.1:8889"},
                         {"name": "MTX_API_URL", "value": "http://127.0.0.1:9997"},
                         {"name": "START_MEDIAMTX", "value": "false"},
+                        # Direct googlevideo CDN often 403s; yt-dlp caches to disk instead.
+                        {"name": "OTT_FORCE_TESTSRC", "value": "0"},
+                        {"name": "OTT_YOUTUBE_CACHE", "value": "/tmp/ott-youtube"},
+                        {"name": "OTT_YOUTUBE_MAX_HEIGHT", "value": "720"},
+                        # UE/browser plays YouTube directly (no MediaMTX republish).
+                        {"name": "OTT_PLAY_MODE", "value": "youtube"},
                     ],
                     "ports": [
                         {"name": "rtsp", "containerPort": rtsp_port},
@@ -1053,7 +1186,7 @@ def generate_server_manifests(
                 {
                     "name": "mediamtx",
                     "image": "docker.io/bluenviron/mediamtx:1.12.2",
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "args": ["/app/server/mediamtx.yml"],
                     "ports": [
                         {"name": "rtsp-publish", "containerPort": 8555},
@@ -1071,8 +1204,8 @@ def generate_server_manifests(
                 },
                 # Container 3: Dedicated Nginx + React OTT Portal Frontend
                 {
-                    "name": "frontend",
-                    "image": "10.1.132.30:5000/application-ott-frontend:nws-v0.9-amd64",
+                    "name": APP_CONSOLE_CONTAINER,
+                    "image": "10.1.132.30:5000/application-ott-frontend:nws-v0.15-amd64",
                     "imagePullPolicy": "Always",
                     "ports": [{"name": "web", "containerPort": 80}],
                     "resources": {
@@ -1117,48 +1250,82 @@ def generate_server_manifests(
                 "labels": labels,
             },
             "spec": {
-                "type": "NodePort",
+                "type": "ClusterIP",
                 "selector": labels,
                 "ports": [
-                    {"name": "web", "port": 80, "targetPort": 80, "nodePort": 30083},
-                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port, "nodePort": 30163},
+                    {"name": "web", "port": 80, "targetPort": 80},
+                    {"name": "rtsp", "port": rtsp_port, "targetPort": rtsp_port},
                     {"name": "http", "port": http_port, "targetPort": http_port},
-                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port, "nodePort": 32433},
+                    {"name": "metrics", "port": metrics_port, "targetPort": metrics_port},
                 ],
             },
         }
-        manifests.extend([cm_manifest, deploy_manifest, svc_manifest])
+        manifests.extend(
+            [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ServiceAccount",
+                    "metadata": {
+                        "name": app_name,
+                        "namespace": profile_name,
+                        "labels": labels,
+                    },
+                },
+                cm_manifest,
+                deploy_manifest,
+                svc_manifest,
+            ]
+        )
 
     elif app_type == "iot":
         app_name = "application-iot"
         labels["app.kubernetes.io/name"] = app_name
         broker_port = int(p.get("broker_port") or app_cfg.server_port or 1883)
         metrics_port = int(p.get("metrics_port") or app_cfg.metrics_port or 9105)
-        dash_port = int(p.get("dashboard_port") or 8080)
+        dash_port = int(p.get("dashboard_port") or site_ips.CONSOLE_PORT)
         dl_fast = str(p.get("dl_fast_period_s") or "300")
         dl_slow = str(p.get("dl_slow_period_s") or "3600")
         mqtt_qos = str(p.get("mqtt_qos") or "0")
 
-        server_img = (
-            app_cfg.server_image
-            or "10.1.132.30:5000/sliced-edge:nws-v0.5-amd64"
-        )
+        server_img = app_images.resolve_server_image("iot", app_cfg.server_image)
+        mosq_img = str(p.get("mosquitto_image") or IOT_MOSQUITTO_IMAGE).strip() or IOT_MOSQUITTO_IMAGE
 
         pod_spec = {
+            "initContainers": [site_ips.multus_src_route_init(app_multus_ip, "net1")],
             "serviceAccountName": app_name,
             "automountServiceAccountToken": True,
             "nodeSelector": multus_iface.scheduling_node_selector("amd64", master),
             "containers": [
                 {
-                    "name": "edge",
+                    "name": "mosquitto",
+                    "image": mosq_img,
+                    "imagePullPolicy": "Always",
+                    "ports": [
+                        {"name": "mqtt", "containerPort": broker_port},
+                        {"name": "mqtt-ctl", "containerPort": IOT_MOSQUITTO_CONTROL_PORT},
+                    ],
+                    "readinessProbe": {
+                        "tcpSocket": {"port": broker_port},
+                        "initialDelaySeconds": 2,
+                        "periodSeconds": 5,
+                    },
+                    "resources": {
+                        "requests": {"cpu": "20m", "memory": "32Mi"},
+                        "limits": {"cpu": "200m", "memory": "128Mi"},
+                    },
+                },
+                {
+                    "name": APP_BACKEND_CONTAINER,
                     "image": server_img,
-                    "imagePullPolicy": "IfNotPresent",
+                    "imagePullPolicy": "Always",
                     "env": [
                         *common_env,
                         {"name": "APP_NAME", "value": app_name},
                         {"name": "OTA_BIND_IP", "value": "0.0.0.0"},
                         {"name": "METRICS_BIND_IP", "value": "0.0.0.0"},
                         {"name": "METRICS_PORT", "value": str(metrics_port)},
+                        {"name": "LOCAL_BROKER_HOST", "value": "127.0.0.1"},
+                        {"name": "LOCAL_BROKER_PORT", "value": str(IOT_MOSQUITTO_CONTROL_PORT)},
                         {"name": "DL_FAST_PERIOD_S", "value": dl_fast},
                         {"name": "DL_SLOW_PERIOD_S", "value": dl_slow},
                         {"name": "DL_PAYLOAD_BYTES", "value": "256"},
@@ -1168,7 +1335,6 @@ def generate_server_manifests(
                         {"name": "LOG_LEVEL", "value": "INFO"},
                     ],
                     "ports": [
-                        {"name": "mqtt", "containerPort": broker_port},
                         {"name": "metrics", "containerPort": metrics_port},
                     ],
                     "resources": {
@@ -1179,7 +1345,7 @@ def generate_server_manifests(
                 _control_dashboard_container(
                     app_kind="iot",
                     app_name=app_name,
-                    target_container="edge",
+                    target_container=APP_BACKEND_CONTAINER,
                     dash_port=dash_port,
                     metrics_port=metrics_port,
                     extra_env=[
@@ -1191,6 +1357,9 @@ def generate_server_manifests(
                         {"name": "DL_PAYLOAD_BYTES", "value": "256"},
                         {"name": "MQTT_QOS", "value": mqtt_qos},
                         {"name": "MULTUS_IP", "value": app_multus_ip},
+                        {"name": "SLICE_ID", "value": str(sid)},
+                        {"name": "UE_CONSOLE_PORT", "value": str(site_ips.UE_CONSOLE_PORT)},
+                        {"name": "UE_SCAN_MAX", "value": str(p.get("ue_scan_max") or 8)},
                     ],
                 ),
                 _influx_pusher_container(metrics_port, app_name, sid, profile_name, app_type, target_cluster),
@@ -1207,6 +1376,7 @@ def generate_server_manifests(
             },
             "spec": {
                 "replicas": 1,
+                "strategy": {"type": "Recreate", "rollingUpdate": None},
                 "selector": {"matchLabels": labels},
                 "template": {
                     "metadata": {
@@ -1229,11 +1399,11 @@ def generate_server_manifests(
                 "labels": labels,
             },
             "spec": {
-                "type": "NodePort",
+                "type": "ClusterIP",
                 "selector": labels,
                 "ports": [
                     {"name": "mqtt", "port": broker_port, "targetPort": broker_port},
-                    {"name": "dashboard", "port": dash_port, "targetPort": dash_port, "nodePort": 30084},
+                    {"name": "dashboard", "port": dash_port, "targetPort": dash_port},
                     {"name": "metrics", "port": metrics_port, "targetPort": metrics_port},
                 ],
             },
@@ -1272,7 +1442,7 @@ def generate_server_manifests(
                             {
                                 "name": "app",
                                 "image": server_img,
-                                "imagePullPolicy": "IfNotPresent",
+                                "imagePullPolicy": "Always",
                                 "env": [*common_env, {"name": "APP_NAME", "value": app_name}],
                                 "ports": [{"containerPort": port}],
                                 "resources": {
@@ -1317,7 +1487,7 @@ def build_client_container(
     p = app_cfg.params or {}
 
     if not server_ip:
-        server_ip = f"10.1.137.{160 + sid}"
+        server_ip = site_ips.application_multus_ip(sid)
 
     common_env = [
         {"name": "TARGET_SERVER_IP", "value": server_ip},
@@ -1351,15 +1521,12 @@ def build_client_container(
         video_src, video_url, _video_label = cctv_videos.clip_for_client(
             p, client_index
         )
-        client_img = (
-            app_cfg.client_image
-            or "10.1.132.30:5000/slicea-publisher:nws-v0.6-amd64"
-        )
+        client_img = app_images.resolve_client_image("cctv", app_cfg.client_image)
         app_name = f"slice{sid}-cctv-client-{client_index}"
         return {
             "name": client_name,
             "image": client_img,
-            "imagePullPolicy": "IfNotPresent",
+            "imagePullPolicy": "Always",
             "securityContext": {
                 "privileged": True,
                 "capabilities": {"add": ["NET_ADMIN"]},
@@ -1399,50 +1566,18 @@ def build_client_container(
         }
 
     elif app_type == "physical_ai":
-        client_name = "aiperf"
-        http_port = int(p.get("server_port") or app_cfg.server_port or 8000)
-        client_m_port = int(p.get("client_metrics_port") or 8001)
-        client_img = (
-            app_cfg.client_image
-            or "10.1.132.30:5000/cosmo3-aiperf:nws-v0.7-amd64"
-        )
-        return {
-            "name": client_name,
-            "image": client_img,
-            "imagePullPolicy": "IfNotPresent",
-            "securityContext": {
-                "privileged": True,
-                "capabilities": {"add": ["NET_ADMIN"]},
-            },
-            "env": [
-                *common_env,
-                {"name": "APP_NAME", "value": f"slice{sid}-physical-ai-client"},
-                {"name": "SERVER_URL", "value": f"http://{server_ip}:{http_port}"},
-                {"name": "MODEL_NAME", "value": _physical_ai_model(p)},
-                {"name": "REQUEST_RATE", "value": str(p.get("request_rate") or 10)},
-                {"name": "MAX_MODEL_LEN", "value": str(p.get("max_model_len") or 4096)},
-                {"name": "METRICS_PORT", "value": str(client_m_port)},
-            ],
-            "ports": [{"name": "metrics", "containerPort": client_m_port}],
-            "resources": {
-                "requests": {"cpu": "200m", "memory": "256Mi"},
-                "limits": {"cpu": "2", "memory": "2Gi"},
-            },
-        }
+        return None
 
     elif app_type == "ott":
         client_name = "ott-client"
         rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8554)
         stream_path = str(p.get("stream_path") or "live/hd")
         client_m_port = int(p.get("client_metrics_port") or 9104)
-        client_img = (
-            app_cfg.client_image
-            or "10.1.132.30:5000/hd-stream-client:hdstream-v2"
-        )
+        client_img = app_images.resolve_client_image("ott", app_cfg.client_image)
         return {
             "name": client_name,
             "image": client_img,
-            "imagePullPolicy": "IfNotPresent",
+            "imagePullPolicy": "Always",
             "securityContext": {
                 "privileged": True,
                 "capabilities": {"add": ["NET_ADMIN"]},
@@ -1463,39 +1598,7 @@ def build_client_container(
         }
 
     elif app_type == "iot":
-        client_name = "iot-client"
-        broker_port = int(p.get("broker_port") or app_cfg.server_port or 1883)
-        client_m_port = int(p.get("client_metrics_port") or 9106)
-        client_img = (
-            app_cfg.client_image
-            or "10.1.132.30:5000/sliced-client:nws-v0.5-amd64"
-        )
-        return {
-            "name": client_name,
-            "image": client_img,
-            "imagePullPolicy": "IfNotPresent",
-            "securityContext": {
-                "privileged": True,
-                "capabilities": {"add": ["NET_ADMIN"]},
-            },
-            "env": [
-                *common_env,
-                {"name": "APP_NAME", "value": f"slice{sid}-iot-client"},
-                {"name": "BROKER_HOST", "value": server_ip},
-                {"name": "BROKER_PORT", "value": str(broker_port)},
-                {"name": "NUM_DEVICES", "value": str(p.get("num_devices") or 5)},
-                {"name": "FAST_PERIOD_S", "value": str(p.get("fast_period_s") or 60)},
-                {"name": "MED_PERIOD_S", "value": str(p.get("med_period_s") or 1800)},
-                {"name": "SLOW_PERIOD_S", "value": str(p.get("slow_period_s") or 3600)},
-                {"name": "MQTT_QOS", "value": str(p.get("mqtt_qos") or 0)},
-                {"name": "METRICS_PORT", "value": str(client_m_port)},
-            ],
-            "ports": [{"name": "metrics", "containerPort": client_m_port}],
-            "resources": {
-                "requests": {"cpu": "100m", "memory": "128Mi"},
-                "limits": {"cpu": "1", "memory": "512Mi"},
-            },
-        }
+        return None
 
     elif app_type == "custom" and app_cfg.client_image:
         client_name = "custom-client"
@@ -1503,7 +1606,7 @@ def build_client_container(
         return {
             "name": client_name,
             "image": app_cfg.client_image,
-            "imagePullPolicy": "IfNotPresent",
+            "imagePullPolicy": "Always",
             "securityContext": {
                 "privileged": True,
                 "capabilities": {"add": ["NET_ADMIN"]},
@@ -1524,6 +1627,340 @@ def build_client_container(
     return None
 
 
+def build_physical_ai_ue_containers(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    server_ip: Optional[str] = None,
+    client_index: int = 1,
+) -> List[dict]:
+    """UE pod sidecars: backend (PDU traffic + log) and frontend (Multus console)."""
+    sid = app_cfg.slice_id
+    p = app_cfg.params or {}
+    idx = max(int(client_index), 1)
+    if not server_ip:
+        server_ip = site_ips.application_multus_ip(sid)
+    http_port = int(p.get("server_port") or app_cfg.server_port or 8000)
+    console_ip = physical_ai_console_ip(idx)
+    console_mac = physical_ai_console_mac(sid, idx)
+    ue_name = f"oai-ue-slice-{sid}-client-{idx}"
+    raw_client = (app_cfg.client_image or "").strip()
+    override = str(p.get("ue_console_image") or "").strip()
+    img = app_images.resolve_client_image("physical_ai", override or raw_client)
+    interval = str(p.get("send_interval_s") or p.get("prompt_interval_s") or 8)
+    common = [
+        {"name": "TARGET_SERVER_IP", "value": server_ip},
+        {"name": "PDU_IFACE", "value": f"oaitun_ue{sid}"},
+        {"name": "PDU_ROUTE_HOSTS", "value": server_ip},
+        {"name": "PDU_WAIT_TIMEOUT", "value": "300"},
+        {"name": "SLICE_ID", "value": str(sid)},
+        {"name": "CLIENT_INDEX", "value": str(idx)},
+        {"name": "PROFILE_NAME", "value": profile_name},
+        {"name": "UE_NAME", "value": ue_name},
+        {"name": "CONSOLE_IP", "value": console_ip},
+        {"name": "CONSOLE_MAC", "value": console_mac},
+        {"name": "SERVER_URL", "value": f"http://{server_ip}:{http_port}"},
+        {"name": "URL", "value": f"http://{server_ip}:{http_port}"},
+        {"name": "MODEL_NAME", "value": _physical_ai_model(p)},
+        {"name": "SEND_INTERVAL_S", "value": interval},
+        {"name": "SEND_ENABLED", "value": str(p.get("send_enabled", "1"))},
+        {"name": "INCLUDE_IMAGE", "value": str(p.get("include_image", "1"))},
+        {"name": "BACKEND_URL", "value": f"http://127.0.0.1:{PHYSICAL_AI_BACKEND_PORT}"},
+        {"name": "BACKEND_PORT", "value": str(PHYSICAL_AI_BACKEND_PORT)},
+        {"name": "FRONTEND_PORT", "value": str(PHYSICAL_AI_CONSOLE_PORT)},
+        {"name": "DASHBOARD_STATIC", "value": "/app/static"},
+    ]
+    resources = {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "1", "memory": "1Gi"},
+    }
+    backend = {
+        "name": "backend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "securityContext": {
+            "privileged": True,
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "backend"},
+            {"name": "APP_NAME", "value": f"slice{sid}-physical-ai-client-{idx}"},
+            {"name": "METRICS_PORT", "value": str(p.get("client_metrics_port") or 8001)},
+        ],
+        "ports": [
+            {"name": "backend", "containerPort": PHYSICAL_AI_BACKEND_PORT},
+            {"name": "metrics", "containerPort": int(p.get("client_metrics_port") or 8001)},
+        ],
+        "resources": resources,
+    }
+    frontend = {
+        "name": "frontend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "frontend"},
+        ],
+        "ports": [{"name": "console", "containerPort": PHYSICAL_AI_CONSOLE_PORT}],
+        "resources": {
+            "requests": {"cpu": "50m", "memory": "64Mi"},
+            "limits": {"cpu": "500m", "memory": "256Mi"},
+        },
+    }
+    return [backend, frontend, build_client_metrics_container(profile_name, app_cfg, client_index)]
+
+
+def build_iot_ue_containers(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    server_ip: Optional[str] = None,
+    client_index: int = 1,
+) -> List[dict]:
+    """UE pod sidecars: MQTT backend + Multus console for per-UE publish config."""
+    sid = app_cfg.slice_id
+    p = app_cfg.params or {}
+    idx = max(int(client_index), 1)
+    if not server_ip:
+        server_ip = site_ips.application_multus_ip(sid)
+    broker_port = int(p.get("broker_port") or app_cfg.server_port or 1883)
+    console_ip = iot_console_ip(idx, sid)
+    console_mac = iot_console_mac(sid, idx)
+    ue_name = f"oai-ue-slice-{sid}-client-{idx}"
+    raw_client = (app_cfg.client_image or "").strip()
+    override = str(p.get("ue_console_image") or "").strip()
+    if override:
+        img = override
+    elif "ue-console" in raw_client:
+        img = raw_client
+    else:
+        img = IOT_UE_CONSOLE_IMAGE
+    msgs = p.get("messages") or p.get("iot_messages")
+    messages_json = json.dumps(msgs) if msgs else ""
+    common = [
+        {"name": "TARGET_SERVER_IP", "value": server_ip},
+        {"name": "PDU_IFACE", "value": f"oaitun_ue{sid}"},
+        {"name": "PDU_ROUTE_HOSTS", "value": server_ip},
+        {"name": "PDU_WAIT_TIMEOUT", "value": "300"},
+        {"name": "SLICE_ID", "value": str(sid)},
+        {"name": "CLIENT_INDEX", "value": str(idx)},
+        {"name": "PROFILE_NAME", "value": profile_name},
+        {"name": "UE_NAME", "value": ue_name},
+        {"name": "DEVICE_ID", "value": f"ue{idx}"},
+        {"name": "CONSOLE_IP", "value": console_ip},
+        {"name": "CONSOLE_MAC", "value": console_mac},
+        {"name": "BROKER_HOST", "value": server_ip},
+        {"name": "BROKER_PORT", "value": str(broker_port)},
+        {"name": "MQTT_QOS", "value": str(p.get("mqtt_qos") or 0)},
+        {"name": "SEND_ENABLED", "value": str(p.get("send_enabled", "1"))},
+        {"name": "BACKEND_URL", "value": f"http://127.0.0.1:{IOT_BACKEND_PORT}"},
+        {"name": "BACKEND_PORT", "value": str(IOT_BACKEND_PORT)},
+        {"name": "FRONTEND_PORT", "value": str(IOT_CONSOLE_PORT)},
+        {"name": "DASHBOARD_STATIC", "value": "/app/static"},
+    ]
+    if messages_json:
+        common.append({"name": "IOT_MESSAGES", "value": messages_json})
+    resources = {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "1", "memory": "512Mi"},
+    }
+    backend = {
+        "name": "backend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "securityContext": {
+            "privileged": True,
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "backend"},
+            {"name": "APP_NAME", "value": f"slice{sid}-iot-client-{idx}"},
+            {"name": "METRICS_PORT", "value": str(p.get("client_metrics_port") or 9106)},
+        ],
+        "ports": [
+            {"name": "backend", "containerPort": IOT_BACKEND_PORT},
+            {"name": "metrics", "containerPort": int(p.get("client_metrics_port") or 9106)},
+        ],
+        "resources": resources,
+    }
+    frontend = {
+        "name": "frontend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "frontend"},
+        ],
+        "ports": [{"name": "console", "containerPort": IOT_CONSOLE_PORT}],
+        "resources": {
+            "requests": {"cpu": "50m", "memory": "64Mi"},
+            "limits": {"cpu": "500m", "memory": "256Mi"},
+        },
+    }
+    return [backend, frontend, build_client_metrics_container(profile_name, app_cfg, client_index)]
+
+
+def build_ott_ue_volumes() -> List[dict]:
+    """Shared memory + chromium config for linuxserver/chromium sidecar."""
+    return [
+        {"name": "chromium-config", "emptyDir": {}},
+        {
+            "name": "dshm",
+            "emptyDir": {"medium": "Memory", "sizeLimit": "1Gi"},
+        },
+    ]
+
+
+def build_ott_ue_containers(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    server_ip: Optional[str] = None,
+    client_index: int = 1,
+) -> List[dict]:
+    """UE pod sidecars: backend (PDU SOCKS + CDP), frontend console, Chromium desktop."""
+    sid = app_cfg.slice_id
+    p = app_cfg.params or {}
+    idx = max(int(client_index), 1)
+    if not server_ip:
+        server_ip = site_ips.application_multus_ip(sid)
+    http_port = int(p.get("http_port") or 8080)
+    rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8555)
+    console_ip = ott_console_ip(idx)
+    console_mac = ott_console_mac(sid, idx)
+    ue_name = f"oai-ue-slice-{sid}-client-{idx}"
+    raw_client = (app_cfg.client_image or "").strip()
+    override = str(p.get("ue_console_image") or "").strip()
+    if override:
+        img = override
+    elif "ue-console" in raw_client:
+        img = raw_client
+    else:
+        img = OTT_UE_CONSOLE_IMAGE
+
+    chromium_img = str(p.get("chromium_image") or OTT_CHROMIUM_IMAGE).strip()
+    chrome_cli = (
+        "--proxy-server=socks5://127.0.0.1:1080 "
+        "--remote-debugging-port=9222 "
+        "--remote-allow-origins=* "
+        "--no-first-run "
+        "--no-default-browser-check "
+        "--disable-features=TranslateUI "
+        "--autoplay-policy=no-user-gesture-required "
+        "--disable-gpu "
+        "https://www.youtube.com"
+    )
+
+    common = [
+        {"name": "TARGET_SERVER_IP", "value": server_ip},
+        {"name": "SERVER_RTSP_PORT", "value": str(rtsp_port)},
+        {"name": "PDU_IFACE", "value": f"oaitun_ue{sid}"},
+        {"name": "PDU_ROUTE_HOSTS", "value": server_ip},
+        {"name": "PDU_WAIT_TIMEOUT", "value": "300"},
+        {"name": "SLICE_ID", "value": str(sid)},
+        {"name": "CLIENT_INDEX", "value": str(idx)},
+        {"name": "PROFILE_NAME", "value": profile_name},
+        {"name": "UE_NAME", "value": ue_name},
+        {"name": "CONSOLE_IP", "value": console_ip},
+        {"name": "CONSOLE_MAC", "value": console_mac},
+        {"name": "SERVER_URL", "value": f"http://{server_ip}"},
+        {"name": "DEFAULT_CHANNEL", "value": f"channel_{idx}"},
+        {"name": "STREAMING_ENABLED", "value": str(p.get("streaming_enabled", "0"))},
+        {"name": "CLIENT_ID", "value": f"ue{idx}"},
+        {"name": "BACKEND_URL", "value": f"http://127.0.0.1:{OTT_BACKEND_PORT}"},
+        {"name": "BACKEND_PORT", "value": str(OTT_BACKEND_PORT)},
+        {"name": "FRONTEND_PORT", "value": str(OTT_CONSOLE_PORT)},
+        {"name": "DASHBOARD_STATIC", "value": "/app/ue/static"},
+        {"name": "PDU_SOCKS_PORT", "value": "1080"},
+        {"name": "CHROME_CDP_HOST", "value": "127.0.0.1"},
+        {"name": "CHROME_CDP_PORT", "value": "9222"},
+        {"name": "CHROME_HTTP_URL", "value": f"https://{console_ip}/chrome/"},
+        {"name": "HTTPS_PORT", "value": "443"},
+        {"name": "HTTP_PORT", "value": "80"},
+        {"name": "CHROME_UPSTREAM", "value": "http://127.0.0.1:3000"},
+    ]
+    resources = {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "1", "memory": "1Gi"},
+    }
+    backend = {
+        "name": "backend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "securityContext": {
+            "privileged": True,
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "backend"},
+            {"name": "APP_NAME", "value": f"slice{sid}-ott-client-{idx}"},
+            {"name": "METRICS_PORT", "value": str(p.get("client_metrics_port") or 9111)},
+            {"name": "OTT_PLAY_MODE", "value": "chromium_5g"},
+            {"name": "OTT_PLAY_QUALITY", "value": str(p.get("play_quality") or "4k")},
+        ],
+        "ports": [
+            {"name": "backend", "containerPort": OTT_BACKEND_PORT},
+            {"name": "metrics", "containerPort": int(p.get("client_metrics_port") or 9111)},
+            {"name": "socks", "containerPort": 1080},
+        ],
+        "resources": resources,
+    }
+    frontend = {
+        "name": "frontend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "frontend"},
+        ],
+        "ports": [{"name": "console", "containerPort": OTT_CONSOLE_PORT}],
+        "resources": {
+            "requests": {"cpu": "50m", "memory": "64Mi"},
+            "limits": {"cpu": "500m", "memory": "256Mi"},
+        },
+    }
+    chromium = {
+        "name": "chromium",
+        "image": chromium_img,
+        "imagePullPolicy": "IfNotPresent",
+        "securityContext": {
+            "privileged": True,
+            "seccompProfile": {"type": "Unconfined"},
+        },
+        "env": [
+            {"name": "PUID", "value": "1000"},
+            {"name": "PGID", "value": "1000"},
+            {"name": "TZ", "value": "UTC"},
+            {"name": "TITLE", "value": f"OTT UE {ue_name}"},
+            {"name": "DISABLE_IPV6", "value": "true"},
+            {"name": "PIXELFLUX_WAYLAND", "value": "false"},
+            {"name": "CHROME_CLI", "value": chrome_cli},
+            {"name": "CUSTOM_PORT", "value": "3000"},
+            {"name": "CUSTOM_HTTPS_PORT", "value": "3001"},
+            {"name": "SUBFOLDER", "value": "/chrome/"},
+        ],
+        "ports": [
+            {"name": "chrome-http", "containerPort": 3000},
+            {"name": "chrome-https", "containerPort": 3001},
+            {"name": "cdp", "containerPort": 9222},
+        ],
+        "volumeMounts": [
+            {"name": "chromium-config", "mountPath": "/config"},
+            {"name": "dshm", "mountPath": "/dev/shm"},
+        ],
+        "resources": {
+            "requests": {"cpu": "500m", "memory": "1Gi"},
+            "limits": {"cpu": "4", "memory": "4Gi"},
+        },
+    }
+    return [
+        backend,
+        frontend,
+        chromium,
+        build_client_metrics_container(profile_name, app_cfg, client_index),
+    ]
+
+
 def build_client_metrics_container(
     profile_name: str,
     app_cfg: SliceApplicationConfig,
@@ -1536,7 +1973,7 @@ def build_client_metrics_container(
     m_port = {
         "cctv": 9101,
         "physical_ai": 8001,
-        "ott": 9104,
+        "ott": 9111,
         "iot": 9106,
         "custom": 9107,
     }.get(app_type, 9101)
@@ -1587,6 +2024,7 @@ def patch_ue_pod_with_client(
         c for c in containers
         if c.get("name") not in (
             "cctv-publisher", "aiperf", "ott-client", "iot-client", "custom-client",
+            "backend", "frontend",
             "metrics-exporter", f"app-client-metrics-{sid}",
         )
     ]
@@ -1719,7 +2157,7 @@ def deploy_application_stream(
         sid = app.slice_id
         target_cluster = resolve_target_cluster(app, rec.pl_result)
         app_name = app.name or f"Slice {sid} ({app.app_type})"
-        server_ip = f"10.1.137.{160 + sid}"
+        server_ip = site_ips.application_multus_ip(sid)
 
         # Servers are GitOps (PL Deploy → gitea_apply). Direct apply is client UEs only.
         yield log_event(
@@ -1828,13 +2266,27 @@ def deploy_application_stream(
                 ]
 
             for c_idx in range(1, client_count + 1):
-                client_ctr = build_client_container(
-                    profile_name, app, server_ip=server_ip, client_index=c_idx
-                )
-                metrics_ctr = build_client_metrics_container(
-                    profile_name, app, client_index=c_idx
-                )
-                client_containers = [c for c in [client_ctr, metrics_ctr] if c]
+                if app.app_type == "physical_ai":
+                    client_containers = build_physical_ai_ue_containers(
+                        profile_name, app, server_ip=server_ip, client_index=c_idx
+                    )
+                elif app.app_type == "ott":
+                    client_containers = build_ott_ue_containers(
+                        profile_name, app, server_ip=server_ip, client_index=c_idx
+                    )
+                    client_volumes = build_ott_ue_volumes()
+                elif app.app_type == "iot":
+                    client_containers = build_iot_ue_containers(
+                        profile_name, app, server_ip=server_ip, client_index=c_idx
+                    )
+                else:
+                    client_ctr = build_client_container(
+                        profile_name, app, server_ip=server_ip, client_index=c_idx
+                    )
+                    metrics_ctr = build_client_metrics_container(
+                        profile_name, app, client_index=c_idx
+                    )
+                    client_containers = [c for c in [client_ctr, metrics_ctr] if c]
 
                 if app.app_type == "cctv":
                     _src, _url, vlabel = cctv_videos.clip_for_client(
@@ -1843,6 +2295,33 @@ def deploy_application_stream(
                     yield log_event(
                         "stdout",
                         f"  [client/edge] camera {c_idx} video={vlabel} ({_src})",
+                    )
+                console_ip = None
+                console_mac = None
+                console_port = None
+                if app.app_type == "physical_ai":
+                    console_ip = physical_ai_console_ip(c_idx)
+                    console_mac = physical_ai_console_mac(sid, c_idx)
+                    console_port = PHYSICAL_AI_CONSOLE_PORT
+                    yield log_event(
+                        "stdout",
+                        f"  [client/edge] UE {c_idx} console {console_ip} mac={console_mac}",
+                    )
+                elif app.app_type == "ott":
+                    console_ip = ott_console_ip(c_idx)
+                    console_mac = ott_console_mac(sid, c_idx)
+                    console_port = OTT_CONSOLE_PORT
+                    yield log_event(
+                        "stdout",
+                        f"  [client/edge] UE {c_idx} console {console_ip} mac={console_mac}",
+                    )
+                elif app.app_type == "iot":
+                    console_ip = iot_console_ip(c_idx, sid)
+                    console_mac = iot_console_mac(sid, c_idx)
+                    console_port = IOT_CONSOLE_PORT
+                    yield log_event(
+                        "stdout",
+                        f"  [client/edge] UE {c_idx} console {console_ip} mac={console_mac}",
                     )
                 ue_manifests = ran_workloads.generate_ue_manifests(
                     namespace=profile_name,
@@ -1853,6 +2332,9 @@ def deploy_application_stream(
                     client_containers=client_containers,
                     client_volumes=client_volumes,
                     client_index=c_idx,
+                    console_ip=console_ip,
+                    console_mac=console_mac,
+                    console_port=console_port or PHYSICAL_AI_CONSOLE_PORT,
                 )
 
                 ue_proc = subprocess.run(

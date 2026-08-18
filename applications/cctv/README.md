@@ -25,7 +25,7 @@ flowchart TD
     Gst["cctv container: gst-rtsp-server :8554 + YOLOv8 worker pool"]
     Api["cctv container: FastAPI :8080 (/snapshot, /api)"]
     Mtx["mediamtx container: MediaMTX :8555 publish / :8888 HLS / :8889 WHEP"]
-    Ui["frontend container: Nginx :80 (NodePort 30080) React Video Wall"]
+    Ui["frontend container: Nginx :80 (Multus 10.1.137.211) React Video Wall"]
     Metric["metrics-exporter container: Prometheus :9102 -> InfluxDB"]
   end
   Pub -->|"RTSP RECORD (NTP-64 timestamps)"| Gst
@@ -37,9 +37,9 @@ flowchart TD
 ```
 
 The multi-container pod contains 3 dedicated application containers + 1 metrics exporter sidecar:
-1. **`cctv`** (Backend) — GStreamer RECORD Ingest on Multus (`10.1.137.161:8554` with static MAC `02:42:0a:01:89:a1`), YOLOv8 inference workers (BGR native pipeline), FastAPI (`/snapshot`, `/api`), and Prometheus exporter (`:9102`).
+1. **`cctv`** (Backend) — GStreamer RECORD Ingest on Multus (`10.1.137.211:8554` with static MAC `02:0a:89:a0:00:01`), YOLOv8 inference workers (BGR native pipeline), FastAPI (`/snapshot`, `/api`), and Prometheus exporter (`:9102`).
 2. **`mediamtx`** (Media Server) — Standalone MediaMTX v1.12.2 process on `127.0.0.1`, ingesting annotated RTSP streams and remuxing live HLS fMP4 segments (`/live/`) & WebRTC WHEP (`/whep/`) for multi-subscriber fanout with 0% extra CPU on the inference backend.
-3. **`frontend`** (Web Gateway) — Nginx serving the React Video Wall SPA on NodePort `30080`, reverse-proxying API, snapshots, and HLS streaming with on-demand `IntersectionObserver` video mounting.
+3. **`frontend`** (Web Gateway) — Nginx serving the React Video Wall SPA on Multus `10.1.137.211:80`, reverse-proxying API, snapshots, and HLS streaming with on-demand `IntersectionObserver` video mounting.
 4. **`metrics-exporter`** (Sidecar) — InfluxDB pusher scraping Prometheus `:9102`.
 
 ## Repository Layout

@@ -1,0 +1,26 @@
+# Physical AI UE console: backend (traffic + log) and frontend (UI) — linux/amd64.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:/root/.local/bin:${PATH} \
+    DASHBOARD_STATIC=/app/static \
+    CONSOLE_ROLE=backend
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl iproute2 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv \
+    && /root/.local/bin/uv pip install --python /opt/venv fastapi uvicorn pydantic prometheus-client
+
+WORKDIR /app
+COPY ue/backend.py /app/backend.py
+COPY ue/frontend.py /app/frontend.py
+COPY ue/static /app/static
+COPY ue/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+EXPOSE 80 8090
+ENTRYPOINT ["/app/entrypoint.sh"]

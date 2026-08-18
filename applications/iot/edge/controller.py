@@ -1,16 +1,14 @@
-"""Slice D edge controller (paho-mqtt), co-located with a Mosquitto broker.
+"""Slice D edge controller (paho-mqtt). Mosquitto runs in a dedicated container.
 
-Runs alongside the broker in one container (see entrypoint.sh). It:
-  * connects to the broker over loopback (never the OTA path),
+Connects to the broker over ``LOCAL_BROKER_HOST:LOCAL_BROKER_PORT`` (loopback
+:1884 in the k8s pod, never the OTA path). It:
   * subscribes ``slice_d/ul/#`` and computes uplink one-way delay per message,
   * tracks the set of live devices (last-seen within a TTL),
   * fans downlink control messages out to ``slice_d/dl/<dev>`` on two cadences
     (fast/slow), and
   * exports mirror-image Prometheus metrics on ens0 + a periodic summary line.
 
-The broker binds its OTA listener to ``OTA_BIND_IP``; the controller here talks
-to the loopback listener (``LOCAL_BROKER_HOST:LOCAL_BROKER_PORT``), so control
-traffic to/from real devices rides the OTA path while this internal hop does not.
+UEs connect to Mosquitto's OTA listener (:1883) over the 5G PDU.
 """
 
 from __future__ import annotations
@@ -120,6 +118,9 @@ class Controller:
         self._last_dl_bytes = 0
         self._last_report = time.monotonic()
         self._dl_seq = 0
+        self._dev_delay_ms: dict[str, float] = {}
+        self._dev_bytes: dict[str, int] = {}
+        self._dev_last_bytes: dict[str, int] = {}
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -175,6 +176,8 @@ class Controller:
             self._devices[device_id] = time.monotonic()
             self._ul_bytes += nbytes
             self._ul_delays.append(delay)
+            self._dev_delay_ms[device_id] = delay * 1000.0
+            self._dev_bytes[device_id] = self._dev_bytes.get(device_id, 0) + nbytes
         log.debug("ul seq=%s tier=%s dev=%s delay=%.1fms", parsed.get("seq"), tier, device_id, delay * 1000)
 
     # -- Downlink fan-out -----------------------------------------------------
@@ -228,6 +231,18 @@ class Controller:
             tp_ul = ul_delta / elapsed if elapsed > 0 else 0.0
             tp_dl = dl_delta / elapsed if elapsed > 0 else 0.0
             avg_delay_ms = (sum(delays) / len(delays) * 1000) if delays else 0.0
+            tp_mbps = ((ul_delta + dl_delta) * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
+            metrics.set_agg_slo(avg_delay_ms, tp_mbps)
+            with self._lock:
+                live_ids = list(self._devices)
+                delay_map = dict(self._dev_delay_ms)
+                byte_map = dict(self._dev_bytes)
+                last_map = dict(self._dev_last_bytes)
+                self._dev_last_bytes = dict(self._dev_bytes)
+            for did in live_ids:
+                d_bytes = byte_map.get(did, 0) - last_map.get(did, 0)
+                d_mbps = (d_bytes * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
+                metrics.set_ue_slo(did, delay_map.get(did, avg_delay_ms), d_mbps)
             log.info(
                 "[slice-d edge] up=%ds conn=%d tp_ul=%s tp_dl=%s "
                 "avg_ul_delay=%dms (n=%d) reconnects=%d devices=%d",

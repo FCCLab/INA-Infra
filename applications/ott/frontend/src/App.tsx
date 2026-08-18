@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from "react";
-import Navbar from "./components/Navbar";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import AppShell, { type NavTab } from "./components/ui/AppShell";
 import ConsoleView from "./components/ConsoleView";
-import TheaterView from "./components/TheaterView";
-import ChannelGridView from "./components/ChannelGridView";
 import AddStreamModal from "./components/AddStreamModal";
+import DocsPage from "./pages/DocsPage";
 import {
   fetchChannels,
   fetchClients,
@@ -16,15 +15,37 @@ import {
   type OttChannel,
 } from "./lib/api";
 
+type Tab = "console" | "docs";
+
+const IconConsole = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <rect x="3" y="4" width="18" height="14" rx="2" />
+    <path d="M8 20h8M12 18v2" strokeLinecap="round" />
+  </svg>
+);
+
+const IconBook = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+);
+
+const BRAND = {
+  product: "NeuroRAN",
+  title: "OTT Stream Portal · NeuroRAN",
+  shortName: "OTT",
+  logo: "/logos/NeuroRAN.png",
+  logoPng: "/logos/NeuroRAN.png",
+};
+
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<"console" | "theater" | "grid">("console");
+  const [tab, setTab] = useState<Tab>("console");
   const [channels, setChannels] = useState<OttChannel[]>([]);
   const [clients, setClients] = useState<ConnectedClient[]>([]);
-  const [selectedChannelId, setSelectedChannelId] = useState<string>("channel_1");
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [totalThroughput, setTotalThroughput] = useState<number>(0);
 
-  // Polling loop with AbortController
   useEffect(() => {
     let stop = false;
     let abortController: AbortController | null = null;
@@ -46,9 +67,10 @@ export default function App() {
           setClients(cls);
           setTotalThroughput(st.total_downlink_throughput_mbps || 0);
         }
-      } catch (err: any) {
-        if (err?.name !== "AbortError") {
-          // Keep last state
+      } catch (err: unknown) {
+        const name = err && typeof err === "object" && "name" in err ? String((err as { name?: string }).name) : "";
+        if (name !== "AbortError") {
+          /* keep last state */
         }
       }
     };
@@ -66,21 +88,21 @@ export default function App() {
   const handleStartClient = async (clientId: string) => {
     await startClient(clientId);
     setClients((prev) =>
-      prev.map((c) => (c.id === clientId ? { ...c, state: "STREAMING" } : c))
+      prev.map((c) => (c.id === clientId ? { ...c, state: "STREAMING" } : c)),
     );
   };
 
   const handleStopClient = async (clientId: string) => {
     await stopClient(clientId);
     setClients((prev) =>
-      prev.map((c) => (c.id === clientId ? { ...c, state: "STOPPED" } : c))
+      prev.map((c) => (c.id === clientId ? { ...c, state: "STOPPED" } : c)),
     );
   };
 
   const handleSetChannel = async (clientId: string, channelId: string) => {
     await setClientChannel(clientId, channelId);
     setClients((prev) =>
-      prev.map((c) => (c.id === clientId ? { ...c, assigned_channel: channelId } : c))
+      prev.map((c) => (c.id === clientId ? { ...c, assigned_channel: channelId } : c)),
     );
   };
 
@@ -92,34 +114,40 @@ export default function App() {
 
   const streamingCount = clients.filter((c) => c.state === "STREAMING").length;
 
-  return (
-    <div className="ott-app">
-      <Navbar
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        onOpenAddStream={() => setIsAddModalOpen(true)}
-        streamingCount={streamingCount}
-        totalClients={clients.length}
-        totalThroughput={totalThroughput}
-      />
+  const tabs: NavTab[] = useMemo(
+    () => [
+      { id: "console", label: "UE Console", icon: IconConsole },
+      { id: "docs", label: "Docs & API", icon: IconBook },
+    ],
+    [],
+  );
 
-      <div className="kpi-bar">
-        <div className="kpi-item">
-          <span>Active Streams:</span>
-          <strong>{streamingCount} / {clients.length} UEs</strong>
-        </div>
-        <div className="kpi-item">
-          <span>Active Channels:</span>
-          <strong>{channels.length}</strong>
-        </div>
-        <div className="kpi-item">
-          <span>Total DL Throughput:</span>
-          <strong>{totalThroughput.toFixed(2)} Mbps</strong>
-        </div>
-      </div>
+  const crumb =
+    tab === "console" ? "UE Console · Downlink control" : "Documentation & REST Reference";
 
-      <main className="ott-main-content">
-        {currentTab === "console" && (
+  let body: ReactNode = null;
+  if (tab === "docs") {
+    body = <DocsPage />;
+  } else {
+    body = (
+      <>
+        <div className="kpi-bar">
+          <div className="kpi-item">
+            <span>Active Streams:</span>
+            <strong>
+              {streamingCount} / {clients.length} UEs
+            </strong>
+          </div>
+          <div className="kpi-item">
+            <span>Active Channels:</span>
+            <strong>{channels.length}</strong>
+          </div>
+          <div className="kpi-item">
+            <span>Total DL Throughput:</span>
+            <strong>{totalThroughput.toFixed(2)} Mbps</strong>
+          </div>
+        </div>
+        <div className="ott-main-content">
           <ConsoleView
             clients={clients}
             channels={channels}
@@ -127,25 +155,37 @@ export default function App() {
             onStopClient={handleStopClient}
             onSetChannel={handleSetChannel}
           />
-        )}
+        </div>
+      </>
+    );
+  }
 
-        {currentTab === "theater" && (
-          <TheaterView
-            channels={channels}
-            selectedChannelId={selectedChannelId}
-            onSelectChannel={setSelectedChannelId}
-          />
-        )}
-
-        {currentTab === "grid" && <ChannelGridView channels={channels} />}
-      </main>
-
+  return (
+    <AppShell
+      brand={BRAND}
+      tabs={tabs}
+      tab={tab}
+      setTab={(id) => setTab(id as Tab)}
+      crumb={crumb}
+      siteLabel="INA · OTT Stream Portal"
+      topbarExtra={
+        <>
+          <button type="button" className="icon-btn" onClick={() => setIsAddModalOpen(true)}>
+            + Add YouTube Stream
+          </button>
+          <a className="docs-link" href="/docs" target="_blank" rel="noreferrer">
+            Swagger
+          </a>
+        </>
+      }
+    >
+      {body}
       <AddStreamModal
         channels={channels}
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAddStream={handleAddYouTubeStream}
       />
-    </div>
+    </AppShell>
   );
 }

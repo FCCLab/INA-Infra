@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-nws-v0.7-amd64}"
+IMAGE_TAG="${IMAGE_TAG:-nws-v0.11-amd64}"
 LOCAL_TAG="cosmo3-dashboard:${IMAGE_TAG}"
 REMOTE_TAG="${REGISTRY}/cosmo3-dashboard:${IMAGE_TAG}"
 

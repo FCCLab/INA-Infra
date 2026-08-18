@@ -1851,13 +1851,13 @@ code {
 }
 
 /* ---------- APPLICATION WORKLOADS ---------- */
-.app-dashboard-grid {
+.app-console-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 8px;
 }
-.app-dashboard-cell {
+.app-console-cell {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
@@ -1866,12 +1866,12 @@ code {
   flex-direction: column;
   gap: 8px;
 }
-.app-dashboard-cell-title {
+.app-console-cell-title {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-.app-dashboard-cell-actions {
+.app-console-cell-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;

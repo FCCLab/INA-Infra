@@ -60,6 +60,8 @@ class ChannelStreamer:
         self._frames_sent = 0
         self._last_frames_sent = 0
         self._last_fps_time = time.monotonic()
+        self._prefer_testsrc = os.environ.get("OTT_FORCE_TESTSRC", "0").lower() in ("1", "true", "yes")
+        self._youtube_fail_streak = 0
 
     def start(self) -> None:
         self._stop_event.clear()
@@ -79,30 +81,50 @@ class ChannelStreamer:
     def _run_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                # 1. Resolve source URL (YouTube / local file)
+                # 1. Resolve source (YouTube → local cache via yt-dlp / file / testsrc)
                 source_url, title = resolve_youtube_stream_url(self.channel.source_url)
-                logger.info(f"[{self.channel.id}] Starting channel stream with source: {title}")
+                force_test = os.environ.get("OTT_FORCE_TESTSRC", "0").lower() in ("1", "true", "yes")
+                if force_test:
+                    source_url, title = "testsrc", f"Synthetic · {self.channel.name}"
+                elif self._prefer_testsrc and self._youtube_fail_streak >= 2:
+                    # Sticky fallback only after repeated YouTube failures.
+                    source_url, title = "testsrc", f"Synthetic · {self.channel.name}"
+                logger.info(f"[{self.channel.id}] Starting channel stream with source: {title} ({source_url[:80]})")
 
                 # 2. Build GStreamer pipeline pushing to MediaMTX
+                pattern = {
+                    "channel_1": "ball",
+                    "channel_2": "smpte",
+                    "channel_3": "snow",
+                    "channel_4": "circular",
+                }.get(self.channel.id, "smpte")
                 if source_url == "testsrc":
-                    src_pipe = "videotestsrc is-live=true pattern=smpte ! video/x-raw,framerate=25/1,width=1280,height=720"
-                elif source_url.startswith("http"):
                     src_pipe = (
-                        f"souphttpsrc location=\"{source_url}\" is-live=true ! "
-                        f"decodebin ! videoconvert ! videoscale ! video/x-raw,framerate=25/1,width=1280,height=720"
+                        f"videotestsrc is-live=true pattern={pattern} ! "
+                        f"video/x-raw,framerate=25/1,width=1280,height=720"
+                    )
+                elif source_url.startswith("http"):
+                    # Direct CDN is fragile (403); prefer yt-dlp cache path instead.
+                    ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+                    src_pipe = (
+                        f"souphttpsrc location=\"{source_url}\" is-live=true "
+                        f"user-agent=\"{ua}\" ! "
+                        f"decodebin ! queue ! videoconvert ! videoscale ! videorate ! "
+                        f"video/x-raw,framerate=25/1,width=1280,height=720"
                     )
                 else:
+                    # Local file (yt-dlp cache). EOS → outer loop restarts = seamless loop.
+                    # videorate is required: forcing framerate caps without it breaks qtdemux.
                     src_pipe = (
-                        f"filesrc location=\"{source_url}\" ! qtdemux name=demux "
-                        f"demux.video_0 ! h264parse ! decodebin ! videoconvert ! videoscale ! "
+                        f"filesrc location=\"{source_url}\" ! "
+                        f"decodebin ! queue ! videoconvert ! videoscale ! videorate ! "
                         f"video/x-raw,framerate=25/1,width=1280,height=720"
                     )
 
                 pipe_str = (
                     f"{src_pipe} ! "
-                    f"timeoverlay valignment=top halignment=left font-desc=\"Sans, 16\" "
-                    f"text=\"OTT CHANNEL: {self.channel.id.upper()} | {self.channel.name}\" ! "
-                    f"clockoverlay valignment=bottom halignment=left font-desc=\"Sans, 14\" timeformat=\"%Y-%m-%d %H:%M:%S\" ! "
+                    # No pango overlays (timeoverlay/clockoverlay) — image lacks pango
+                    # plugins; overlays previously prevented all MediaMTX publishes.
                     f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={self.channel.bitrate_kbps} key-int-max=25 ! "
                     f"video/x-h264,profile=baseline ! h264parse ! "
                     f"rtspclientsink location=\"{self.target_url}\" protocols=tcp latency=0 do-rtsp-keep-alive=true"
@@ -124,9 +146,17 @@ class ChannelStreamer:
                         if t == Gst.MessageType.ERROR:
                             err, debug = msg.parse_error()
                             logger.warning(f"[{self.channel.id}] GStreamer pipeline error: {err} ({debug})")
+                            if source_url.startswith("http") or (
+                                source_url != "testsrc" and "youtube" in (self.channel.source_type or "")
+                            ):
+                                self._youtube_fail_streak += 1
+                                if self._youtube_fail_streak >= 2:
+                                    self._prefer_testsrc = True
                             break
                         elif t == Gst.MessageType.EOS:
                             logger.info(f"[{self.channel.id}] Reached EOS, looping video...")
+                            self._youtube_fail_streak = 0
+                            self._prefer_testsrc = False
                             break
 
                     # Telemetry calculation
@@ -143,14 +173,21 @@ class ChannelStreamer:
                             self.channel.fps = fps
                             self.channel.frames_sent = self._frames_sent
                             self.channel.last_frame_ts = time.time()
+                        # Healthy playback clears sticky YouTube fallback.
+                        if source_url != "testsrc":
+                            self._youtube_fail_streak = 0
+                            self._prefer_testsrc = False
 
                 if self.pipeline:
                     self.pipeline.set_state(Gst.State.NULL)
             except Exception as e:
                 logger.error(f"[{self.channel.id}] Stream loop exception: {e}")
+                self._youtube_fail_streak += 1
+                if self._youtube_fail_streak >= 2:
+                    self._prefer_testsrc = True
                 time.sleep(2.0)
 
-            time.sleep(1.0)
+            time.sleep(1.0 if self._youtube_fail_streak == 0 else min(15, 2 * self._youtube_fail_streak))
 
 
 class OttEngine:
@@ -163,6 +200,13 @@ class OttEngine:
 
     def start(self) -> None:
         self._running = True
+        play_mode = (os.environ.get("OTT_PLAY_MODE") or "youtube").strip().lower()
+        if play_mode == "youtube":
+            logger.info(
+                "OTT_PLAY_MODE=youtube — skipping MediaMTX republish; "
+                "UEs play YouTube directly"
+            )
+            return
         with GLOBAL_LOCK:
             channel_list = list(CHANNELS.values())
 
@@ -173,6 +217,10 @@ class OttEngine:
             logger.info(f"Started OTT streamer for {ch.id} ({ch.name})")
 
     def restart_channel(self, channel_id: str) -> bool:
+        play_mode = (os.environ.get("OTT_PLAY_MODE") or "youtube").strip().lower()
+        if play_mode == "youtube":
+            logger.info(f"OTT_PLAY_MODE=youtube — channel {channel_id} is YouTube-direct (no MediaMTX)")
+            return True
         ch = get_channel(channel_id)
         if not ch:
             return False

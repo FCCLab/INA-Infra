@@ -22,6 +22,12 @@ export type ConnectedClient = {
   id: string;
   name: string;
   ip: string;
+  console_ip?: string;
+  console_port?: number;
+  console_mac?: string;
+  console_url?: string;
+  pdu_iface?: string;
+  pdu_ip?: string;
   state: "STREAMING" | "STOPPED" | "IDLE";
   assigned_channel: string;
   net_delay_ms: number;

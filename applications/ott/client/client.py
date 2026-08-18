@@ -30,7 +30,7 @@ Gst.init(None)
 
 # --- Configuration ---------------------------------------------------------
 CLIENT_ID = os.environ.get("CLIENT_ID", os.environ.get("HOSTNAME", "ue1"))
-SERVER_HOST = os.environ.get("SERVER_HOST", "10.1.137.163")
+SERVER_HOST = os.environ.get("SERVER_HOST", "10.1.137.213")
 SERVER_HTTP_PORT = int(os.environ.get("SERVER_HTTP_PORT", "8080"))
 SERVER_RTSP_PORT = int(os.environ.get("SERVER_RTSP_PORT", "8555"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9111"))

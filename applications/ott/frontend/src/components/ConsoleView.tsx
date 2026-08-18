@@ -20,9 +20,15 @@ export default function ConsoleView({
     <div className="console-view">
       <div style={{ marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#fff" }}>5G UE Reception Console</h2>
-          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            Independently manage and stream multi-channel YouTube/HD video downlink to each connected UE.
+          <div className="kicker" style={{ fontSize: "11px", letterSpacing: ".12em", textTransform: "uppercase", color: "var(--accent2)", fontWeight: 600 }}>
+            Slice 3 · 5G Connected UEs
+          </div>
+          <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#fff", fontFamily: "var(--font-heading)" }}>
+            Connected UEs
+          </h2>
+          <p style={{ fontSize: "13px", color: "var(--text-dim)" }}>
+            Heartbeating UEs appear here with HTTPS console links. Start/Stop and channel changes drive
+            each UE Chromium player (YouTube via 5G PDU SOCKS).
           </p>
         </div>
       </div>
@@ -30,7 +36,9 @@ export default function ConsoleView({
       <div className="console-grid">
         {clients.map((cl) => {
           const isStreaming = cl.state === "STREAMING";
-          const currentCh = channels.find((ch) => ch.id === cl.assigned_channel);
+          const consoleUrl =
+            cl.console_url ||
+            (cl.console_ip ? `https://${cl.console_ip}/` : "https://10.1.137.240/");
 
           return (
             <div key={cl.id} className="console-card">
@@ -39,7 +47,19 @@ export default function ConsoleView({
                 <div className="ue-avatar">{cl.id.toUpperCase().slice(0, 3)}</div>
                 <div className="ue-details">
                   <span className="ue-title">{cl.name}</span>
-                  <span className="ue-ip">{cl.ip}</span>
+                  <span className="ue-ip mono">
+                    Console: {cl.console_ip || cl.ip}
+                  </span>
+                  {cl.console_mac && (
+                    <span className="ue-ip mono" style={{ fontSize: "10px" }}>
+                      MAC: {cl.console_mac}
+                    </span>
+                  )}
+                  {cl.pdu_ip && (
+                    <span className="ue-ip mono" style={{ fontSize: "10px", color: "var(--accent)" }}>
+                      PDU: {cl.pdu_ip} ({cl.pdu_iface || "oaitun_ue3"})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -53,7 +73,7 @@ export default function ConsoleView({
 
               {/* 3. Channel Selector */}
               <div className="channel-selector-wrap">
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase" }}>
+                <span style={{ fontSize: "11px", color: "var(--text-faint)", textTransform: "uppercase" }}>
                   Assigned Channel
                 </span>
                 <select
@@ -77,7 +97,7 @@ export default function ConsoleView({
                 </div>
                 <div className="telemetry-chip" title="Received Frames Per Second">
                   <span className="lbl">RX FPS</span>
-                  <span className="val">{isStreaming ? `${cl.rx_fps.toFixed(1)}` : "0.0"}</span>
+                  <span className="val">{isStreaming ? `${cl.rx_fps.toFixed(0)}` : "0"}</span>
                 </div>
                 <div className="telemetry-chip" title="Downlink Throughput">
                   <span className="lbl">Bitrate</span>
@@ -89,7 +109,7 @@ export default function ConsoleView({
                 </div>
               </div>
 
-              {/* 5. Independent Action Buttons */}
+              {/* 5. Independent Action Buttons & Direct Link to UE Console */}
               <div className="ue-action-buttons">
                 {isStreaming ? (
                   <button
@@ -98,7 +118,7 @@ export default function ConsoleView({
                     onClick={() => onStopClient(cl.id)}
                     title="Stop video downlink reception on this UE"
                   >
-                    ⏹ Stop Stream
+                    ⏹ Stop
                   </button>
                 ) : (
                   <button
@@ -107,17 +127,27 @@ export default function ConsoleView({
                     onClick={() => onStartClient(cl.id)}
                     title="Start video downlink reception on this UE"
                   >
-                    ▶ Start Stream
+                    ▶ Start
                   </button>
                 )}
+
+                <a
+                  href={consoleUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-console-link"
+                  title={`Open dedicated UE Console for ${cl.name}`}
+                >
+                  <span>UE Console ↗</span>
+                </a>
               </div>
             </div>
           );
         })}
 
         {clients.length === 0 && (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Waiting for 5G UE clients to connect...
+          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-dim)" }}>
+            No connected UEs yet. Deploy slice-3 UE pods; they register via heartbeat and list their console URL here.
           </div>
         )}
       </div>

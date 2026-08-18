@@ -68,13 +68,34 @@ pin_pdu_routes_once() {
   [ "$ok" -gt 0 ]
 }
 
+resolve_pdu_iface() {
+  local cand
+  if [ -n "$PDU_IFACE" ] && ip link show "$PDU_IFACE" >/dev/null 2>&1; then
+    return 0
+  fi
+  for cand in ${PDU_IFACE:-} oaitun_ue1 oaitun_ue2 oaitun_ue3 oaitun_ue4 oaitun_ue5; do
+    [ -z "$cand" ] && continue
+    if ip link show "$cand" >/dev/null 2>&1; then
+      PDU_IFACE="$cand"
+      log info "auto-selected PDU iface ${PDU_IFACE}"
+      return 0
+    fi
+  done
+  cand="$(ip -br link 2>/dev/null | awk '/^oaitun/{print $1; exit}' || true)"
+  if [ -n "$cand" ]; then
+    PDU_IFACE="$cand"
+    log info "auto-selected PDU iface ${PDU_IFACE}"
+    return 0
+  fi
+  return 1
+}
+
 setup_pdu_routes() {
-  [ -z "$PDU_IFACE" ] && return 0
   [ -z "$PDU_ROUTE_HOSTS" ] && return 0
   local elapsed=0
-  while ! ip link show "$PDU_IFACE" >/dev/null 2>&1; do
+  while ! resolve_pdu_iface; do
     if [ "$elapsed" -ge "$PDU_WAIT_TIMEOUT" ]; then
-      log warn "PDU iface ${PDU_IFACE} absent after ${PDU_WAIT_TIMEOUT}s; stream may not use the air interface"
+      log warn "no oaitun* PDU iface after ${PDU_WAIT_TIMEOUT}s; stream may not use the air interface"
       return 0
     fi
     sleep 2
@@ -83,7 +104,7 @@ setup_pdu_routes() {
   pin_pdu_routes_once && log info "pinned ${PDU_ROUTE_HOSTS} via ${PDU_IFACE}"
   (
     while true; do
-      ip link show "$PDU_IFACE" >/dev/null 2>&1 && pin_pdu_routes_once
+      resolve_pdu_iface && pin_pdu_routes_once
       sleep 10
     done
   ) &

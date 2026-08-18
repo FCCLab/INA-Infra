@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IoT Control · NeuroRAN</title>
+  <title>IoT · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -154,13 +155,14 @@
       background: rgba(22, 230, 160, 0.14);
     }
 
-    /* Container */
+    /* Container — full width of the app body (no 1080px cap) */
     main {
-      padding: 24px 28px 48px;
-      max-width: 1080px;
-      margin: 0 auto;
+      padding: 20px 28px 40px;
+      width: 100%;
+      max-width: none;
+      margin: 0;
       display: grid;
-      gap: 20px;
+      gap: 16px;
     }
 
     /* KPI Summary Strip */
@@ -168,6 +170,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
+      margin-bottom: 28px;
     }
 
     .kpi-card {
@@ -389,7 +392,8 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 16px;
+      margin-top: 4px;
+      margin-bottom: 20px;
       flex-wrap: wrap;
     }
 
@@ -456,41 +460,255 @@
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }
+
+/* CCTV-like left rail + tabs for HTML consoles */
+html, body { height: 100%; overflow: hidden; }
+.app {
+  display: flex;
+  align-items: stretch;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+.app-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.rail {
+  width: 92px;
+  flex: 0 0 92px;
+  height: 100vh;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  background: var(--surface);
+}
+.rail-brand {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.rail-logo { width: 56px; height: auto; display: block; }
+.rail-nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.rail-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 62px;
+  padding: 8px 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+.rail-tab-icon { display: grid; place-items: center; width: 22px; height: 22px; }
+.rail-tab-icon svg { width: 20px; height: 20px; }
+.rail-tab-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  line-height: 1.15;
+  text-align: center;
+}
+.rail-tab:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.rail-tab-active {
+  background: rgba(22, 230, 160, 0.10);
+  color: var(--accent);
+  border-color: rgba(22, 230, 160, 0.22);
+}
+.rail-tab-active .rail-tab-label { color: var(--accent); }
+.rail-tab-active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.rail-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+.rail-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rail-status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(22, 230, 160, 0.18);
+}
+.rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint); text-align: center; }
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: rgba(11, 17, 32, 0.82);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.crumb { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.site-badge {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: rgba(22, 230, 160, 0.12);
+  padding: 5px 11px; border-radius: 20px; white-space: nowrap;
+}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 20px 28px 40px;
+}
+.tab-panel { display: none; }
+.tab-panel.is-active { display: block; margin-bottom: 16px; }
+.docs-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin: 8px 0 0; }
+.docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.docs-table th, .docs-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.docs-table th { color: var(--text-faint); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.docs-badge-get { color: var(--accent); font-weight: 700; font-size: 11px; }
+.docs-badge-post { color: var(--accent2); font-weight: 700; font-size: 11px; }
+.docs-badge-put { color: var(--accent-orange); font-weight: 700; font-size: 11px; }
+.docs-badge-del { color: var(--bad); font-weight: 700; font-size: 11px; }
+
+    .ue-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+    .ue-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      cursor: pointer;
+    }
+    .ue-card:hover { border-color: var(--border-2); }
+    .topic-list { margin-top: 10px; display: grid; gap: 4px; }
+    .topic-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      padding: 4px 0;
+      border-top: 1px solid var(--border);
+    }
+    .topic-name { color: var(--accent2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .topic-freq { color: var(--accent); font-weight: 600; }
+    .topic-n { color: var(--text-faint); }
+    .topic-empty { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
+    .stats-ue {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      background: var(--surface);
+      margin-bottom: 10px;
+    }
+    .stats-ue:last-child { margin-bottom: 0; }
+    .ue-dash-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--accent); color: #04140e; font-weight: 700; font-size: 13px;
+      padding: 8px 14px; border-radius: 8px; text-decoration: none !important;
+    }
+    .ue-msg-row {
+      display: grid; grid-template-columns: 88px 120px 120px 1fr auto; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+    }
+    @media (max-width: 800px) { .ue-msg-row { grid-template-columns: 1fr; } }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+    .mqtt-feed {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      background: rgba(5, 8, 15, 0.85);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      max-height: min(56vh, 640px);
+      min-height: 280px;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .mqtt-row {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      border-left: 3px solid transparent;
+    }
+    .mqtt-row:last-child { border-bottom: 0; }
+    .mqtt-row.uplink { border-left-color: var(--accent2); }
+    .mqtt-row.downlink { border-left-color: var(--accent); }
+    .mqtt-row.other { border-left-color: var(--warn); }
+    .mqtt-meta { color: var(--text-faint); font-size: 11px; }
+    .mqtt-topic { color: var(--accent2); }
+    .mqtt-dir { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+    .mqtt-dir.uplink { color: var(--accent2); }
+    .mqtt-dir.downlink { color: var(--accent); }
+    .mqtt-payload { color: #cbd5e1; white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
+
   </style>
 </head>
 <body>
-  <!-- NeuroRAN Fixed Shell Header -->
-  <header>
-    <div class="brand-wrap">
-      <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="NeuroRAN">
-        <defs>
-          <linearGradient id="nr-grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#16E6A0" />
-            <stop offset="100%" stop-color="#00C2D4" />
-          </linearGradient>
-        </defs>
-        <g fill="none" stroke="url(#nr-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z" />
-          <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40" />
-        </g>
-        <g fill="url(#nr-grad)">
-          <circle cx="32" cy="28" r="4" />
-          <circle cx="14" cy="20" r="3" />
-          <circle cx="50" cy="20" r="3" />
-          <circle cx="32" cy="10" r="3" />
-          <circle cx="14" cy="40" r="3" />
-          <circle cx="50" cy="40" r="3" />
-          <circle cx="32" cy="50" r="3" />
-        </g>
-      </svg>
-      <div class="brand-text">
-        <div class="kicker">Slice 4 · Massive IoT & Sensor Gateway</div>
-        <h1>IoT Control Console <span class="badge">MQTT Broker</span></h1>
-      </div>
-    </div>
-
-    <div class="header-actions">
-      <div class="row" id="header-pills">
+<div class="app theme-dark">
+  <aside class="rail">
+    <div class="rail-brand" title="IoT Control · NeuroRAN"><img class="rail-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" /></div>
+    <nav class="rail-nav" aria-label="Main navigation">
+      <button type="button" class="rail-tab rail-tab-active" data-tab="overview" onclick="setConsoleTab('overview')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16"/><path d="M8 16v-5M12 16V8M16 16v-3" stroke-linecap="round"/></svg></span>
+        <span class="rail-tab-label">Overview</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="ues" onclick="setConsoleTab('ues')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M4 20c1.5-3 4-5 8-5s6.5 2 8 5"/></svg></span>
+        <span class="rail-tab-label">UEs</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="config" onclick="setConsoleTab('config')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="rail-tab-label">Config</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="publish" onclick="setConsoleTab('publish')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>
+        <span class="rail-tab-label">Publish</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="docs" onclick="setConsoleTab('docs')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="rail-tab-label">Docs</span>
+      </button>
+    </nav>
+    <div class="rail-foot"><div class="rail-status"><span class="rail-status-dot"></span><span class="rail-status-text">IoT</span></div></div>
+  </aside>
+  <div class="app-body">
+    <header class="topbar">
+      <div class="crumb" id="crumb">Broker overview · MQTT</div>
+      <span class="site-badge">INA · IoT Console</span>
+      <div class="topbar-right">
+        <div class="row" id="header-pills">
         <span class="pill"><span class="dot pulse"></span> connecting…</span>
       </div>
       <a class="ext-link" href="/api/docs" target="_blank" rel="noreferrer" title="Swagger REST API Reference">Swagger API</a>
@@ -498,31 +716,37 @@
         <span>Grafana</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
       </a>
-    </div>
-  </header>
-
-  <main>
-    <!-- KPI Summary Strip -->
+      </div>
+    </header>
+        <main class="dash">
+      <div class="tab-panel is-active" data-tab="overview">
     <div class="kpi-strip">
       <div class="kpi-card">
-        <div class="kpi-label">Broker Status <span class="dot" id="kpi-broker-dot"></span></div>
+        <div class="kpi-label">Broker <span class="dot" id="kpi-broker-dot"></span></div>
         <div class="kpi-value" id="kpi-broker">Checking…</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">OTA Downlink Period</div>
-        <div class="kpi-value mono" id="kpi-ota">Fast 300s / Slow 3600s</div>
+        <div class="kpi-label">MQTT subscribe <span class="dot" id="kpi-sub-dot"></span></div>
+        <div class="kpi-value" id="kpi-sub">—</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Payload & QoS</div>
-        <div class="kpi-value mono" id="kpi-qos">256 B · QoS 0</div>
+        <div class="kpi-label">Connected UEs <span class="dot" id="kpi-ue-dot"></span></div>
+        <div class="kpi-value" id="kpi-ues">—</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">N6 Multus Data Plane</div>
+        <div class="kpi-label">N6 broker</div>
         <div class="kpi-value mono" id="kpi-n6" style="font-size: 13px;">--</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Messages seen</div>
+        <div class="kpi-value mono" id="kpi-msg-count">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Avg effective freq</div>
+        <div class="kpi-value mono" id="kpi-avg-freq">—</div>
       </div>
     </div>
 
-    <!-- Live MQTT Endpoint Banner -->
     <div class="broker-banner">
       <div class="broker-url">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
@@ -534,7 +758,70 @@
       </div>
     </div>
 
-    <!-- Broker & OTA Timing Configuration -->
+    <div class="overview-grid">
+      <section class="card tier">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Connected UEs</h2>
+            <p class="card-subtitle">Slice-4 UEs on the 5G PDU. Click a card to configure publish messages.</p>
+          </div>
+          <button type="button" class="btn-secondary" id="refresh-ues">Refresh</button>
+        </div>
+        <div id="ue-ctrl-msg" class="msg-box"></div>
+        <div id="ue-list" class="ue-grid">Loading UEs…</div>
+      </section>
+      <section class="card tier">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Live MQTT</h2>
+            <p class="card-subtitle">Backend subscribed to <code>slice_d/#</code> on Mosquitto :1884.</p>
+          </div>
+          <span class="pill" id="mqtt-feed-pill">idle</span>
+        </div>
+        <div id="mqtt-feed" class="mqtt-feed">Waiting for messages…</div>
+      </section>
+      <section class="card tier">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">UE MQTT stats</h2>
+            <p class="card-subtitle">Per UE: topic count, topic list, and average effective frequency (last 30s).</p>
+          </div>
+        </div>
+        <div id="ue-stats-box">Waiting for MQTT…</div>
+      </section>
+    </div>
+      </div>
+            <div class="tab-panel" data-tab="ues">
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">UE publish configuration</h2>
+          <p class="card-subtitle">Select a connected UE, then set how many messages to publish and the frequency, period, and payload of each.</p>
+        </div>
+        <div class="row">
+          <button type="button" id="ue-toggle">▶ Start</button>
+          <a class="ue-dash-btn" id="ue-open" href="#" target="_blank" rel="noreferrer">Open UE dashboard</a>
+        </div>
+      </div>
+      <p class="card-subtitle" id="ue-detail-title">No UE selected.</p>
+      <div class="row" style="margin: 12px 0;">
+        <div>
+          <label>Number of messages</label>
+          <input id="ue-msg-count" type="number" min="1" max="20" value="3" style="width:140px;" />
+        </div>
+        <button type="button" class="btn-secondary" id="ue-reload-config">Reload</button>
+        <button type="button" id="ue-save-config">Save UE config</button>
+      </div>
+      <div id="ue-msg-list"></div>
+      <div class="msg-box" id="ue-cfg-msg"></div>
+      <h3 style="font-size:14px;margin:16px 0 8px;">Topic stats</h3>
+      <div id="ue-topic-stats" class="topic-empty">Select a UE.</div>
+      <h3 style="font-size:14px;margin:16px 0 8px;">Recent publishes</h3>
+      <pre id="ue-log">Select a UE.</pre>
+    </section>
+      </div>
+            <div class="tab-panel" data-tab="config">
+          <!-- Broker & OTA Timing Configuration -->
     <section class="card tier">
       <div class="card-header">
         <div>
@@ -554,6 +841,7 @@
       </div>
 
       <div class="row" style="margin-top: 16px;">
+        <button type="button" class="btn-secondary" id="reload-config">Reload running config</button>
         <button type="button" id="save-config">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           Apply Config & Roll Pod
@@ -567,7 +855,19 @@
       <div class="msg-box" id="cfg-msg"></div>
     </section>
 
-    <!-- Downlink Message Publisher Test Studio -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Prometheus metrics</h2>
+          <p class="card-subtitle">Scraped from the IoT controller on <code>127.0.0.1:9105/metrics</code>.</p>
+        </div>
+        <button type="button" class="btn-secondary" id="manual-refresh" style="padding: 4px 10px; font-size: 11px;">Refresh</button>
+      </div>
+      <pre id="metrics-box">Connecting to local metrics endpoint…</pre>
+    </section>
+      </div>
+            <div class="tab-panel" data-tab="publish">
+          <!-- Downlink Message Publisher Test Studio -->
     <section class="card tier">
       <div class="card-header">
         <div>
@@ -609,23 +909,31 @@
 
       <div class="msg-box" id="pub-msg"></div>
     </section>
-
-    <!-- Live Telemetry & Metrics Scraper -->
-    <section class="card tier">
-      <div class="card-header">
-        <div>
-          <h2 class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            Live Sensor Telemetry & MQTT Prometheus Metrics
-          </h2>
-          <p class="card-subtitle">Real-time statistics scraped from the IoT server on <code>127.0.0.1:9105/metrics</code>.</p>
-        </div>
-        <button type="button" class="btn-secondary" id="manual-refresh" style="padding: 4px 10px; font-size: 11px;">Refresh</button>
       </div>
-
-      <pre id="metrics-box">Connecting to local metrics endpoint…</pre>
-    </section>
-  </main>
+          <div class="tab-panel" data-tab="docs">
+        <section class="card tier">
+          <div class="card-header"><div>
+            <h2 class="card-title">IoT Control · Slice 4</h2>
+            <p class="card-subtitle">MQTT broker & OTA downlink</p>
+          </div></div>
+          <p class="docs-lead">This sidecar patches the IoT Deployment env and publishes test MQTT payloads. Interactive OpenAPI: <a href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</p>
+          <table class="docs-table">
+            <thead><tr><th>Method</th><th>Endpoint</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/status</code></td><td>JSON</td><td>Broker live, N6 IP, config, Prometheus scrape</td></tr>
+              <tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/stats</code></td><td>JSON</td><td>Per-UE topic count, topic list, avg_freq_hz</td></tr>
+              <tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/ues/{idx}/control</code></td><td>JSON</td><td>Start or stop UE MQTT publish</td></tr>
+              <tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/ues/{idx}/config</code></td><td>JSON</td><td>Set UE messages (frequency_hz, payload)</td></tr>
+              <tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/config</code></td><td>JSON</td><td>Apply DL period / payload / QoS and roll pod</td></tr>
+              <tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/restart</code></td><td>JSON</td><td>Restart broker process</td></tr>
+              <tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/mqtt/publish</code></td><td>JSON</td><td>Publish a downlink test message</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -645,6 +953,61 @@
       el.textContent = text;
       setTimeout(() => { el.className = 'msg-box'; }, 6000);
     }
+    function esc(s) { return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    function fmtHz(hz) {
+      const n = Number(hz) || 0;
+      if (n >= 1) return n.toFixed(2) + " Hz";
+      if (n >= 0.01) return n.toFixed(3) + " Hz";
+      return n.toFixed(4) + " Hz";
+    }
+    function topicHz(t) {
+      const avg = Number(t && t.avg_freq_hz);
+      if (avg > 0) return avg;
+      return Number(t && t.freq_hz) || 0;
+    }
+    function statsAvgHz(stats) {
+      if (!stats) return 0;
+      const ul = Number(stats.ul_avg_freq_hz);
+      if (ul > 0) return ul;
+      const all = Number(stats.avg_freq_hz);
+      if (all > 0) return all;
+      return ((stats.topics || []).reduce((s, t) => s + topicHz(t), 0));
+    }
+    function configuredHz(messages) {
+      return (messages || []).reduce((s, m) => s + (parseFloat(m && m.frequency_hz) || 0), 0);
+    }
+    function topicStatsHtml(topics) {
+      const rows = topics || [];
+      if (!rows.length) return `<div class="topic-empty">No topics received yet</div>`;
+      return `<div class="topic-list">${rows.map(t => `
+        <div class="topic-row">
+          <span class="topic-name" title="${esc(t.topic)}">${esc(t.topic)}</span>
+          <span class="topic-freq">${fmtHz(topicHz(t))}</span>
+          <span class="topic-n">${t.count || 0} rx</span>
+        </div>`).join("")}</div>`;
+    }
+    function renderUeStatsBox(ues) {
+      const box = $("ue-stats-box");
+      if (!box) return;
+      const list = ues || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="topic-empty">No UE topic stats yet. Waiting for MQTT.</div>`;
+        return;
+      }
+      box.innerHTML = list.map(u => {
+        const topics = u.topics || (u.stats && u.stats.topics) || [];
+        const n = u.topic_count != null ? u.topic_count : (u.stats && u.stats.topic_count) || topics.length;
+        const name = u.ue || ("UE " + (u.client_index || ""));
+        const avg = statsAvgHz(u.stats || u);
+        return `<div class="stats-ue">
+          <div class="row" style="justify-content:space-between;">
+            <strong>${esc(name)}</strong>
+            <span class="pill mono">${n} topic${n === 1 ? "" : "s"} · ${fmtHz(avg)} avg</span>
+          </div>
+          ${topicStatsHtml(topics)}
+        </div>`;
+      }).join("");
+    }
 
     async function refreshStatus() {
       try {
@@ -658,17 +1021,24 @@
           (s.n6_ip ? `<span class="pill mono">N6 ${s.n6_ip}</span>` : "");
 
         // KPI Strip
-        $("kpi-broker").textContent = s.metrics_live ? "Active · Port 1883" : "Initializing…";
+        $("kpi-broker").textContent = s.metrics_live ? "Active · :1883" : "Initializing…";
         $("kpi-broker-dot").className = `dot ${s.metrics_live ? "ok pulse" : "bad"}`;
 
-        if (s.config) {
+        const sub = s.mqtt_sub || {};
+        const subOk = !!sub.connected && !!sub.subscribed;
+        if ($("kpi-sub")) $("kpi-sub").textContent = subOk ? `slice_d/#` : (sub.error || "connecting…");
+        if ($("kpi-sub-dot")) $("kpi-sub-dot").className = `dot ${subOk ? "ok pulse" : "bad"}`;
+        if ($("kpi-msg-count")) $("kpi-msg-count").textContent = String(s.mqtt_count || sub.count || 0);
+        if ($("mqtt-feed-pill")) {
+          $("mqtt-feed-pill").className = `pill ${subOk ? "ok" : "bad"}`;
+          $("mqtt-feed-pill").textContent = subOk ? "subscribed" : "offline";
+        }
+
+        if (s.config && !window.__brokerCfgLoaded) {
           KEYS.forEach((k) => {
-            if (s.config[k] != null && !document.activeElement.id.includes(k)) {
-              $(k).value = s.config[k];
-            }
+            if (s.config[k] != null && $(k)) $(k).value = s.config[k];
           });
-          $("kpi-ota").textContent = `Fast ${s.config.DL_FAST_PERIOD_S || "300"}s / Slow ${s.config.DL_SLOW_PERIOD_S || "3600"}s`;
-          $("kpi-qos").textContent = `${s.config.DL_PAYLOAD_BYTES || "256"} B · QoS ${s.config.MQTT_QOS || "0"}`;
+          window.__brokerCfgLoaded = true;
         }
 
         if (s.n6_ip) {
@@ -706,6 +1076,23 @@
       navigator.clipboard.writeText(cmd);
       showMsg("cfg-msg", `Copied subscriber command: ${cmd}`);
     };
+
+    if ($("reload-config")) {
+      $("reload-config").onclick = async () => {
+        try {
+          const s = await req("/api/status");
+          if (s.config) {
+            KEYS.forEach((k) => {
+              if (s.config[k] != null && $(k)) $(k).value = s.config[k];
+            });
+          }
+          window.__brokerCfgLoaded = true;
+          showMsg("cfg-msg", "Loaded running broker config.");
+        } catch (e) {
+          showMsg("cfg-msg", e.message, true);
+        }
+      };
+    }
 
     // Save configuration
     $("save-config").onclick = async () => {
@@ -772,8 +1159,300 @@
 
     $("manual-refresh").onclick = refreshStatus;
 
+    let selectedUe = null;
+    let lastUeData = { ues: [] };
+    function isUeRunning(st) {
+      const v = st && st.send_enabled;
+      return v === true || v === "true" || v === 1 || v === "1";
+    }
+    function paintToggle(btn, running) {
+      if (!btn) return;
+      if (running) {
+        btn.className = "danger ue-ctrl-btn";
+        btn.setAttribute("data-action", "stop");
+        btn.textContent = "⏹ Stop";
+      } else {
+        btn.className = "ue-ctrl-btn";
+        btn.setAttribute("data-action", "start");
+        btn.textContent = "▶ Start";
+      }
+    }
+    function msgFreqHz(m) {
+      const hz = parseFloat(m && m.frequency_hz);
+      if (hz > 0) return Math.round(hz * 1e6) / 1e6;
+      const p = parseFloat(m && m.period_s);
+      if (p > 0) return Math.round((1 / p) * 1e6) / 1e6;
+      return 0.2;
+    }
+    function msgPeriodS(m) {
+      const p = parseFloat(m && m.period_s);
+      if (p > 0) return Math.round(p * 1e4) / 1e4;
+      const hz = parseFloat(m && m.frequency_hz);
+      if (hz > 0) return Math.round((1 / hz) * 1e4) / 1e4;
+      return 5;
+    }
+    function defaultUeMsg(i) { return { id: `msg-${i}`, frequency_hz: 0.2, period_s: 5, payload: `{"sensor":${i}}` }; }
+    function readUeFormMessages() {
+      return [...document.querySelectorAll("#ue-msg-list .ue-msg-row")].map((row, i) => {
+        const hz = parseFloat(row.querySelector("[data-f=freq]").value) || 0.2;
+        const periodEl = row.querySelector("[data-f=period]");
+        const period = periodEl ? (parseFloat(periodEl.value) || (1 / hz)) : (1 / hz);
+        return {
+          id: row.querySelector("[data-f=id]").value.trim() || `msg-${i + 1}`,
+          frequency_hz: hz,
+          period_s: period,
+          payload: row.querySelector("[data-f=payload]").value,
+        };
+      });
+    }
+    function bindUeFreqPeriod(row) {
+      const freq = row.querySelector("[data-f=freq]");
+      const period = row.querySelector("[data-f=period]");
+      if (!freq || !period) return;
+      freq.addEventListener("input", () => {
+        const hz = parseFloat(freq.value);
+        if (!(hz > 0)) return;
+        period.value = String(Math.round((1 / hz) * 1e4) / 1e4);
+      });
+      period.addEventListener("input", () => {
+        const p = parseFloat(period.value);
+        if (!(p > 0)) return;
+        freq.value = String(Math.round((1 / p) * 1e6) / 1e6);
+      });
+    }
+    function renderUeMessageForm(items) {
+      const box = $("ue-msg-list");
+      if (!box) return;
+      const msgs = items && items.length ? items : [defaultUeMsg(1)];
+      if ($("ue-msg-count")) $("ue-msg-count").value = String(msgs.length);
+      box.innerHTML = msgs.map((m, i) => `
+        <div class="ue-msg-row">
+          <div><label>ID</label><input data-f="id" value="${(m.id || `msg-${i + 1}`).replace(/"/g, "&quot;")}" /></div>
+          <div><label>Freq (Hz)</label><input data-f="freq" type="number" min="0.01" max="5" step="0.01" value="${msgFreqHz(m)}" /></div>
+          <div><label>Period (s)</label><input data-f="period" type="number" min="0.2" max="100" step="0.1" value="${msgPeriodS(m)}" /></div>
+          <div><label>Payload</label><textarea data-f="payload">${(m.payload || "").replace(/</g, "&lt;")}</textarea></div>
+          <div style="padding-top:22px;"><button type="button" class="btn-secondary" data-remove="${i}">Remove</button></div>
+        </div>`).join("");
+      box.querySelectorAll(".ue-msg-row").forEach(bindUeFreqPeriod);
+      box.querySelectorAll("[data-remove]").forEach(btn => {
+        btn.onclick = () => {
+          const next = readUeFormMessages();
+          next.splice(parseInt(btn.getAttribute("data-remove"), 10), 1);
+          renderUeMessageForm(next.length ? next : [defaultUeMsg(1)]);
+        };
+      });
+    }
+    async function controlUe(idx, start) {
+      try {
+        await req(`/api/ues/${idx}/control`, { method: "POST", body: JSON.stringify({ send_enabled: start }) });
+        showMsg("ue-ctrl-msg", start ? `UE ${idx} publishing.` : `UE ${idx} stopped.`);
+        refreshUes();
+      } catch (e) {
+        showMsg("ue-ctrl-msg", e.message, true);
+        refreshUes();
+      }
+    }
+    async function loadUeDetail(opts) {
+      if (selectedUe == null) return;
+      const loadForm = !!(opts && opts.form);
+      try {
+        const s = await req(`/api/ues/${selectedUe}/status`);
+        $("ue-detail-title").textContent = `${s.ue || "UE " + selectedUe} · ${s.ul_topic || ""}`;
+        $("ue-open").href = `/ue/${selectedUe}/`;
+        paintToggle($("ue-toggle"), isUeRunning(s));
+        if (loadForm) renderUeMessageForm(s.messages || []);
+        const log = await req(`/api/ues/${selectedUe}/exchanges?limit=12`);
+        const items = log.items || [];
+        $("ue-log").textContent = items.length
+          ? items.map(e => `${e.ts || ""} ${e.direction || ""} ${e.msg_id || ""} ${e.ok ? "ok" : "err"} ${e.bytes || 0}B`).join("\n")
+          : "No publishes yet.";
+        const statsBox = $("ue-topic-stats");
+        if (statsBox) {
+          let topics = (s.stats && s.stats.topics) || [];
+          let avgSrc = s.stats || {};
+          try {
+            const st = await req(`/api/ues/${selectedUe}/stats`);
+            const broker = (st.broker && st.broker.topics) || [];
+            if (broker.length) topics = broker;
+            avgSrc = st.broker || st.ue || s.stats || {};
+          } catch (_e) {}
+          statsBox.innerHTML = `<div class="mono" style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">${topics.length} topic${topics.length === 1 ? "" : "s"} · ${fmtHz(statsAvgHz(avgSrc))} avg</div>` + topicStatsHtml(topics);
+        }
+      } catch (e) {
+        $("ue-detail-title").textContent = e.message;
+      }
+    }
+    function renderUes(data) {
+      lastUeData = data || { ues: [] };
+      const ues = lastUeData.ues || [];
+      if (!ues.length) {
+        if ($("kpi-ues")) $("kpi-ues").textContent = "0";
+        if ($("kpi-ue-dot")) $("kpi-ue-dot").className = "dot bad";
+        $("ue-list").textContent = "No slice-4 UEs found. Deploy IoT UE clients (PL Deploy).";
+        return;
+      }
+      const nOk = ues.filter(u => u.connected).length;
+      if ($("kpi-ues")) $("kpi-ues").textContent = `${nOk}/${ues.length}`;
+      if ($("kpi-ue-dot")) $("kpi-ue-dot").className = `dot ${nOk ? "ok pulse" : "bad"}`;
+      $("ue-list").innerHTML = ues.map(u => {
+        const st = u.status || {};
+        const running = isUeRunning(st);
+        const dash = u.dashboard_url || u.console_url || "";
+        const ctrlBtn = running
+          ? `<button type="button" class="danger ue-ctrl-btn" data-ue-ctrl="${u.client_index}" data-action="stop">⏹ Stop</button>`
+          : `<button type="button" class="ue-ctrl-btn" data-ue-ctrl="${u.client_index}" data-action="start">▶ Start</button>`;
+        const nmsg = (st.messages || []).length || st.message_count || "—";
+        const stats = u.stats || st.stats || {};
+        const topics = stats.topics || [];
+        const ntopics = stats.topic_count != null ? stats.topic_count : topics.length;
+        const avg = statsAvgHz(stats);
+        const cfg = configuredHz(st.messages || []);
+        const freqLabel = cfg
+          ? `${fmtHz(avg)} avg / ${fmtHz(cfg)} cfg`
+          : `${fmtHz(avg)} avg`;
+        return `<div class="ue-card" data-ue="${u.client_index}">
+          <div class="row" style="justify-content:space-between;">
+            <strong>UE ${u.client_index}</strong>
+            <span class="pill ${running ? "ok" : "bad"}">${u.connected ? (running ? "publishing" : "stopped") : (u.pod_phase || "down")}</span>
+          </div>
+          <div class="mono" style="font-size:12px;color:var(--text-dim);margin-top:6px;">${u.name}</div>
+          <div class="mono" style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+            ${u.console_ip || "—"} · ${nmsg} msgs · ${ntopics} topic${ntopics === 1 ? "" : "s"} · ${freqLabel}
+          </div>
+          ${topicStatsHtml(topics)}
+          <div class="row" style="margin-top:10px;">
+            ${ctrlBtn}
+            <button type="button" class="btn-secondary" data-ue-cfg="${u.client_index}">Configure</button>
+            <a class="ue-dash-btn" href="${dash}" target="_blank" rel="noreferrer">Open UE dashboard</a>
+          </div>
+        </div>`;
+      }).join("");
+      $("ue-list").querySelectorAll("[data-ue]").forEach(el => {
+        el.onclick = (ev) => {
+          if (ev.target.closest("a") || ev.target.closest("button")) return;
+          openUeConfig(parseInt(el.getAttribute("data-ue"), 10));
+        };
+      });
+      $("ue-list").querySelectorAll("[data-ue-cfg]").forEach(btn => {
+        btn.onclick = (ev) => {
+          ev.stopPropagation();
+          openUeConfig(parseInt(btn.getAttribute("data-ue-cfg"), 10));
+        };
+      });
+      $("ue-list").querySelectorAll("[data-ue-ctrl]").forEach(btn => {
+        btn.onclick = (ev) => {
+          ev.stopPropagation();
+          const idx = parseInt(btn.getAttribute("data-ue-ctrl"), 10);
+          const start = btn.getAttribute("data-action") === "start";
+          paintToggle(btn, start);
+          controlUe(idx, start);
+        };
+      });
+      if (selectedUe == null && ues.length) selectedUe = ues[0].client_index;
+    }
+    function openUeConfig(idx) {
+      selectedUe = idx;
+      const st = ((lastUeData.ues || []).find(u => u.client_index === selectedUe) || {}).status || {};
+      paintToggle($("ue-toggle"), isUeRunning(st));
+      setConsoleTab("ues");
+      loadUeDetail({ form: true });
+    }
+    async function refreshUes() {
+      try {
+        const data = await req("/api/ues");
+        renderUes(data);
+        renderUeStatsBox((data.ues || []).map(u => Object.assign({ client_index: u.client_index, ue: "ue" + u.client_index }, u.stats || {})));
+        if ($("kpi-avg-freq")) {
+          const avg = (data.ues || []).reduce((s, u) => s + statsAvgHz(u.stats || {}), 0);
+          $("kpi-avg-freq").textContent = fmtHz(avg);
+        }
+        if (selectedUe != null) loadUeDetail();
+      } catch (e) {
+        if ($("kpi-ues")) $("kpi-ues").textContent = "—";
+        $("ue-list").textContent = e.message;
+      }
+    }
+    if ($("refresh-ues")) $("refresh-ues").onclick = refreshUes;
+    if ($("ue-msg-count")) $("ue-msg-count").onchange = () => {
+      const n = Math.max(1, Math.min(20, parseInt($("ue-msg-count").value, 10) || 1));
+      const cur = readUeFormMessages();
+      while (cur.length < n) cur.push(defaultUeMsg(cur.length + 1));
+      renderUeMessageForm(cur.slice(0, n));
+    };
+    if ($("ue-reload-config")) $("ue-reload-config").onclick = () => {
+      if (selectedUe == null) { showMsg("ue-cfg-msg", "Select a UE first.", true); return; }
+      loadUeDetail({ form: true }).then(() => showMsg("ue-cfg-msg", `Loaded running config for UE ${selectedUe}.`));
+    };
+    if ($("ue-save-config")) $("ue-save-config").onclick = async () => {
+      if (selectedUe == null) { showMsg("ue-cfg-msg", "Select a UE first.", true); return; }
+      try {
+        const msgs = readUeFormMessages();
+        await req(`/api/ues/${selectedUe}/config`, { method: "POST", body: JSON.stringify({ messages: msgs }) });
+        showMsg("ue-cfg-msg", `Saved ${msgs.length} message(s) on UE ${selectedUe}.`);
+      } catch (e) {
+        showMsg("ue-cfg-msg", e.message, true);
+      }
+    };
+    if ($("ue-toggle")) $("ue-toggle").onclick = () => {
+      if (selectedUe == null) return;
+      const start = $("ue-toggle").getAttribute("data-action") !== "stop";
+      paintToggle($("ue-toggle"), start);
+      controlUe(selectedUe, start);
+    };
+
+    async function refreshMessages() {
+      const box = $("mqtt-feed");
+      if (!box) return;
+      try {
+        const data = await req("/api/messages?limit=60");
+        const items = data.items || [];
+        const sub = data.subscriber || {};
+        if ($("kpi-msg-count")) $("kpi-msg-count").textContent = String((sub.count != null ? sub.count : items.length));
+        if ($("mqtt-feed-pill")) {
+          const ok = !!sub.connected && !!sub.subscribed;
+          $("mqtt-feed-pill").className = `pill ${ok ? "ok" : "bad"}`;
+          $("mqtt-feed-pill").textContent = ok ? "subscribed" : (sub.error || "offline");
+        }
+        if (!items.length) {
+          box.textContent = sub.connected ? "Subscribed. Waiting for MQTT traffic…" : (sub.error || "Connecting to Mosquitto…");
+          try {
+            const st = await req("/api/stats");
+            renderUeStatsBox(st.ues || []);
+          } catch (_e) {}
+          return;
+        }
+        box.innerHTML = items.map(e => {
+          const dir = e.direction || "other";
+          const body = typeof e.payload === "string" ? e.payload : JSON.stringify(e.payload);
+          return `<div class="mqtt-row ${esc(dir)}">
+            <div class="mqtt-meta">${esc(e.ts)} · <span class="mqtt-dir ${esc(dir)}">${esc(dir)}</span> · ${e.bytes || 0} B</div>
+            <div class="mqtt-topic">${esc(e.topic)}</div>
+            <div class="mqtt-payload">${esc(body).slice(0, 500)}</div>
+          </div>`;
+        }).join("");
+        try {
+          const st = await req("/api/stats");
+          renderUeStatsBox(st.ues || []);
+        } catch (_e) {}
+      } catch (e) {
+        box.textContent = e.message;
+      }
+    }
+
+    const CONSOLE_CRUMBS = {"overview": "Live MQTT · connected UEs", "ues": "Connected UEs · publish config", "config": "MQTT & OTA scheduling", "publish": "Publish downlink test", "docs": "Documentation & REST Reference"};
+    function setConsoleTab(id) {
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.tab === id));
+      document.querySelectorAll(".rail-tab").forEach((b) => b.classList.toggle("rail-tab-active", b.dataset.tab === id));
+      const crumb = document.getElementById("crumb");
+      if (crumb) crumb.textContent = CONSOLE_CRUMBS[id] || id;
+    }
+    setConsoleTab("overview");
     refreshStatus();
+    refreshUes();
+    refreshMessages();
     setInterval(refreshStatus, 5000);
+    setInterval(refreshUes, 8000);
+    setInterval(refreshMessages, 1500);
   </script>
 </body>
 </html>

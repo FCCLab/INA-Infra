@@ -93,9 +93,29 @@ stringData:
 EOF
 }
 
+# Preserve bound volumeName from previous GitOps YAML (avoids KNV2009 on re-render).
+_preserve_pvc_volume_name() {
+  local new_file="$1"
+  local old_file="${2:-}"
+  [[ -n "$old_file" && -f "$old_file" ]] || return 0
+  local vn
+  vn="$(awk '/^[[:space:]]*volumeName:/{print $2; exit}' "$old_file")"
+  [[ -n "$vn" ]] || return 0
+  if grep -q '^[[:space:]]*volumeName:' "$new_file"; then
+    sed -i "s|^[[:space:]]*volumeName:.*|  volumeName: ${vn}|" "$new_file"
+  else
+    sed -i "/^[[:space:]]*storageClassName:/a\\  volumeName: ${vn}" "$new_file"
+  fi
+}
+
 write_pvc() {
   local dir="$1"
-  cat >"${dir}/persistentvolumeclaim-${DDNS_NAME}-bind.yaml" <<EOF
+  # Bound local-path PVCs get volumeName set by the provisioner; Config Sync must
+  # not try to clear it (KNV2009). Mutation-ignore stops post-create updates.
+  local pvc_bind="${dir}/persistentvolumeclaim-${DDNS_NAME}-bind.yaml"
+  local pvc_bind_old=""
+  [[ -f "$pvc_bind" ]] && pvc_bind_old="$(mktemp)" && cp "$pvc_bind" "$pvc_bind_old"
+  cat >"${pvc_bind}" <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -103,6 +123,8 @@ metadata:
   namespace: ${DDNS_NS}
   labels:
     app.kubernetes.io/name: ${DDNS_NAME}
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
 spec:
   accessModes:
     - ReadWriteOnce
@@ -111,7 +133,12 @@ spec:
     requests:
       storage: ${DDNS_PVC_SIZE}
 EOF
-  cat >"${dir}/persistentvolumeclaim-${DDNS_NAME}-db.yaml" <<EOF
+  _preserve_pvc_volume_name "$pvc_bind" "${pvc_bind_old:-}"
+  [[ -n "${pvc_bind_old:-}" ]] && rm -f "$pvc_bind_old"
+  local pvc_db="${dir}/persistentvolumeclaim-${DDNS_NAME}-db.yaml"
+  local pvc_db_old=""
+  [[ -f "$pvc_db" ]] && pvc_db_old="$(mktemp)" && cp "$pvc_db" "$pvc_db_old"
+  cat >"${pvc_db}" <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -119,6 +146,8 @@ metadata:
   namespace: ${DDNS_NS}
   labels:
     app.kubernetes.io/name: ${DDNS_NAME}
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
 spec:
   accessModes:
     - ReadWriteOnce
@@ -127,6 +156,8 @@ spec:
     requests:
       storage: ${DDNS_PVC_SIZE}
 EOF
+  _preserve_pvc_volume_name "$pvc_db" "${pvc_db_old:-}"
+  [[ -n "${pvc_db_old:-}" ]] && rm -f "$pvc_db_old"
 }
 
 write_deployment() {

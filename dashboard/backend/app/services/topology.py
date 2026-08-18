@@ -145,6 +145,7 @@ def build_topology() -> Dict[str, Any]:
                     "pods_running": int(s.get("pods_running") or 0),
                     "latency_ms": s.get("latency_ms"),
                     "error": s.get("error"),
+                    "config_sync": s.get("config_sync") or {},
                     "header_h": _HEADER_H,
                 },
             }

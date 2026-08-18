@@ -18,7 +18,7 @@ from app.schemas import (
     SliceApplicationConfig,
     SliceIn,
 )
-from app.services import ip_allocator, pl_solver
+from app.services import app_images, ip_allocator, pl_solver
 
 
 def _default_db_path() -> Path:
@@ -98,108 +98,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
 def default_applications(
     slices: Optional[List[SliceIn]] = None,
 ) -> Dict[str, SliceApplicationConfig]:
-    """Provide default application configs for slices (CCTV, Physical AI, OTT, IoT)."""
-    sl = slices if slices is not None else pl_solver.default_slices()
-    apps: Dict[str, SliceApplicationConfig] = {}
-    preset_configs: Dict[int, SliceApplicationConfig] = {
-        1: SliceApplicationConfig(
-            slice_id=1,
-            app_type="cctv",
-            name="CCTV Vision Streaming",
-            enabled=True,
-            target_cluster="auto",
-            server_image="10.1.132.30:5000/slicea-analyzer:nws-v0.7-amd64",
-            client_image="10.1.132.30:5000/slicea-publisher:nws-v0.6-amd64",
-            server_port=8554,
-            metrics_port=9102,
-            params={
-                "stream_path": "slicea",
-                "yolo_model": "yolov8n.pt",
-                "yolo_device": "cpu",
-                "frame_skip": 1,
-                "fps": 25,
-                "bitrate_kbps": 4000,
-                "rtsp_protocol": "tcp",
-                "client_count": 1,
-            },
-        ),
-        2: SliceApplicationConfig(
-            slice_id=2,
-            app_type="physical_ai",
-            name="Physical AI (Cosmos3 VLM)",
-            enabled=True,
-            target_cluster="edge",
-            server_image="10.1.132.30:5000/cosmo3-vllm:nws-v0.7",
-            client_image="10.1.132.30:5000/cosmo3-aiperf:nws-v0.7-amd64",
-            server_port=8000,
-            metrics_port=8002,
-            params={
-                "model": "nvidia/Cosmos3-Nano",
-                "tensor_parallel_size": 1,
-                "max_model_len": 4096,
-                "gpu_arch": "auto",
-                "request_rate": 10,
-                "client_count": 1,
-            },
-        ),
-        3: SliceApplicationConfig(
-            slice_id=3,
-            app_type="ott",
-            name="OTT HD Video Streaming",
-            enabled=True,
-            target_cluster="auto",
-            server_image="10.1.132.30:5000/hd-stream-server:hdstream-v2",
-            client_image="10.1.132.30:5000/hd-stream-client:hdstream-v2",
-            server_port=8554,
-            metrics_port=9103,
-            params={
-                "stream_protocol": "rtsp",
-                "stream_path": "live/hd",
-                "bitrate_kbps": 6000,
-                "resolution": "1080p",
-                "client_count": 1,
-            },
-        ),
-        4: SliceApplicationConfig(
-            slice_id=4,
-            app_type="iot",
-            name="Background IoT (MQTT)",
-            enabled=True,
-            target_cluster="auto",
-            server_image="10.1.132.30:5000/sliced-edge:nws-v0.5-amd64",
-            client_image="10.1.132.30:5000/sliced-client:nws-v0.5-amd64",
-            server_port=1883,
-            metrics_port=9105,
-            params={
-                "num_devices": 5,
-                "fast_period_s": 60,
-                "med_period_s": 1800,
-                "slow_period_s": 3600,
-                "dl_fast_period_s": 300,
-                "dl_slow_period_s": 3600,
-                "mqtt_qos": 0,
-                "client_count": 1,
-            },
-        ),
-    }
-    for s in sl:
-        sid = s.id
-        if sid in preset_configs:
-            apps[str(sid)] = preset_configs[sid].model_copy()
-        else:
-            apps[str(sid)] = SliceApplicationConfig(
-                slice_id=sid,
-                app_type="none",
-                name=f"Slice {sid} Workload",
-                enabled=False,
-                target_cluster="auto",
-                server_image="",
-                client_image="",
-                server_port=8080,
-                metrics_port=9100 + sid,
-                params={},
-            )
-    return apps
+    """Provide current application configs for slices (CCTV, Physical AI, OTT, IoT)."""
+    return app_images.default_applications(slices)
 
 
 def _parse_applications(
@@ -220,7 +120,9 @@ def _parse_applications(
     out: Dict[str, SliceApplicationConfig] = {}
     for k, v in data.items():
         try:
-            out[str(k)] = SliceApplicationConfig.model_validate(v)
+            out[str(k)] = app_images.canonicalize_config(
+                SliceApplicationConfig.model_validate(v)
+            )
         except Exception:
             continue
     for k, v in defaults.items():
@@ -451,6 +353,9 @@ def _upsert_conn(conn: sqlite3.Connection, rec: ProfileRecord) -> None:
     now = datetime.now(timezone.utc).isoformat()
     network = rec.network or pl_solver.default_network_in()
     applications = rec.applications or default_applications(rec.slices)
+    applications = {
+        k: app_images.canonicalize_config(v) for k, v in applications.items()
+    }
 
     existing = conn.execute(
         "SELECT * FROM profiles WHERE name = ?",

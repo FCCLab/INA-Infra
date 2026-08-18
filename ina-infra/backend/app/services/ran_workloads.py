@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 import yaml
 
 from app.schemas import IpPlan, PlacementOut, PlSolveResponse, Profile, SliceIps
+from app.services import site_ips
 from app.services.multus_iface import detect_cluster_master, detect_host_master, scheduling_node_selector
 
 SITE_TO_CLUSTER = {0: "edge", 1: "regional", 2: "central"}
@@ -40,14 +41,23 @@ def _dump(doc: dict) -> str:
     return yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
 
 
-def _networks_annot(entries: Sequence[tuple[str, str, str]], gw: str, plen: int) -> str:
-    parts = [
-        (
+def _networks_annot(entries: Sequence[tuple], gw: str, plen: int) -> str:
+    """Multus annotation. Tuple is (nad, iface, ip[, mac[, use_gateway[, gateway]]])."""
+    parts = []
+    for item in entries:
+        name, iface, ip = item[0], item[1], item[2]
+        mac = item[3] if len(item) > 3 else None
+        use_gw = item[4] if len(item) > 4 else True
+        entry_gw = item[5] if len(item) > 5 else gw
+        extra = ""
+        if use_gw and entry_gw:
+            extra += f', "gateways": ["{entry_gw}"]'
+        if mac:
+            extra += f', "mac": "{mac}"'
+        parts.append(
             f'{{"name": "{name}", "interface": "{iface}", '
-            f'"ips": ["{ip}/{plen}"], "gateways": ["{gw}"]}}'
+            f'"ips": ["{ip}/{plen}"]{extra}}}'
         )
-        for name, iface, ip in entries
-    ]
     return "[" + ", ".join(parts) + "]"
 
 
@@ -880,6 +890,9 @@ def generate_ue_manifests(
     client_containers: Optional[List[dict]] = None,
     client_volumes: Optional[List[dict]] = None,
     client_index: int = 1,
+    console_ip: Optional[str] = None,
+    console_mac: Optional[str] = None,
+    console_port: int = site_ips.UE_CONSOLE_PORT,
 ) -> List[dict]:
     """Generate on-demand UE manifests for direct Kubernetes deployment via API."""
     n = sl.n
@@ -890,6 +903,7 @@ def generate_ue_manifests(
     sa_name = f"{ue_name}-sa"
     cm_name = f"{ue_name}-configmap"
     nad_name = f"ue-slice-{n}-client-{idx}-sim-rf"
+    console_nad_name = f"ue-slice-{n}-client-{idx}-console"
     ue_rf = _ue_rf_for_client(sl, idx)
     master = detect_host_master(ue_node)
 
@@ -954,6 +968,76 @@ def generate_ue_manifests(
         "data": {"ue.conf": _ue_conf(sl, shared.du_rf, client_index=idx)},
     }
 
+    docs: List[dict] = [nad_doc, sa_doc, cm_doc]
+    net_entries: List[tuple] = [(nad_name, "rf", ue_rf)]
+    extra_labels: Dict[str, str] = {}
+    if console_ip:
+        extra_labels["ina.lab/console-ip"] = console_ip
+        extra_labels["ina.lab/console-mac"] = (console_mac or "").replace(":", "-")
+        extra_labels["ina.lab/console-port"] = str(int(console_port))
+        docs.append(
+            {
+                "apiVersion": "k8s.cni.cncf.io/v1",
+                "kind": "NetworkAttachmentDefinition",
+                "metadata": {
+                    "name": console_nad_name,
+                    "namespace": namespace,
+                    "labels": {
+                        "app.kubernetes.io/part-of": "ina-infra",
+                        "ina.lab/role": "ue_console",
+                        "ina.lab/slice": str(n),
+                        "ina-infra.nephio.lab/multus-master": master,
+                    },
+                },
+                "spec": {
+                    "config": json.dumps(
+                        {
+                            "cniVersion": "0.3.1",
+                            "name": console_nad_name,
+                            "plugins": [
+                                {
+                                    "type": "macvlan",
+                                    "capabilities": {"ips": True, "mac": True},
+                                    "master": master,
+                                    "mode": "bridge",
+                                    "ipam": {
+                                        "type": "static",
+                                        "addresses": [
+                                            {
+                                                "address": f"{console_ip}/24",
+                                                "gateway": site_ips.SITE_GW,
+                                            }
+                                        ],
+                                    },
+                                },
+                                {
+                                    "type": "tuning",
+                                    "capabilities": {"mac": True},
+                                    "ipam": {},
+                                    "sysctl": {
+                                        "net.ipv4.conf.IFNAME.arp_ignore": "1",
+                                        "net.ipv4.conf.IFNAME.arp_announce": "2",
+                                    },
+                                },
+                            ],
+                        }
+                    )
+                },
+            }
+        )
+        # No CNI default on the main table (would steal the PDU route).
+        # Policy default via 10.1.137.1 is added in an initContainer.
+        net_entries.append(
+            (
+                console_nad_name,
+                "console",
+                console_ip,
+                console_mac or "",
+                False,
+                site_ips.SITE_GW,
+            )
+        )
+
     containers = [
         _bringup_order_sidecar(
             f"ue-{n}",
@@ -1010,6 +1094,7 @@ def generate_ue_manifests(
                 "slice": str(n),
                 "ina.lab/role": "client",
                 "ina.lab/slice": str(n),
+                **extra_labels,
             },
         },
         "spec": {
@@ -1026,10 +1111,11 @@ def generate_ue_manifests(
                         "slice": str(n),
                         "ina.lab/role": "client",
                         "ina.lab/slice": str(n),
+                        **extra_labels,
                     },
                     "annotations": {
                         "k8s.v1.cni.cncf.io/networks": _networks_annot(
-                            [(nad_name, "rf", ue_rf)],
+                            net_entries,
                             gw,
                             plen,
                         )
@@ -1042,14 +1128,43 @@ def generate_ue_manifests(
                         **ARCH_AMD64,
                         "kubernetes.io/hostname": ue_node,
                     },
-                    "initContainers": _ue_bringup_inits(shared),
+                    "initContainers": (
+                        list(_ue_bringup_inits(shared))
+                        + (
+                            [site_ips.multus_src_route_init(console_ip, "console")]
+                            if console_ip
+                            else []
+                        )
+                    ),
                     "containers": containers,
                     "volumes": volumes,
                 },
             },
         },
     }
-    return [nad_doc, sa_doc, cm_doc, deploy_doc]
+    svc_doc = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": ue_name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/name": ue_name,
+                "app.kubernetes.io/part-of": "ina-infra",
+                "ina.lab/role": "client",
+                "ina.lab/slice": str(n),
+                **extra_labels,
+            },
+        },
+        "spec": {
+            "selector": {"app.kubernetes.io/name": ue_name},
+            "ports": [
+                {"name": "console", "port": int(console_port), "targetPort": int(console_port)},
+                {"name": "backend", "port": 8090, "targetPort": 8090},
+            ],
+        },
+    }
+    return [*docs, deploy_doc, svc_doc] if console_ip else [*docs, deploy_doc]
 
 
 def _write_upf(

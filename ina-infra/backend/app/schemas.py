@@ -184,7 +184,10 @@ class SliceIps(BaseModel):
     cuup_n3: str
     ue_rf: str
     dnn_cidr: str
-    app_ip: str = ""
+    app_ip: str = Field(
+        default="",
+        description="Application N6 / console Multus IP on site L2 10.1.137 (not profile 10.1.140)",
+    )
     site_cu: str = ""
     site_upf: str = ""
     site_app: str = ""

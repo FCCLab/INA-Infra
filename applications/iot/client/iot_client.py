@@ -82,6 +82,7 @@ LOG_INTERVAL_S = _env_float("LOG_INTERVAL_S", 30)
 JITTER_FRAC = _env_float("JITTER_FRAC", 0.1)
 LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
 CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
+UE_ID = os.environ.get("APP_NAME") or os.environ.get("CLIENT_ID") or "iot-ue"
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -237,6 +238,9 @@ class IoTClient:
             tp_ul = ul_delta / elapsed if elapsed > 0 else 0.0
             tp_dl = dl_delta / elapsed if elapsed > 0 else 0.0
             avg_delay_ms = (sum(delays) / len(delays) * 1000) if delays else 0.0
+            tp_mbps = ((ul_delta + dl_delta) * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
+            metrics.set_ue_slo(UE_ID, avg_delay_ms, tp_mbps)
+            metrics.set_agg_slo(avg_delay_ms, tp_mbps)
             log.info(
                 "[slice-d client] up=%ds conn=%d tp_ul=%s tp_dl=%s "
                 "avg_dl_delay=%dms (n=%d) reconnects=%d",

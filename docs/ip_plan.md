@@ -60,6 +60,11 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.152` | `gh82` | regional cluster, GH200 arm64 |
 | `.153`–`.159` | — | Spare |
 | **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC on `central-0`; ina-infra UPF N6 dhclient |
+| **`.200`–`.209`** | **UE consoles (overflow)** | Slice 4 UEs 6–15. Skips `.255` broadcast. Allocator: `site_ips.ue_console_ip()`. |
+| `.210` | — | Spare (between overflow and application servers) |
+| **`.211`–`.214`** | **Application servers** | PL `app_ip` / N6 data + web consoles (`http://10.1.137.211/` … `.214/`, HTTP `:80`). Not on profile `10.1.140`. |
+| `.215`–`.219` | — | Spare |
+| **`.220`–`.254`** | **UE consoles** | Static Multus on `usrp`; 10 per slice: 1 `.220–.229`, 2 `.230–.239`, 3 `.240–.249`, 4 UEs 1–5 `.250–.254`. HTTP `:80`. **Not** `.255` (broadcast) or `.256+`. |
 
 ## `10.1.132.0/24` allocation (mgmt)
 
@@ -205,6 +210,22 @@ Bootstrap: [workloads/wl_setup_ssh_mgmt_ip.sh](../workloads/wl_setup_ssh_mgmt_ip
 | regional | `gh82` | 10.1.101.212 | `enP2s2f0np0` | `enP2s2f1np1` | 10.1.137.152 | [55-k8s.yaml](../workloads/netplan/gh82/55-k8s.yaml) |
 
 `usrp` site IP **`10.1.137.134`** is not hypervisor bridge **`10.1.137.13`** (`br-int-ue`). GPU workers use **`.150`–`.159`**, not bridge **`.10`–`.22`**.
+
+### UE consoles (`10.1.137.200–.209` and `.220–.254`)
+
+Code: [`ina-infra/backend/app/services/site_ips.py`](../ina-infra/backend/app/services/site_ips.py) `ue_console_ip(slice_id, client_index)`.
+
+Ten addresses per slice starting at `.220`. That layout does not fit slice 4 UEs 6+ on a `/24` (`.255` is broadcast; `.256` is not a host). Those UEs use the unused block after Glass DHCP instead.
+
+| Slice | UE index | Addresses | Example |
+|-------|----------|-----------|---------|
+| 1 | 1–10 | `.220`–`.229` | UE 1 `http://10.1.137.220/` |
+| 2 | 1–10 | `.230`–`.239` | UE 1 `http://10.1.137.230/` |
+| 3 | 1–10 | `.240`–`.249` | UE 1 `http://10.1.137.240/` |
+| 4 | 1–5 | `.250`–`.254` | UE 1 `http://10.1.137.250/` |
+| 4 | 6–15 | `.200`–`.209` | UE 6 `http://10.1.137.200/` |
+
+Do not assign `.255` (IPv4 broadcast; Glass DHCP `broadcast-address`). Slice 4 UE 16+ hits spare `.210` or application servers `.211`–`.214` — the allocator raises.
 
 ## SSH
 

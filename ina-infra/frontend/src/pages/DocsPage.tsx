@@ -1,5 +1,6 @@
 import Card from "../components/ui/Card";
 import SectionLabel from "../components/ui/SectionLabel";
+import { APPLICATION_CONSOLE_LIST } from "../lib/applicationConsoles";
 
 function DocTable({
   headers,
@@ -265,17 +266,19 @@ demand   = radio_mbps  →  fed to PM`}</Formula>
         </Card>
 
         <Card className="tier">
-          <h2 className="docs-h2">Applications · dashboards</h2>
+          <h2 className="docs-h2">Applications · consoles</h2>
           <p className="docs-lead">
-            Each slice app has a control UI (CCTV wall, Physical AI, OTT, IoT) plus Grafana metrics.
-            CCTV:{" "}
-            <a href="http://10.1.137.120:30080/" target="_blank" rel="noreferrer">10.1.137.120:30080</a>
-            . Physical AI:{" "}
-            <a href="http://10.1.137.133:30082/" target="_blank" rel="noreferrer">10.1.137.133:30082</a>
-            . OTT:{" "}
-            <a href="http://10.1.137.110:30083/" target="_blank" rel="noreferrer">10.1.137.110:30083</a>
-            . IoT:{" "}
-            <a href="http://10.1.137.110:30084/" target="_blank" rel="noreferrer">10.1.137.110:30084</a>
+            Each slice app has a control console (CCTV wall, Physical AI, OTT, IoT) plus a Grafana dashboard
+            on Multus <code>10.1.137.211–.214</code> (not NodePort).{" "}
+            {APPLICATION_CONSOLE_LIST.map((app, i) => (
+              <span key={app.id}>
+                {i > 0 ? ". " : ""}
+                {app.name}:{" "}
+                <a href={app.console.href} target="_blank" rel="noreferrer">
+                  {app.console.href.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                </a>
+              </span>
+            ))}
             . Grafana:{" "}
             <a href="http://10.1.137.105:3000/" target="_blank" rel="noreferrer">
               10.1.137.105:3000

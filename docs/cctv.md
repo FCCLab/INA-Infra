@@ -5,7 +5,7 @@ Vision streaming over 5G: UE **publishers** push RTSP RECORD to the analyzer; YO
 | | |
 |---|---|
 | Slice | 1 (eMBB / CCTV) |
-| Server cluster | **regional** (PL placement; Multus N6 `10.1.137.161`) |
+| Server cluster | **regional** (PL placement; Multus N6 `10.1.137.211`) |
 | Client UEs | **edge `usrp`**, on-demand K8s (applied via INA-Infra UI) |
 | Namespace | `ina-infra` |
 | Images | `10.1.132.30:5000/application-cctv:nws-v0.9-amd64`<br>`10.1.132.30:5000/application-cctv-frontend:nws-v0.9-amd64`<br>`10.1.132.30:5000/application-cctv-publisher:nws-v0.9-amd64`<br>`docker.io/bluenviron/mediamtx:1.12.2` |
@@ -14,8 +14,8 @@ Vision streaming over 5G: UE **publishers** push RTSP RECORD to the analyzer; YO
 
 | What | URL |
 |------|-----|
-| Video Wall Web Dashboard | [http://10.1.137.120:30080/](http://10.1.137.120:30080/) (NodePort 30080) |
-| Swagger API Docs | [http://10.1.137.120:30080/docs](http://10.1.137.120:30080/docs) |
+| Video Wall Web Dashboard | [http://10.1.137.211/](http://10.1.137.211/) (Multus, not NodePort) |
+| Swagger API Docs | [http://10.1.137.211/docs](http://10.1.137.211/docs) |
 | Grafana CCTV Dashboard | [http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s](http://10.1.137.105:3000/d/ffvbyfvl0i29sd/cctv-dashboard?orgId=1&refresh=2s) (`inainfra` / `inainfra`) — other apps: [influxdb-grafana.md](influxdb-grafana.md) |
 | InfluxDB | [http://10.1.137.104:8086](http://10.1.137.104:8086) — see [influxdb-grafana.md](influxdb-grafana.md) |
 
@@ -24,7 +24,7 @@ Vision streaming over 5G: UE **publishers** push RTSP RECORD to the analyzer; YO
 ```text
 [ UE Publisher (5G) ]
         │
-(RTSP RECORD :8554 on Multus 10.1.137.161)
+(RTSP RECORD :8554 on Multus 10.1.137.211)
         ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Pod: application-cctv (Regional Cluster)                               │
@@ -38,7 +38,7 @@ Vision streaming over 5G: UE **publishers** push RTSP RECORD to the analyzer; YO
 │ 2. [mediamtx]         MediaMTX Hub (RTSP :8555, HLS :8888, WHEP :8889) │
 │                             │ (HLS fMP4 stream to localhost:8888)      │
 │                             ▼                                          │
-│ 3. [frontend]         Nginx Web Server (:80 on NodePort 30080)         │
+│ 3. [frontend]         Nginx Web Server (:80 on Multus 10.1.137.211)    │
 │                       React Video Wall (Auto, 1, 2x2, 3x3, 4x4 Grid)   │
 │                       Reverse Proxy to Backend (:8080) & MTX (:8888)   │
 │                                                                        │
@@ -52,8 +52,8 @@ UE ingest stays on GStreamer so RTP NTP-64 / RTCP SR timestamps are not relayed 
 
 | Port | Service / Container | Scope | Role |
 |------|---------------------|-------|------|
-| **80** (NodePort 30080) | `frontend` (Nginx) | External | Video Wall Web UI, API reverse proxy, MediaMTX HLS streaming |
-| **8554** (NodePort 30160) | `cctv` (GStreamer) | Multus (`10.1.137.161`) | UE RTSP RECORD Ingest (with NTP-64 timestamps) |
+| **80** | `frontend` (Nginx) | Multus `10.1.137.211` | Video Wall Web UI, API reverse proxy, MediaMTX HLS streaming |
+| **8554** | `cctv` (GStreamer) | Multus (`10.1.137.211`) | UE RTSP RECORD Ingest (with NTP-64 timestamps) |
 | **8080** | `cctv` (FastAPI) | Localhost | REST API, JPEG Snapshots (`/snapshot/{id}`) |
 | **8555** | `mediamtx` (RTSP) | Localhost | Annotated RTSP stream push from YOLO workers (`/cam_*`) |
 | **8888** | `mediamtx` (HLS) | Localhost | HLS stream remuxer (fMP4 playlist `/live/{path}`) |
@@ -63,13 +63,13 @@ UE ingest stays on GStreamer so RTP NTP-64 / RTCP SR timestamps are not relayed 
 
 ## Network & Multus Configuration
 
-- **Static Deterministic MAC**: Pinned to `02:42:0a:01:89:a1` on Multus interface `net1` (`10.1.137.161/24`).
-- **Gratuitous ARP**: On startup, `entrypoint.sh` executes `arping -c 3 -U -I net1 10.1.137.161` to instantly update switch and router ARP tables.
+- **Static Deterministic MAC**: Pinned to `02:0a:89:a0:00:01` on Multus interface `net1` (`10.1.137.211/24`).
+- **Gratuitous ARP**: On startup, `entrypoint.sh` executes `arping -c 3 -U -I net1 10.1.137.211` to instantly update switch and router ARP tables.
 - **NetworkAttachmentDefinition**: Configured with `"capabilities": {"ips": true, "mac": true}` in `app-slice1-multus`.
 
 ## API Endpoints
 
-Base: `http://10.1.137.120:30080`. Interactive docs: `/docs`. OpenAPI: `/openapi.json`.
+Base: `http://10.1.137.211`. Interactive docs: `/docs`. OpenAPI: `/openapi.json`.
 
 | Method | Path | Purpose |
 |--------|------|---------|

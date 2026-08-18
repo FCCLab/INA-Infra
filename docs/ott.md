@@ -22,7 +22,7 @@ flowchart TD
     OttEngine["ott-server: Multi-Channel GStreamer Streamer\n(NTP-64 timestamps & Bitrate controller)"]
     Api["ott-server: FastAPI REST API :8080\n(/api/v1/channels, /api/v1/clients, /api/v1/status)"]
     Mtx["mediamtx container: MediaMTX :8555 RTSP / :8888 HLS / :8889 WHEP"]
-    Ui["frontend container: Nginx :80 (NodePort 30083)\nReact OTT Streaming Portal"]
+    Ui["frontend container: Nginx :80 (Multus 10.1.137.213)\nReact OTT Streaming Portal"]
     Metric["metrics-exporter container: Prometheus :9103 -> InfluxDB"]
   end
 
@@ -49,7 +49,7 @@ flowchart TD
 |---|---|---|
 | `ott-server` | `10.1.132.30:5000/application-ott:nws-v0.9-amd64` | `:8080` (REST API), `:8554` (RTSP PLAY), `:9103` (Prometheus) |
 | `mediamtx` | `docker.io/bluenviron/mediamtx:1.12.2` | `:8555` (RTSP Publish), `:8888` (HLS), `:8889` (WebRTC), `:9997` (API) |
-| `frontend` | `10.1.132.30:5000/application-ott-frontend:nws-v0.9-amd64` | `:80` (Nginx + React SPA, NodePort `30083`) |
+| `frontend` | `10.1.132.30:5000/application-ott-frontend:nws-v0.9-amd64` | `:80` (Nginx + React SPA on Multus `10.1.137.213`) |
 | `metrics-exporter` | `docker.io/nicolaka/netshoot` | Scrapes `:9103` $\rightarrow$ InfluxDB `:8086` |
 
 ---

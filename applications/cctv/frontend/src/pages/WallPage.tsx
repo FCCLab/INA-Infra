@@ -5,26 +5,145 @@ import KpiStrip from "../components/ui/KpiStrip";
 import StatusDot from "../components/ui/StatusDot";
 import { fetchClients, formatCameraName, type CctvClient } from "../lib/api";
 
-function CameraTile({ cam }: { cam: CctvClient }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [hlsPlaying, setHlsPlaying] = useState(false);
-  const [timeStr, setTimeStr] = useState("");
-  const [inView, setInView] = useState(true);
+function isSafari(): boolean {
+  return /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+}
 
-  // Lazy in-view observer: only stream video when tile is visible in the viewport
+/** Subscribe to MediaMTX HLS only — no snapshot/MJPEG fallback on the wall. */
+function HlsPlayer({ src, enabled }: { src: string; enabled: boolean }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        setInView(entry.isIntersecting);
-      },
-      { threshold: 0.05 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
+    const el = videoRef.current;
+    if (!el || !enabled || !src) return;
+
+    let hls: Hls | null = null;
+    let stopped = false;
+    let watch: number | null = null;
+    let recoverTimer: number | null = null;
+    let lastTime = -1;
+    let stallTicks = 0;
+
+    const clearRecover = () => {
+      if (recoverTimer != null) {
+        window.clearTimeout(recoverTimer);
+        recoverTimer = null;
+      }
+    };
+
+    const start = () => {
+      if (stopped || !el) return;
+      lastTime = -1;
+      stallTicks = 0;
+
+      if (isSafari() && el.canPlayType("application/vnd.apple.mpegurl")) {
+        el.src = src;
+        el.play().catch(() => {});
+        return;
+      }
+      if (!Hls.isSupported()) return;
+
+      hls = new Hls({
+        lowLatencyMode: false,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 6,
+        maxLiveSyncPlaybackRate: 1.5,
+        manifestLoadingTimeOut: 8000,
+        levelLoadingTimeOut: 8000,
+        fragLoadingTimeOut: 12000,
+        enableWorker: true,
+      });
+      hls.loadSource(src);
+      hls.attachMedia(el);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        el.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls?.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          try {
+            hls?.recoverMediaError();
+          } catch {
+            restart();
+          }
+        } else {
+          restart();
+        }
+      });
+    };
+
+    const restart = () => {
+      if (stopped) return;
+      clearRecover();
+      try {
+        hls?.destroy();
+      } catch {
+        /* ignore */
+      }
+      hls = null;
+      recoverTimer = window.setTimeout(() => {
+        if (!stopped) start();
+      }, 500);
+    };
+
+    watch = window.setInterval(() => {
+      if (stopped || !el) return;
+      if (el.paused) {
+        el.play().catch(() => {});
+      }
+      const t = el.currentTime;
+      if (lastTime >= 0 && Math.abs(t - lastTime) < 0.04) {
+        stallTicks += 1;
+        if (stallTicks >= 3) {
+          stallTicks = 0;
+          const live = hls?.liveSyncPosition;
+          if (typeof live === "number" && Number.isFinite(live)) {
+            try {
+              el.currentTime = live;
+            } catch {
+              restart();
+            }
+          } else {
+            restart();
+          }
+        }
+      } else {
+        stallTicks = 0;
+      }
+      lastTime = t;
+    }, 800);
+
+    start();
+    return () => {
+      stopped = true;
+      clearRecover();
+      if (watch != null) window.clearInterval(watch);
+      try {
+        hls?.destroy();
+      } catch {
+        /* ignore */
+      }
+      el.removeAttribute("src");
+      el.load();
+    };
+  }, [src, enabled]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      muted
+      playsInline
+      style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }}
+    />
+  );
+}
+
+function CameraTile({ cam }: { cam: CctvClient }) {
+  const [timeStr, setTimeStr] = useState("");
+  const hlsOn = Boolean(cam.hls_path && (cam.active || cam.mtx_publishing));
 
   useEffect(() => {
     const updateClock = () => {
@@ -35,61 +154,6 @@ function CameraTile({ cam }: { cam: CctvClient }) {
     const id = setInterval(updateClock, 1000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (!inView || !cam.active) {
-      setHlsPlaying(false);
-      return;
-    }
-    const el = videoRef.current;
-    if (!el || !cam.hls_path) return;
-    const src = cam.hls_path;
-    let hls: Hls | null = null;
-
-    if (el.canPlayType("application/vnd.apple.mpegurl")) {
-      el.src = src;
-      el.play().catch(() => {});
-      setHlsPlaying(true);
-    } else if (Hls.isSupported()) {
-      hls = new Hls({
-        lowLatencyMode: true,
-        liveSyncDurationCount: 1,
-        maxLiveSyncPlaybackRate: 1.5,
-        manifestLoadingTimeOut: 4000,
-        levelLoadingTimeOut: 4000,
-        fragLoadingTimeOut: 4000,
-        enableWorker: true,
-      });
-      hls.loadSource(src);
-      hls.attachMedia(el);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        el.play().catch(() => {});
-      });
-      hls.on(Hls.Events.FRAG_BUFFERED, () => {
-        setHlsPlaying(true);
-        el.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_evt, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls?.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls?.recoverMediaError();
-              break;
-            default:
-              setHlsPlaying(false);
-              hls?.destroy();
-              break;
-          }
-        }
-      });
-    }
-    return () => {
-      hls?.destroy();
-    };
-  }, [cam.hls_path, cam.active, inView]);
 
   const detSummary = useMemo(() => {
     if (!cam.detected_objects || cam.detected_objects.length === 0) {
@@ -102,10 +166,8 @@ function CameraTile({ cam }: { cam: CctvClient }) {
     return Object.entries(counts).map(([name, count]) => `${name} × ${count}`);
   }, [cam.detected_objects, cam.detections_count]);
 
-  const isHlsActive = hlsPlaying;
-
   return (
-    <div ref={containerRef} className={`cam-card ${cam.active ? "is-live" : ""}`}>
+    <div className={`cam-card ${cam.active ? "is-live" : ""}`}>
       <div className="cam-card-topbar">
         <div className="cam-meta-left">
           <StatusDot state={cam.active ? "ok" : "warn"} />
@@ -116,32 +178,15 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           <span className={`cam-badge ${cam.active ? "cam-badge-live" : "cam-badge-idle"}`}>
             {cam.active ? `${cam.fps.toFixed(1)} FPS` : "OFFLINE"}
           </span>
-          <span className="cam-badge cam-badge-live" title="Streaming exclusively via MediaMTX Pub/Sub (HLS/WebRTC)">
+          <span className="cam-badge cam-badge-live" title="Subscribe via MediaMTX HLS">
             MediaMTX
           </span>
         </div>
       </div>
 
       <div className="cam-stage">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          style={{ display: isHlsActive ? "block" : "none" }}
-        />
-
-        {!isHlsActive && (
-          <img
-            src={`${cam.snapshot_path}?t=${Date.now()}`}
-            alt={cam.name || cam.id}
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
-        )}
-        {!cam.active && !cam.has_frame && !isHlsActive && (
+        {hlsOn && <HlsPlayer src={cam.hls_path} enabled={hlsOn} />}
+        {!hlsOn && (
           <div className="cam-offline">
             <svg className="cam-offline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M4 6h11a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" />

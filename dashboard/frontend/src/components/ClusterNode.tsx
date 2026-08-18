@@ -1,5 +1,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import type { ConfigSyncStatus } from "../api/client";
+import ConfigSyncIcon from "./ConfigSyncIcon";
 
 export type ClusterNodeData = {
   label: string;
@@ -12,6 +14,7 @@ export type ClusterNodeData = {
   latency_ms?: number;
   error?: string | null;
   selected?: boolean;
+  config_sync?: ConfigSyncStatus | null;
 };
 
 const CLUSTER_TITLES: Record<string, string> = {
@@ -47,7 +50,10 @@ function ClusterNodeComponent({ data, selected }: NodeProps & { data: ClusterNod
         <div className="cluster-title-row">
           <span className={`dot ${health}`} />
           <span className="cluster-title">{title}</span>
-          <span className={`health-badge ${health}`}>{healthLabel}</span>
+          <span className="cluster-status-icons">
+            <span className={`health-badge ${health}`}>{healthLabel}</span>
+            <ConfigSyncIcon status={d.config_sync} showLabel />
+          </span>
         </div>
 
         <div className="cluster-props">

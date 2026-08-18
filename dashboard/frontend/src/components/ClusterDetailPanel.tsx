@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Metrics, type NodeInfo } from "../api/client";
+import { api, type ConfigSyncStatus, type Metrics, type NodeInfo } from "../api/client";
 import { fmtNum, isFiniteNumber } from "../lib/format";
+import ConfigSyncIcon from "./ConfigSyncIcon";
 import InterfaceCharts from "./InterfaceCharts";
 import ResourceCharts from "./ResourceCharts";
 
@@ -9,6 +10,7 @@ type Props = {
   selectedNode: string | null;
   onSelectNode: (nodeName: string | null) => void;
   refreshToken: number;
+  configSync?: ConfigSyncStatus | null;
 };
 
 export default function ClusterDetailPanel({
@@ -16,6 +18,7 @@ export default function ClusterDetailPanel({
   selectedNode,
   onSelectNode,
   refreshToken,
+  configSync,
 }: Props) {
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -83,6 +86,29 @@ export default function ClusterDetailPanel({
     <div className="panel-body">
       {error ? <div className="error-banner">{error}</div> : null}
       {loading && !metrics ? <p className="muted">Loading metrics…</p> : null}
+      {configSync ? (
+        <div className="cs-detail" title={configSync.message || configSync.error || undefined}>
+          <ConfigSyncIcon status={configSync} />
+          <div className="cs-detail-text">
+            <span className="cs-detail-label">Config Sync</span>
+            <span className="cs-detail-summary">{configSync.summary || configSync.overall}</span>
+            <span className="cs-detail-meta">
+              {[
+                configSync.name || null,
+                configSync.last_synced_commit
+                  ? `applied ${configSync.last_synced_commit}`
+                  : null,
+                configSync.source_commit &&
+                configSync.source_commit !== configSync.last_synced_commit
+                  ? `src ${configSync.source_commit}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "—"}
+            </span>
+          </div>
+        </div>
+      ) : null}
       <ResourceCharts metrics={metrics} focusNode={selectedNode} nodes={nodes} />
       {selectedNode ? (
         <InterfaceCharts

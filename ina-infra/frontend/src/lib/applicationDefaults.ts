@@ -15,8 +15,8 @@ const REG = "10.1.132.30:5000";
 const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDefaults> = {
   cctv: {
     name: "CCTV Vision Streaming",
-    server_image: `${REG}/slicea-analyzer:nws-v0.7-amd64`,
-    client_image: `${REG}/slicea-publisher:nws-v0.6-amd64`,
+    server_image: `${REG}/application-cctv:nws-v0.9-amd64`,
+    client_image: `${REG}/application-cctv-publisher:nws-v0.10-amd64`,
     server_port: 8554,
     metrics_port: 9102,
     server_params: {
@@ -37,7 +37,7 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   physical_ai: {
     name: "Physical AI (Cosmos3 VLM)",
     server_image: `${REG}/cosmo3-vllm:nws-v0.7`,
-    client_image: `${REG}/cosmo3-aiperf:nws-v0.7-amd64`,
+    client_image: `${REG}/cosmo3-ue-console:nws-v0.17-amd64`,
     server_port: 8000,
     metrics_port: 8002,
     server_params: {
@@ -55,8 +55,8 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   },
   ott: {
     name: "OTT HD Video Streaming",
-    server_image: `${REG}/hd-stream-server:hdstream-v2`,
-    client_image: `${REG}/hd-stream-client:hdstream-v2`,
+    server_image: `${REG}/application-ott:nws-v0.10-amd64`,
+    client_image: `${REG}/ott-ue-console:nws-v0.28-amd64`,
     server_port: 8554,
     metrics_port: 9103,
     server_params: {
@@ -71,8 +71,8 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   },
   iot: {
     name: "Background IoT (MQTT)",
-    server_image: `${REG}/sliced-edge:nws-v0.5-amd64`,
-    client_image: `${REG}/sliced-client:nws-v0.5-amd64`,
+    server_image: `${REG}/sliced-edge:nws-v0.7-amd64`,
+    client_image: `${REG}/iot-ue-console:nws-v0.8-amd64`,
     server_port: 1883,
     metrics_port: 9105,
     server_params: {

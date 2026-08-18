@@ -79,8 +79,33 @@ def _rel(path: Path) -> str:
     return str(path)
 
 
+class _LiteralStr(str):
+    """Force YAML `|` block scalars so ConfigMap Python/HTML keeps indent."""
+
+
+def _represent_literal(dumper, data):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+
+
+yaml.SafeDumper.add_representer(_LiteralStr, _represent_literal)
+
+
 def _dump(doc: dict) -> str:
-    return yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
+    if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
+        data = doc.get("data")
+        if isinstance(data, dict):
+            doc = dict(doc)
+            doc["data"] = {
+                k: _LiteralStr(v) if isinstance(v, str) and ("\n" in v or len(v) > 80) else v
+                for k, v in data.items()
+            }
+    return yaml.safe_dump(
+        doc,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+        width=10000,
+    )
 
 
 def _write(path: Path, content: str, written: List[str]) -> None:
@@ -146,7 +171,7 @@ def _summary_txt(ip_plan: IpPlan, result: PlSolveResponse) -> str:
         f"# INA-Infra profile={ip_plan.profile.name} subnet={ip_plan.subnet}",
         f"# N={ip_plan.n_slices}  formula: host = base[role] + n",
         "#",
-        "# slice | CU | UPF | APP | UPF_N3 | CUUP_N3 | UE_RF | DNN",
+        "# slice | CU | UPF | APP | UPF_N3 | CUUP_N3 | UE_RF | APP_N6 | DNN",
     ]
     for s in ip_plan.slices:
         place = result.deploy_map.get(str(s.slice_id))
@@ -155,7 +180,7 @@ def _summary_txt(ip_plan: IpPlan, result: PlSolveResponse) -> str:
         app = place.app if place else s.site_app
         lines.append(
             f"# {s.n:>5} | {cu:<8} | {upf:<8} | {app:<8} | "
-            f"{s.upf_n3} | {s.cuup_n3} | {s.ue_rf} | {s.dnn_cidr}"
+            f"{s.upf_n3} | {s.cuup_n3} | {s.ue_rf} | {s.app_ip} | {s.dnn_cidr}"
         )
     sh = ip_plan.shared
     lines.extend(

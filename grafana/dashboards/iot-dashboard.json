@@ -48,7 +48,7 @@
               "type": "influxdb",
               "uid": "dfufcr74lgwzkf"
             },
-            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field == \"throughput_mbps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field == \"throughput_mbps\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
             "refId": "A"
           }
         ],
@@ -255,7 +255,9 @@
               "uid": "dfufcr74lgwzkf"
             },
             "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field =~ /throughput/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
-            "refId": "A"
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
           }
         ],
         "title": "Throughput",
@@ -311,7 +313,9 @@
               "uid": "dfufcr74lgwzkf"
             },
             "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"iot\")\n  |> filter(fn: (r) => r._field =~ /sliced_mqtt_connected/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
-            "refId": "A"
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
           }
         ],
         "title": "Key series",

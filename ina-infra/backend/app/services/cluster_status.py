@@ -694,6 +694,8 @@ def list_edge_nodes() -> Dict[str, Any]:
 _CLIENT_SIDECAR_NAMES = {
     "cctv-publisher",
     "aiperf",
+    "backend",
+    "frontend",
     "ott-client",
     "iot-client",
     "custom-client",

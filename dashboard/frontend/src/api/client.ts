@@ -1,3 +1,24 @@
+export type ConfigSyncStatus = {
+  name: string;
+  namespace: string;
+  exists: boolean;
+  overall: string; // synced | syncing | error | missing | unknown
+  summary: string;
+  source_commit?: string;
+  render_commit?: string;
+  sync_commit?: string;
+  last_synced_commit?: string;
+  syncing?: boolean;
+  stalled?: boolean;
+  reconciling?: boolean;
+  error_count?: number;
+  message?: string;
+  updated_at?: string | null;
+  error?: string | null;
+  repo?: string;
+  branch?: string;
+};
+
 export type ClusterSummary = {
   name: string;
   reachable: boolean;
@@ -12,6 +33,7 @@ export type ClusterSummary = {
   error?: string | null;
   kubeconfig: string;
   context: string;
+  config_sync?: ConfigSyncStatus | null;
 };
 
 export type NodeInfo = {
@@ -112,6 +134,7 @@ export type TopologyNode = {
     cluster?: string;
     ready?: boolean;
     roles?: string[];
+    config_sync?: ConfigSyncStatus | null;
   };
 };
 

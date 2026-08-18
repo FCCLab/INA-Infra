@@ -59,6 +59,7 @@ METRICS_PORT = _env_int("METRICS_PORT", 9101)
 METRICS_ADDR = _env("METRICS_ADDR", "0.0.0.0")
 LOG_INTERVAL_S = float(_env("LOG_INTERVAL_S", "1"))
 CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
+UE_ID = _env("APP_NAME", STREAM_PATH or "cctv-ue")
 
 RTSP_URI = f"rtsp://{RTSP_TARGET_HOST}:{RTSP_PORT}/{STREAM_PATH}"
 
@@ -68,6 +69,16 @@ FRAMES_SENT = Counter(
     "Total encoded frames handed to the RTP payloader",
 )
 FPS_GAUGE = Gauge("cctv_ue_fps", "Frames per second (UE publisher)")
+APP_UE_LATENCY_MS = Gauge(
+    "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
+)
+APP_UE_THROUGHPUT_MBPS = Gauge(
+    "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
+)
+APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
+APP_THROUGHPUT_MBPS = Gauge(
+    "app_throughput_mbps", "Aggregated application throughput (Mbps)"
+)
 ENCODE_SECONDS = Histogram(
     "cctv_ue_encode_seconds",
     "Per-frame encode latency",
@@ -95,6 +106,7 @@ class Publisher:
         # Why the current GLib loop quit: "eos" (file end / loop miss) or "error".
         self._quit_reason: str | None = None
         self._frames_at_run_start = 0
+        self._last_encode_ms = 0.0
 
     # -- Source preparation ---------------------------------------------------
     def _prepare_source(self) -> None:
@@ -242,7 +254,10 @@ class Publisher:
             self._frame_count += 1
             start = self._enc_sink_times.pop(buf.pts, None)
         if start is not None:
-            ENCODE_SECONDS.observe(time.monotonic() - start)
+            enc_s = time.monotonic() - start
+            ENCODE_SECONDS.observe(enc_s)
+            with self._lock:
+                self._last_encode_ms = enc_s * 1000.0
         return Gst.PadProbeReturn.OK
 
     # -- Looping --------------------------------------------------------------
@@ -336,6 +351,13 @@ class Publisher:
             elapsed = now - self._last_report
             fps = delta / elapsed if elapsed > 0 else 0.0
             FPS_GAUGE.set(fps)
+            with self._lock:
+                encode_ms = self._last_encode_ms
+            tput = (BITRATE_KBPS / 1000.0) if fps > 0 else 0.0
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(encode_ms)
+            APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(tput)
+            APP_LATENCY_MS.set(encode_ms)
+            APP_THROUGHPUT_MBPS.set(tput)
             self._last_frame_count = count
             self._last_report = now
             metrics.log_json(

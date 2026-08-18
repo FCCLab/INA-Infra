@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT UE Console · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #070b14; --bg1: #0b1120; --card: rgba(15, 23, 42, 0.75);
+      --surface: rgba(255,255,255,0.035); --border: rgba(255,255,255,0.08);
+      --text: #eef2f9; --text-dim: #93a0b8; --text-faint: #5e6b85;
+      --accent: #16E6A0; --accent2: #00C2D4; --bad: #ff5a6e; --ok: #16e6a0;
+      --ok-bg: rgba(22,230,160,0.12); --bad-bg: rgba(255,90,110,0.12);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      background: radial-gradient(1000px 600px at 80% -10%, rgba(22,230,160,0.10), transparent 60%),
+                  linear-gradient(180deg, var(--bg0), var(--bg1));
+      color: var(--text); min-height: 100vh;
+    }
+    header {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 14px 24px; border-bottom: 1px solid var(--border); background: rgba(7,11,20,0.82);
+      position: sticky; top: 0; backdrop-filter: blur(12px);
+    }
+    h1 { font-family: 'Space Grotesk', sans-serif; font-size: 20px; }
+    .brand-lockup { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { width: 48px; height: auto; display: block; border-radius: 8px; }
+    .kicker { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent2); }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+    .pill { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+    .pill.ok { color: var(--ok); border-color: rgba(22,230,160,.35); }
+    .pill.bad { color: var(--bad); border-color: rgba(255,90,110,.35); }
+    main { padding: 20px 24px 40px; max-width: 1280px; margin: 0 auto; display: grid; gap: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--accent); color: #04140e; border: 0; border-radius: 8px; padding: 8px 14px;
+      font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    button.danger { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255,90,110,.35); }
+    .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .kpi-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
+    .kpi-value { font-size: 14px; margin-top: 4px; }
+    label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px; }
+    input, textarea {
+      width: 100%; background: rgba(7,11,20,0.7); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; font-family: inherit; font-size: 13px;
+    }
+    textarea { min-height: 64px; font-family: 'IBM Plex Mono', monospace; resize: vertical; }
+    .msg-row {
+      display: grid; grid-template-columns: 88px 130px 130px 1fr auto; gap: 10px; align-items: start;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .msg-row:last-child { border-bottom: 0; }
+    .hint { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+    .msg-box { font-size: 12px; margin-top: 10px; display: none; }
+    .msg-box.show { display: block; }
+    .msg-box.ok { color: var(--ok); }
+    .msg-box.err { color: var(--bad); }
+
+    .console {
+      background: #05080f;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .console-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.04);
+      border-bottom: 1px solid var(--border);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+    }
+    .console-dots { display: flex; gap: 5px; }
+    .console-dots span {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #3a455c;
+    }
+    .console-dots span:nth-child(1) { background: #ff5a6e; }
+    .console-dots span:nth-child(2) { background: #f5a623; }
+    .console-dots span:nth-child(3) { background: #16e6a0; }
+    .console-title { color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+    .console-meta { margin-left: auto; color: var(--text-faint); }
+    .console-body {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      min-height: 280px;
+      max-height: min(56vh, 640px);
+      overflow: auto;
+      padding: 10px 12px 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .console-idle { color: var(--text-faint); }
+    .console-line { padding: 1px 0; }
+    .console-line .ts { color: var(--text-faint); }
+    .console-line .ul { color: var(--accent2); }
+    .console-line .dl { color: var(--ok); }
+    .console-line .err { color: var(--bad); }
+    .console-line .payload { color: #cbd5e1; }
+
+    .topic-list { margin-top: 8px; display: grid; gap: 4px; }
+    .topic-row {
+      display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dim);
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+    }
+    .topic-name { color: var(--accent2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .topic-freq { color: var(--accent); font-weight: 600; }
+    .topic-n { color: var(--text-faint); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-lockup">
+      <img class="brand-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" />
+      <div>
+        <div class="kicker">Slice 4 · UE console</div>
+        <h1 id="title">IoT UE</h1>
+      </div>
+    </div>
+    <div class="row" id="pills"><span class="pill">connecting…</span></div>
+  </header>
+  <main>
+    <div class="kpi">
+      <div class="kpi-card"><div class="kpi-label">Console IP / MAC</div><div class="kpi-value mono" id="kpi-net">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">PDU</div><div class="kpi-value" id="kpi-pdu">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Publishing</div><div class="kpi-value" id="kpi-send">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Messages</div><div class="kpi-value mono" id="kpi-msgs">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Topics</div><div class="kpi-value mono" id="kpi-topics">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg effective freq</div><div class="kpi-value mono" id="kpi-avg-freq">—</div></div>
+    </div>
+    <section class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h2 style="font-size:16px;">MQTT publish</h2>
+          <p class="hint">Start or stop uplink over the 5G PDU. Freq and period stay in sync; each message has its own payload.</p>
+        </div>
+        <div class="row">
+          <button type="button" id="btn-toggle">▶ Start</button>
+          <button type="button" class="secondary" id="btn-once">Publish once</button>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:12px;">
+        <div>
+          <h2 style="font-size:16px;">Messages to publish</h2>
+          <p class="hint">Edit Freq (Hz) or Period (s); the other field updates automatically. Then save.</p>
+        </div>
+        <div class="row">
+          <div>
+            <label for="msg-count">Number of messages</label>
+            <input id="msg-count" type="number" min="1" max="20" value="3" style="width:120px;" />
+          </div>
+          <button type="button" class="secondary" id="btn-reload">Reload</button>
+          <button type="button" id="btn-save">Save config</button>
+        </div>
+      </div>
+      <div id="msg-list"></div>
+      <div class="msg-box" id="cfg-msg"></div>
+    </section>
+    <section class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px;">
+        <div>
+          <h2 style="font-size:16px;">Topic stats</h2>
+          <p class="hint">Topic count, list, and average effective frequency over the last 30s.</p>
+        </div>
+        <span class="pill mono" id="stats-count">0 topics</span>
+      </div>
+      <div id="topic-stats"><div class="hint">No topics yet.</div></div>
+    </section>
+    <section class="card" style="padding:0;overflow:hidden;">
+      <div class="console">
+        <div class="console-bar">
+          <span class="console-dots"><span></span><span></span><span></span></span>
+          <span class="console-title">publish log</span>
+          <span class="console-meta" id="log-meta">0 lines</span>
+        </div>
+        <div class="console-body" id="log"><div class="console-idle">waiting for MQTT…</div></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const MIN_HZ = 0.01, MAX_HZ = 5, MIN_P = 0.2, MAX_P = 100;
+    let messages = [];
+    async function req(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      return body;
+    }
+    function esc(s) { return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    function roundHz(hz) { return Math.round(hz * 1e6) / 1e6; }
+    function roundPeriod(p) { return Math.round(p * 1e4) / 1e4; }
+    function clampHz(hz) { return Math.min(MAX_HZ, Math.max(MIN_HZ, hz)); }
+    function clampPeriod(p) { return Math.min(MAX_P, Math.max(MIN_P, p)); }
+    function fmtHz(hz) {
+      const n = Number(hz) || 0;
+      if (n >= 1) return n.toFixed(2) + " Hz";
+      if (n >= 0.01) return n.toFixed(3) + " Hz";
+      return n.toFixed(4) + " Hz";
+    }
+    function topicHz(t) {
+      const avg = Number(t && t.avg_freq_hz);
+      if (avg > 0) return avg;
+      return Number(t && t.freq_hz) || 0;
+    }
+    function renderTopicStats(stats) {
+      const topics = (stats && stats.topics) || [];
+      const n = stats && stats.topic_count != null ? stats.topic_count : topics.length;
+      if ($("kpi-topics")) $("kpi-topics").textContent = String(n);
+      const avg = (stats && (stats.ul_avg_freq_hz || stats.avg_freq_hz)) || 0;
+      const cfg = stats && stats.configured_hz;
+      if ($("kpi-avg-freq")) {
+        $("kpi-avg-freq").textContent = cfg
+          ? `${fmtHz(avg)} / ${fmtHz(cfg)} cfg`
+          : fmtHz(avg);
+      }
+      if ($("stats-count")) $("stats-count").textContent = `${n} topic${n === 1 ? "" : "s"} · ${fmtHz(avg)}`;
+      const box = $("topic-stats");
+      if (!box) return;
+      if (!topics.length) {
+        box.innerHTML = `<div class="hint">No topics yet.</div>`;
+        return;
+      }
+      box.innerHTML = `<div class="topic-list">${topics.map(t => `
+        <div class="topic-row">
+          <span class="topic-name">${esc(t.topic)}</span>
+          <span class="topic-freq">${fmtHz(topicHz(t))}</span>
+          <span class="topic-n">${t.count || 0} ${t.direction === "downlink" ? "rx" : "tx"}</span>
+        </div>`).join("")}</div>`;
+    }
+    function showMsg(text, isError) {
+      const el = $("cfg-msg");
+      el.className = `msg-box show ${isError ? "err" : "ok"}`;
+      el.textContent = text;
+      setTimeout(() => { el.className = "msg-box"; }, 5000);
+    }
+    function msgFreqHz(m) {
+      const hz = parseFloat(m && m.frequency_hz);
+      if (hz > 0) return roundHz(hz);
+      const p = parseFloat(m && m.period_s);
+      if (p > 0) return roundHz(1 / p);
+      return 0.2;
+    }
+    function msgPeriodS(m) {
+      const p = parseFloat(m && m.period_s);
+      if (p > 0) return roundPeriod(p);
+      const hz = parseFloat(m && m.frequency_hz);
+      if (hz > 0) return roundPeriod(1 / hz);
+      return 5;
+    }
+    function defaultMsg(i) {
+      return { id: `msg-${i}`, frequency_hz: 0.2, period_s: 5, payload: `{"sensor":${i}}` };
+    }
+    function readFormMessages() {
+      const rows = [...document.querySelectorAll(".msg-row")];
+      return rows.map((row, i) => {
+        const hz = parseFloat(row.querySelector("[data-f=freq]").value) || 0.2;
+        const period = parseFloat(row.querySelector("[data-f=period]").value) || (1 / hz);
+        return {
+          id: row.querySelector("[data-f=id]").value.trim() || `msg-${i + 1}`,
+          frequency_hz: hz,
+          period_s: period,
+          payload: row.querySelector("[data-f=payload]").value,
+        };
+      });
+    }
+    function bindFreqPeriod(row) {
+      const freq = row.querySelector("[data-f=freq]");
+      const period = row.querySelector("[data-f=period]");
+      freq.addEventListener("input", () => {
+        const hz = parseFloat(freq.value);
+        if (!(hz > 0)) return;
+        period.value = String(roundPeriod(1 / hz));
+      });
+      period.addEventListener("input", () => {
+        const p = parseFloat(period.value);
+        if (!(p > 0)) return;
+        freq.value = String(roundHz(1 / p));
+      });
+      freq.addEventListener("change", () => {
+        const hz = clampHz(parseFloat(freq.value) || 0.2);
+        freq.value = String(roundHz(hz));
+        period.value = String(roundPeriod(1 / hz));
+      });
+      period.addEventListener("change", () => {
+        const p = clampPeriod(parseFloat(period.value) || 5);
+        period.value = String(roundPeriod(p));
+        freq.value = String(roundHz(1 / p));
+      });
+    }
+    function renderMessageForm(items) {
+      messages = items && items.length ? items : [defaultMsg(1)];
+      $("msg-count").value = String(messages.length);
+      $("msg-list").innerHTML = messages.map((m, i) => `
+        <div class="msg-row">
+          <div><label>ID</label><input data-f="id" value="${esc(m.id || `msg-${i + 1}`)}" /></div>
+          <div><label>Freq (Hz)</label><input data-f="freq" type="number" min="0.01" max="5" step="0.01" value="${esc(msgFreqHz(m))}" /></div>
+          <div><label>Period (s)</label><input data-f="period" type="number" min="0.2" max="100" step="0.1" value="${esc(msgPeriodS(m))}" /></div>
+          <div><label>Payload</label><textarea data-f="payload">${esc(m.payload || "")}</textarea></div>
+          <div style="padding-top:22px;"><button type="button" class="secondary" data-remove="${i}">Remove</button></div>
+        </div>`).join("");
+      $("msg-list").querySelectorAll(".msg-row").forEach(bindFreqPeriod);
+      $("msg-list").querySelectorAll("[data-remove]").forEach(btn => {
+        btn.onclick = () => {
+          const next = readFormMessages();
+          next.splice(parseInt(btn.getAttribute("data-remove"), 10), 1);
+          renderMessageForm(next.length ? next : [defaultMsg(1)]);
+        };
+      });
+    }
+    $("msg-count").onchange = () => {
+      const n = Math.max(1, Math.min(20, parseInt($("msg-count").value, 10) || 1));
+      const cur = readFormMessages();
+      while (cur.length < n) cur.push(defaultMsg(cur.length + 1));
+      renderMessageForm(cur.slice(0, n));
+    };
+    function paintToggle(running) {
+      const tog = $("btn-toggle");
+      if (running) {
+        tog.className = "danger";
+        tog.setAttribute("data-action", "stop");
+        tog.textContent = "⏹ Stop";
+      } else {
+        tog.className = "";
+        tog.setAttribute("data-action", "start");
+        tog.textContent = "▶ Start";
+      }
+    }
+    function renderLog(items) {
+      const box = $("log");
+      const meta = $("log-meta");
+      if (!items.length) {
+        box.innerHTML = `<div class="console-idle">waiting for MQTT…</div>`;
+        if (meta) meta.textContent = "0 lines";
+        return;
+      }
+      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+      const chronological = items.slice().reverse();
+      box.innerHTML = chronological.map(e => {
+        const dir = (e.direction || "ul").toLowerCase();
+        const dirCls = e.ok === false ? "err" : (dir.indexOf("down") >= 0 ? "dl" : "ul");
+        const dirLabel = dir.indexOf("down") >= 0 ? "DL" : "UL";
+        const body = typeof e.payload === "string" ? e.payload : JSON.stringify(e.payload || {});
+        const lat = e.latency_ms != null ? `${e.latency_ms}ms` : "";
+        const st = e.ok === false ? "ERR" : "ok";
+        return `<div class="console-line"><span class="ts">${esc(e.ts || "")}</span>  <span class="${dirCls}">${dirLabel}</span>  ${esc(e.msg_id || "")}  ${e.bytes || 0}B  ${esc(lat)}  <span class="${dirCls}">${st}</span>  <span class="payload">${esc(body).slice(0, 400)}</span></div>`;
+      }).join("");
+      if (meta) meta.textContent = `${chronological.length} lines`;
+      if (atBottom) box.scrollTop = box.scrollHeight;
+    }
+    function setText(id, v) {
+      const el = $(id);
+      if (el) el.textContent = v;
+    }
+    async function refresh() {
+      try {
+        const s = await req("/api/status");
+        setText("title", s.ue || "IoT UE");
+        setText("kpi-net", `${s.console_ip || "—"}  ${s.console_mac || ""}`);
+        setText("kpi-pdu", s.pdu_ready ? `Ready (${s.pdu_iface})` : `Waiting (${s.pdu_iface})`);
+        setText("kpi-send", s.send_enabled ? (s.mqtt_connected ? "On · MQTT up" : "On · connecting") : "Stopped");
+        setText("kpi-msgs", `${s.message_count || (s.messages || []).length} · ${s.published || 0} tx`);
+        if ($("pills")) {
+          $("pills").innerHTML =
+            `<span class="pill ${s.pdu_ready ? "ok":"bad"}">${s.pdu_ready ? "PDU up" : "PDU wait"}</span>` +
+            `<span class="pill ${s.mqtt_connected ? "ok":"bad"}">${s.mqtt_connected ? "MQTT" : "MQTT down"}</span>` +
+            `<span class="pill ${s.send_enabled ? "ok":"bad"}">${s.send_enabled ? "Running" : "Stopped"}</span>` +
+            `<span class="pill mono">idx ${s.client_index}</span>`;
+        }
+        paintToggle(!!s.send_enabled);
+        try { renderTopicStats(s.stats || {}); } catch (_e) {}
+        try {
+          const log = await req("/api/exchanges?limit=80");
+          renderLog(log.items || []);
+        } catch (_e) {}
+      } catch (e) {
+        if ($("pills")) $("pills").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`;
+      }
+    }
+    $("btn-toggle").onclick = () => {
+      const start = $("btn-toggle").getAttribute("data-action") !== "stop";
+      paintToggle(start);
+      req("/api/control", { method: "POST", body: JSON.stringify({ send_enabled: start }) })
+        .then(refresh)
+        .catch((e) => { $("pills").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`; refresh(); });
+    };
+    $("btn-once").onclick = () => req("/api/publish-once", { method: "POST", body: "{}" }).then(refresh);
+    async function reloadConfig(quiet) {
+      try {
+        const s = await req("/api/config");
+        renderMessageForm(s.messages || []);
+        if (!quiet) showMsg(`Loaded ${ (s.messages || []).length } running message(s).`);
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    }
+    $("btn-reload").onclick = () => reloadConfig(false);
+    $("btn-save").onclick = async () => {
+      try {
+        const msgs = readFormMessages();
+        await req("/api/config", { method: "POST", body: JSON.stringify({ messages: msgs }) });
+        showMsg(`Saved ${msgs.length} message(s).`);
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    };
+    reloadConfig(true);
+    refresh();
+    setInterval(refresh, 2500);
+  </script>
+</body>
+</html>

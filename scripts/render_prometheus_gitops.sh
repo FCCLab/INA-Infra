@@ -275,9 +275,29 @@ data:
 EOF
 }
 
+# Preserve bound volumeName from previous GitOps YAML (avoids KNV2009 on re-render).
+_preserve_pvc_volume_name() {
+  local new_file="$1"
+  local old_file="${2:-}"
+  [[ -n "$old_file" && -f "$old_file" ]] || return 0
+  local vn
+  vn="$(awk '/^[[:space:]]*volumeName:/{print $2; exit}' "$old_file")"
+  [[ -n "$vn" ]] || return 0
+  if grep -q '^[[:space:]]*volumeName:' "$new_file"; then
+    sed -i "s|^[[:space:]]*volumeName:.*|  volumeName: ${vn}|" "$new_file"
+  else
+    sed -i "/^[[:space:]]*storageClassName:/a\\  volumeName: ${vn}" "$new_file"
+  fi
+}
+
 write_pvc() {
   local dir="$1"
-  cat >"${dir}/persistentvolumeclaim-${PROM_NAME}.yaml" <<EOF
+  # Bound local-path PVCs get volumeName set by the provisioner; Config Sync must
+  # not try to clear it (KNV2009). Mutation-ignore stops post-create updates.
+  local pvc="${dir}/persistentvolumeclaim-${PROM_NAME}.yaml"
+  local pvc_old=""
+  [[ -f "$pvc" ]] && pvc_old="$(mktemp)" && cp "$pvc" "$pvc_old"
+  cat >"${pvc}" <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -285,6 +305,8 @@ metadata:
   namespace: ${PROM_NS}
   labels:
     app.kubernetes.io/name: ${PROM_NAME}
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
 spec:
   accessModes:
     - ReadWriteOnce
@@ -293,6 +315,8 @@ spec:
     requests:
       storage: ${PROM_PVC_SIZE}
 EOF
+  _preserve_pvc_volume_name "$pvc" "${pvc_old:-}"
+  [[ -n "${pvc_old:-}" ]] && rm -f "$pvc_old"
 }
 
 write_deployment() {

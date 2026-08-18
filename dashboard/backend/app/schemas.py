@@ -11,6 +11,29 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
+class ConfigSyncStatus(BaseModel):
+    """Config Sync RootSync progress for a cluster."""
+
+    name: str = ""
+    namespace: str = "config-management-system"
+    exists: bool = False
+    overall: str = "unknown"  # synced | syncing | error | missing | unknown
+    summary: str = ""
+    source_commit: str = ""
+    render_commit: str = ""
+    sync_commit: str = ""
+    last_synced_commit: str = ""
+    syncing: bool = False
+    stalled: bool = False
+    reconciling: bool = False
+    error_count: int = 0
+    message: str = ""
+    updated_at: Optional[str] = None
+    error: Optional[str] = None
+    repo: str = ""
+    branch: str = ""
+
+
 class ClusterSummary(BaseModel):
     name: str
     reachable: bool
@@ -25,6 +48,7 @@ class ClusterSummary(BaseModel):
     error: Optional[str] = None
     kubeconfig: str = ""
     context: str = ""
+    config_sync: ConfigSyncStatus = Field(default_factory=ConfigSyncStatus)
 
 
 class ClusterListResponse(BaseModel):

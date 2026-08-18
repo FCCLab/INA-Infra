@@ -77,6 +77,9 @@ class ClientStreamContext:
         self.detections_count = 0
         self.latest_jpeg: Optional[bytes] = None
         self.last_frame_time = time.monotonic()
+        self.bytes_in = 0
+        self.last_bytes_in = 0
+        self.throughput_mbps = 0.0
         self.net_samples: list[float] = []
         self.yolo_samples: list[float] = []
         self.e2e_samples: list[float] = []

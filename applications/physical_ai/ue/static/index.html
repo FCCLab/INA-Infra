@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Physical AI UE Console · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #070b14; --bg1: #0b1120; --card: rgba(15, 23, 42, 0.75);
+      --surface: rgba(255,255,255,0.035); --surface-2: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.08); --border-2: rgba(255,255,255,0.14);
+      --text: #eef2f9; --text-dim: #93a0b8; --text-faint: #5e6b85;
+      --accent: #16E6A0; --accent2: #00C2D4; --bad: #ff5a6e; --ok: #16e6a0;
+      --ok-bg: rgba(22,230,160,0.12); --bad-bg: rgba(255,90,110,0.12);
+      --radius-md: 10px; --radius-lg: 14px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      background: radial-gradient(1000px 600px at 80% -10%, rgba(22,230,160,0.10), transparent 60%),
+                  linear-gradient(180deg, var(--bg0), var(--bg1));
+      color: var(--text);
+    }
+    h1, h2 { font-family: 'Space Grotesk', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+    .pill { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+    .pill.ok { color: var(--ok); border-color: rgba(22,230,160,.35); background: var(--ok-bg); }
+    .pill.bad { color: var(--bad); border-color: rgba(255,90,110,.35); background: var(--bad-bg); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--accent); color: #04140e; border: 0; border-radius: 8px; padding: 8px 14px;
+      font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    button.danger { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255,90,110,.35); }
+    .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }
+    .kpi-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
+    .kpi-value { font-size: 14px; margin-top: 4px; }
+    pre {
+      background: #05080f; border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 12px; white-space: pre-wrap; max-height: 420px; overflow: auto;
+    }
+    .ex { border-bottom: 1px solid var(--border); padding: 10px 0; }
+    .ex:last-child { border-bottom: 0; }
+    .sent { color: var(--accent2); }
+    .recv { color: var(--ok); }
+    .err { color: var(--bad); }
+    .app { display: flex; align-items: stretch; height: 100vh; overflow: hidden; }
+    .app-body { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .rail {
+      width: 92px; flex: 0 0 92px; height: 100vh; border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 14px 10px 12px; background: var(--surface);
+    }
+    .rail-brand { display: flex; justify-content: center; padding: 2px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+    .rail-logo { width: 56px; height: auto; display: block; }
+    .rail-nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+    .rail-tab {
+      position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 5px; width: 100%; min-height: 62px; padding: 8px 6px; border: 1px solid transparent;
+      border-radius: 12px; background: transparent; color: var(--text-dim); cursor: pointer; font: inherit;
+    }
+    .rail-tab-icon { display: grid; place-items: center; width: 22px; height: 22px; }
+    .rail-tab-icon svg { width: 20px; height: 20px; }
+    .rail-tab-label { font-size: 10px; font-weight: 600; color: var(--text-faint); line-height: 1.15; text-align: center; }
+    .rail-tab:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .rail-tab-active { background: rgba(22, 230, 160, 0.10); color: var(--accent); border-color: rgba(22, 230, 160, 0.22); }
+    .rail-tab-active .rail-tab-label { color: var(--accent); }
+    .rail-tab-active::before {
+      content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+      width: 3px; height: 24px; border-radius: 0 3px 3px 0; background: var(--accent);
+    }
+    .rail-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: center; }
+    .rail-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .rail-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(22, 230, 160, 0.18); }
+    .rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint); text-align: center; }
+    .topbar {
+      display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+      background: rgba(11, 17, 32, 0.82); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .crumb { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+    .site-badge { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(22, 230, 160, 0.12); padding: 5px 11px; border-radius: 20px; white-space: nowrap; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .dash { flex: 1; min-height: 0; overflow: auto; padding: 12px 18px 24px; display: grid; gap: 16px; }
+    .tab-panel { display: grid; gap: 16px; }
+    .card-subtitle { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+<div class="app theme-dark">
+  <aside class="rail">
+    <div class="rail-brand" title="Physical AI UE · NeuroRAN"><img class="rail-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" /></div>
+    <nav class="rail-nav" aria-label="Main navigation">
+      <button type="button" class="rail-tab rail-tab-active" data-tab="overview" onclick="setConsoleTab('overview')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+        <span class="rail-tab-label">Overview</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="run" onclick="setConsoleTab('run')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>
+        <span class="rail-tab-label">Run</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="logs" onclick="setConsoleTab('logs')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="rail-tab-label">Logs</span>
+      </button>
+    </nav>
+    <div class="rail-foot"><div class="rail-status"><span class="rail-status-dot"></span><span class="rail-status-text">UE</span></div></div>
+  </aside>
+  <div class="app-body">
+    <header class="topbar">
+      <div class="crumb" id="crumb">Physical AI UE</div>
+      <span class="site-badge" id="title">Physical AI UE</span>
+      <div class="topbar-right" id="pills"><span class="pill">connecting…</span></div>
+    </header>
+    <main class="dash">
+      <div class="tab-panel" data-tab="overview">
+        <div class="kpi">
+          <div class="kpi-card"><div class="kpi-label">Console IP / MAC</div><div class="kpi-value mono" id="kpi-net">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">PDU</div><div class="kpi-value" id="kpi-pdu">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Sending</div><div class="kpi-value" id="kpi-send">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Last latency</div><div class="kpi-value mono" id="kpi-lat">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Input tokens</div><div class="kpi-value mono" id="kpi-tok-in">—</div></div>
+          <div class="kpi-card"><div class="kpi-label">Output tokens</div><div class="kpi-value mono" id="kpi-tok-out">—</div></div>
+        </div>
+      </div>
+      <div class="tab-panel" data-tab="run">
+        <section class="card">
+          <div class="row" style="justify-content:space-between;">
+            <div>
+              <h2 style="font-size:16px;">Content to vLLM</h2>
+              <p class="card-subtitle">Start or stop automatic send over the 5G PDU. Image is a synthetic RGB frame.</p>
+            </div>
+            <div class="row">
+              <button type="button" id="btn-toggle">▶ Start</button>
+              <button type="button" class="secondary" id="btn-img">Toggle image</button>
+              <button type="button" class="secondary" id="btn-once">Send once</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="tab-panel" data-tab="logs">
+        <section class="card">
+          <h2 style="font-size:16px;margin-bottom:10px;">Sent / received</h2>
+          <div id="log">No exchanges yet.</div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function setConsoleTab(id) {
+      document.querySelectorAll(".rail-tab").forEach((b) => b.classList.toggle("rail-tab-active", b.dataset.tab === id));
+      const panel = document.querySelector(`.tab-panel[data-tab="${id}"]`);
+      if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    async function req(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      return body;
+    }
+    function esc(s) { return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    async function refresh() {
+      try {
+        const s = await req("/api/status");
+        $("title").textContent = s.ue || "Physical AI UE";
+        $("kpi-net").textContent = `${s.console_ip || "—"}  ${s.console_mac || ""}`;
+        $("kpi-pdu").textContent = s.pdu_ready ? `Ready (${s.pdu_iface})` : `Waiting (${s.pdu_iface})`;
+        $("kpi-send").textContent = s.send_enabled ? (s.include_image ? "On · image+text" : "On · text") : "Stopped";
+        $("kpi-lat").textContent = s.last?.received?.latency_ms != null ? `${s.last.received.latency_ms} ms` : "—";
+        const usage = s.last?.received?.usage || {};
+        const inTok = s.prompt_tokens != null ? s.prompt_tokens : (usage.prompt_tokens || usage.input_tokens || 0);
+        const outTok = s.completion_tokens != null ? s.completion_tokens : (usage.completion_tokens || usage.output_tokens || 0);
+        $("kpi-tok-in").textContent = Number(inTok).toLocaleString();
+        $("kpi-tok-out").textContent = Number(outTok).toLocaleString();
+        $("pills").innerHTML =
+          `<span class="pill ${s.pdu_ready ? "ok":"bad"}">${s.pdu_ready ? "PDU up" : "PDU wait"}</span>` +
+          `<span class="pill ${s.send_enabled ? "ok":"bad"}">${s.send_enabled ? "Running" : "Stopped"}</span>` +
+          `<span class="pill mono">idx ${s.client_index}</span>`;
+        const tog = $("btn-toggle");
+        if (s.send_enabled) {
+          tog.className = "danger";
+          tog.setAttribute("data-action", "stop");
+          tog.textContent = "⏹ Stop";
+        } else {
+          tog.className = "";
+          tog.setAttribute("data-action", "start");
+          tog.textContent = "▶ Start";
+        }
+        const log = await req("/api/exchanges?limit=20");
+        const items = log.items || [];
+        if (!items.length) { $("log").textContent = "No exchanges yet."; return; }
+        $("log").innerHTML = items.map(e => {
+          const rec = e.received || {};
+          const sent = e.sent || {};
+          const cls = rec.ok ? "recv" : "err";
+          return `<div class="ex">
+            <div class="mono" style="font-size:11px;color:var(--text-faint)">${esc(e.ts)}</div>
+            <div class="sent">TX ${sent.include_image ? "text+image" : "text"} · ${sent.bytes || 0} B · ${esc((sent.prompt||"").slice(0,160))}</div>
+            <div class="${cls}">RX ${rec.ok ? "ok" : "err"} · ${rec.latency_ms || 0} ms · HTTP ${rec.http_status || "—"} · in ${((rec.usage||{}).prompt_tokens || (rec.usage||{}).input_tokens || 0)} / out ${((rec.usage||{}).completion_tokens || (rec.usage||{}).output_tokens || 0)} tok</div>
+            <pre>${esc(rec.text || rec.error || "")}</pre>
+          </div>`;
+        }).join("");
+      } catch (e) {
+        $("pills").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`;
+      }
+    }
+    $("btn-toggle").onclick = () => {
+      const start = $("btn-toggle").getAttribute("data-action") !== "stop";
+      const tog = $("btn-toggle");
+      if (start) {
+        tog.className = "danger";
+        tog.setAttribute("data-action", "stop");
+        tog.textContent = "⏹ Stop";
+      } else {
+        tog.className = "";
+        tog.setAttribute("data-action", "start");
+        tog.textContent = "▶ Start";
+      }
+      req("/api/control", { method: "POST", body: JSON.stringify({ send_enabled: start }) }).then(refresh).catch((e) => { $("pills").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`; refresh(); });
+    };
+    $("btn-img").onclick = async () => {
+      const s = await req("/api/status");
+      await req("/api/control", { method: "POST", body: JSON.stringify({ include_image: !s.include_image }) });
+      refresh();
+    };
+    $("btn-once").onclick = () => req("/api/send-once", { method: "POST", body: "{}" }).then(refresh);
+    refresh();
+    setInterval(refresh, 4000);
+  </script>
+</body>
+</html>

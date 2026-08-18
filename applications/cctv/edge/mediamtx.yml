@@ -22,7 +22,7 @@ hlsAddress: :8888
 hlsAllowOrigin: "*"
 hlsAlwaysRemux: yes
 hlsVariant: fmp4
-hlsSegmentCount: 3
+hlsSegmentCount: 7
 hlsSegmentDuration: 1s
 hlsPartDuration: 200ms
 

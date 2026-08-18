@@ -74,7 +74,7 @@ const BRAND = {
   product: "NeuroRAN",
   title: "INA-Infra · NeuroRAN",
   shortName: "INA",
-  logo: "/logos/NeuroRAN.svg",
+  logo: "/logos/NeuroRAN.png",
   logoPng: "/logos/NeuroRAN.png",
 };
 

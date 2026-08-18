@@ -137,6 +137,16 @@ APPLICATION_THROUGHPUT_BPS = Gauge(
     "N6/Multus ingest rate (bytes/sec RX)",
     ["origin"],
 )
+APP_UE_LATENCY_MS = Gauge(
+    "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
+)
+APP_UE_THROUGHPUT_MBPS = Gauge(
+    "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
+)
+APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
+APP_THROUGHPUT_MBPS = Gauge(
+    "app_throughput_mbps", "Aggregated application throughput (Mbps)"
+)
 
 
 def _kernel_clock_offset_seconds() -> Optional[float]:
@@ -522,6 +532,8 @@ class CCTVServer:
                 ctx.decoded_count = 0
                 ctx.analyzed_count = 0
                 ctx.last_decoded_count = 0
+                ctx.bytes_in = 0
+                ctx.last_bytes_in = 0
                 ctx.last_analyzed_count = 0
                 ctx.fps = 0.0
                 ctx.egress_fps = 0.0
@@ -596,6 +608,7 @@ class CCTVServer:
         ctx = self._get_context(client_id)
         with GLOBAL_LOCK:
             ctx.decoded_count = getattr(ctx, "decoded_count", 0) + 1
+            ctx.bytes_in = getattr(ctx, "bytes_in", 0) + int(buf.get_size() or 0)
             ctx.last_frame_time = time.monotonic()
         t_capture_ns = self._read_reference_ns(buf)
         if t_capture_ns is None:
@@ -699,7 +712,7 @@ class CCTVServer:
         try:
             import cv2
 
-            ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+            ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
             return buf.tobytes() if ok else None
         except Exception:
             return None
@@ -742,16 +755,22 @@ class CCTVServer:
             with GLOBAL_LOCK:
                 total_ingress_fps = 0.0
                 total_egress_fps = 0.0
+                active_latencies = []
+                active_tput = 0.0
                 for cid, ctx in list(self._stream_contexts.items()):
                     delta = ctx.decoded_count - ctx.last_decoded_count
                     delta_analyzed = ctx.analyzed_count - ctx.last_analyzed_count
+                    delta_bytes = getattr(ctx, "bytes_in", 0) - getattr(ctx, "last_bytes_in", 0)
                     elapsed = now - ctx.last_report
                     fps = delta / elapsed if elapsed > 0 else 0.0
                     egress_fps = delta_analyzed / elapsed if elapsed > 0 else 0.0
+                    tput_mbps = (delta_bytes * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0
                     ctx.fps = fps
                     ctx.egress_fps = egress_fps
+                    ctx.throughput_mbps = tput_mbps
                     ctx.last_decoded_count = ctx.decoded_count
                     ctx.last_analyzed_count = ctx.analyzed_count
+                    ctx.last_bytes_in = getattr(ctx, "bytes_in", 0)
                     ctx.last_report = now
                     total_ingress_fps += fps
                     total_egress_fps += egress_fps
@@ -760,8 +779,18 @@ class CCTVServer:
                     if is_active:
                         CLIENT_INGRESS_FPS.labels(client=c_name).set(round(fps, 2))
                         CLIENT_EGRESS_FPS.labels(client=c_name).set(round(egress_fps, 2))
+                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)
+                        APP_UE_LATENCY_MS.labels(ue_id=c_name).set(ctx.e2e_delay_ms or ctx.net_delay_ms)
+                        APP_UE_THROUGHPUT_MBPS.labels(ue_id=c_name).set(round(tput_mbps, 3))
+                        active_latencies.append(ctx.e2e_delay_ms or ctx.net_delay_ms)
+                        active_tput += tput_mbps
                     else:
                         for g in (CLIENT_NET_DELAY_MS, CLIENT_YOLO_DELAY_MS, CLIENT_E2E_DELAY_MS, CLIENT_INGRESS_FPS, CLIENT_EGRESS_FPS):
+                            try:
+                                g.remove(c_name)
+                            except Exception:
+                                pass
+                        for g in (APP_UE_LATENCY_MS, APP_UE_THROUGHPUT_MBPS):
                             try:
                                 g.remove(c_name)
                             except Exception:
@@ -773,6 +802,10 @@ class CCTVServer:
                     ctx.e2e_samples = []
                 INGRESS_FPS_GAUGE.set(total_ingress_fps)
                 EGRESS_FPS_GAUGE.set(total_egress_fps)
+                APP_LATENCY_MS.set(
+                    (sum(active_latencies) / len(active_latencies)) if active_latencies else 0.0
+                )
+                APP_THROUGHPUT_MBPS.set(round(active_tput, 3))
                 rx = _dataplane_rx_bytes()
                 now_m = time.monotonic()
                 if rx is not None and self._last_dp_rx is not None and self._last_dp_t is not None:

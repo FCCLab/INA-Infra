@@ -31,7 +31,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r.app_name =~ /.*client.*/ and (r._field == \"net_delay_ms\" or r._field == \"slicea_net_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Net Delay (ms)\" }))\n  |> yield(name: \"net_delay\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and r.app_name =~ /.*client.*/ and (r._field == \"net_delay_ms\" or r._field == \"slicea_net_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Net Delay (ms)\" }))\n  |> yield(name: \"net_delay\")",
           "refId": "A"
         }],
         "title": "5G Network Delay (net_delay_ms)",
@@ -55,7 +55,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r.app_name =~ /.*client.*/ and (r._field == \"yolo_delay_ms\" or r._field == \"slicea_yolo_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" YOLO Delay (ms)\" }))\n  |> yield(name: \"yolo_delay\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and r.app_name =~ /.*client.*/ and (r._field == \"yolo_delay_ms\" or r._field == \"slicea_yolo_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" YOLO Delay (ms)\" }))\n  |> yield(name: \"yolo_delay\")",
           "refId": "A"
         }],
         "title": "YOLO AI Latency (yolo_delay_ms)",
@@ -79,7 +79,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r.app_name =~ /.*client.*/ and (r._field == \"e2e_delay_ms\" or r._field == \"slicea_e2e_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" E2E Delay (ms)\" }))\n  |> yield(name: \"e2e_delay\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and r.app_name =~ /.*client.*/ and (r._field == \"e2e_delay_ms\" or r._field == \"latency_ms\" or r._field == \"slicea_e2e_delay_ms\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" E2E Delay (ms)\" }))\n  |> yield(name: \"e2e_delay\")",
           "refId": "A"
         }],
         "title": "End-to-End Latency (e2e_delay_ms)",
@@ -118,7 +118,7 @@
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Server Ingestion Throughput measured on the Regional Edge N6 network interface. Server published.",
+        "description": "Server ingestion throughput on the CCTV analyzer N6/Multus interface. Server published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 12, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": true },
@@ -134,7 +134,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"throughput_server\" or r._field == \"throughput_mbps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"application-cctv Ingest (Mbps)\" }))\n  |> yield(name: \"server_tput\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and (r._field == \"throughput_server\" or r._field == \"throughput_mbps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"application-cctv Ingest (Mbps)\" }))\n  |> yield(name: \"server_tput\")",
           "refId": "A"
         }],
         "title": "Server Ingestion Throughput (throughput_server)",
@@ -165,7 +165,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r.app_name =~ /.*client.*/ and (r._field == \"application_ingress_fps\" or r._field == \"ingress_fps\" or r._field == \"cctv_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Ingress FPS\" }))\n  |> yield(name: \"ingress_fps\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and r.app_name =~ /.*client.*/ and (r._field == \"application_ingress_fps\" or r._field == \"ingress_fps\" or r._field == \"cctv_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Ingress FPS\" }))\n  |> yield(name: \"ingress_fps\")",
           "refId": "A"
         }],
         "title": "Application Ingress FPS (application_ingress_fps)",
@@ -189,7 +189,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and r.app_name =~ /.*client.*/ and (r._field == \"application_egress_fps\" or r._field == \"egress_fps\" or r._field == \"cctv_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Egress FPS\" }))\n  |> yield(name: \"egress_fps\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and r.app_name =~ /.*client.*/ and (r._field == \"application_egress_fps\" or r._field == \"egress_fps\" or r._field == \"cctv_fps\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: r.app_name + \" Egress FPS\" }))\n  |> yield(name: \"egress_fps\")",
           "refId": "A"
         }],
         "title": "Application Egress FPS (application_egress_fps)",
@@ -228,7 +228,7 @@
       },
       {
         "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-        "description": "Chrony NTP clock offset for Regional CCTV server host relative to reference time source. Server published.",
+        "description": "Chrony NTP clock offset for the CCTV analyzer host relative to reference time. Server published.",
         "fieldConfig": {
           "defaults": {
             "custom": { "drawStyle": "line", "fillOpacity": 6, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 1, "pointSize": 3, "showPoints": "auto", "spanNulls": true },
@@ -244,7 +244,7 @@
         },
         "targets": [{
           "datasource": { "type": "influxdb", "uid": "dfufcr74lgwzkf" },
-          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.cluster == \"regional\" and (r._field == \"clock_offset_server\" or r._field == \"cctv_clock_offset_seconds\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"application-cctv Offset (ms)\" }))\n  |> yield(name: \"server_offset\")",
+          "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"cctv\" and r.origin == \"server\" and (r._field == \"clock_offset_server\" or r._field == \"cctv_clock_offset_seconds\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: \"application-cctv Offset (ms)\" }))\n  |> yield(name: \"server_offset\")",
           "refId": "A"
         }],
         "title": "Server Clock Offset (clock_offset_server)",

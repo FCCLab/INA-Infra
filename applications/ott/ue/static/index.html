@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OTT UE Console · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0:#070b14; --bg1:#0b1120; --card:rgba(15,23,42,.75); --surface:rgba(255,255,255,.035);
+      --border:rgba(255,255,255,.08); --text:#eef2f9; --text-dim:#93a0b8; --text-faint:#5e6b85;
+      --accent:#16E6A0; --accent2:#00C2D4; --bad:#ff5a6e; --ok:#16e6a0;
+      --ok-bg:rgba(22,230,160,.12); --bad-bg:rgba(255,90,110,.12); --warn:#f5c542;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--text);min-height:100vh;line-height:1.5;
+      background:radial-gradient(1200px 600px at 80% -10%,rgba(22,230,160,.10),transparent 60%),
+                 radial-gradient(1000px 700px at 10% 110%,rgba(0,194,212,.08),transparent 55%),
+                 linear-gradient(180deg,var(--bg0),var(--bg1))}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 28px;
+      border-bottom:1px solid var(--border);background:rgba(7,11,20,.85);backdrop-filter:blur(14px);position:sticky;top:0;z-index:50}
+    h1{font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;color:#fff}
+    .brand-lockup{display:flex;align-items:center;gap:12px}
+    .brand-logo{width:48px;height:auto;display:block;border-radius:8px}
+    h2{font-size:16px;font-weight:600}
+    .kicker{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent2);font-weight:600}
+    .mono{font-family:'IBM Plex Mono',monospace}
+    .pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);display:inline-flex;gap:6px;align-items:center}
+    .pill.ok{color:var(--ok);border-color:rgba(22,230,160,.35);background:var(--ok-bg)}
+    .pill.bad{color:var(--bad);border-color:rgba(255,90,110,.35);background:var(--bad-bg)}
+    .pill.warn{color:var(--warn);border-color:rgba(245,197,66,.35);background:rgba(245,197,66,.12)}
+    main{padding:24px 28px 48px;max-width:1400px;margin:0 auto;display:grid;gap:20px}
+    .layout{display:grid;grid-template-columns:1.6fr 1fr;gap:20px}
+    @media(max-width:980px){.layout{grid-template-columns:1fr}}
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+    .kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+    .kpi-label{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em}
+    .kpi-value{font-size:15px;font-weight:600;margin-top:4px;word-break:break-all}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    button{background:var(--accent);color:#04140e;border:0;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer}
+    button.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+    button.danger{background:var(--bad-bg);color:var(--bad);border:1px solid rgba(255,90,110,.35)}
+    select{background:#05080f;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;min-width:220px}
+    .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:12px}
+    .video-tile{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface);cursor:pointer;text-align:left;color:inherit;font:inherit}
+    .video-tile.active,.video-tile:hover{border-color:var(--accent);background:rgba(22,230,160,.08)}
+    .video-tile h3{font-size:13px;margin-bottom:4px}.video-tile p{font-size:11px;color:var(--text-dim)}
+    .player-box{width:100%;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;margin-top:12px;border:1px solid var(--border);position:relative;min-height:360px}
+    .player-box iframe{width:100%;height:100%;border:0;background:#000;display:block;position:absolute;inset:0}
+    .overlay-badge{position:absolute;left:10px;top:10px;z-index:2;font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.65);border:1px solid var(--border);font-family:'IBM Plex Mono',monospace}
+    .link-box{margin-top:8px;font-size:11px;color:var(--text-dim);word-break:break-all;font-family:'IBM Plex Mono',monospace}
+    .log-box{background:#05080f;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;max-height:320px;overflow-y:auto}
+    .log-item{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+    .log-time{color:var(--text-faint);white-space:nowrap}.log-msg{color:var(--text-dim)}
+    .hint{color:var(--text-dim);font-size:13px;margin-top:2px}
+    .stat-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+    .stat-table th,.stat-table td{text-align:left;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+    .stat-table th{color:var(--text-faint);font-weight:500;width:42%}
+    .stat-table td{font-family:'IBM Plex Mono',monospace}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-lockup">
+      <img class="brand-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" />
+      <div>
+      <div class="kicker">Slice 3 · Chromium over 5G PDU</div>
+      <h1 id="ue-title">5G UE Video Terminal</h1>
+      </div>
+    </div>
+    <div class="row">
+      <span class="pill" id="pill-pdu">5G PDU: checking…</span>
+      <span class="pill" id="pill-server">App server: —</span>
+      <span class="pill" id="pill-chrome">Chrome: —</span>
+      <span class="pill" id="pill-socks">SOCKS: —</span>
+    </div>
+  </header>
+  <main>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Console IP / MAC</div><div class="kpi-value mono" id="kpi-net">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">5G PDU</div><div class="kpi-value mono" id="kpi-pdu">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">YouTube ID</div><div class="kpi-value mono" id="kpi-ytid">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">SOCKS via 5G</div><div class="kpi-value mono" id="kpi-socks">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">CDP</div><div class="kpi-value mono" id="kpi-cdp">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Mode</div><div class="kpi-value mono" id="kpi-mode">chromium_5g</div></div>
+    </div>
+    <div class="layout">
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <div>
+            <h2>Chromium desktop · YouTube via 5G</h2>
+            <p class="hint">Open <strong>https://&lt;console-ip&gt;/</strong> (accept cert once). Console + Chromium share HTTPS; YouTube goes Chromium → SOCKS → 5G.</p>
+          </div>
+          <div class="row">
+            <select id="sel-channel"><option value="">Select…</option></select>
+            <select id="sel-quality" title="Playback quality">
+              <option value="4k" selected>4K</option>
+              <option value="1440p">1440p</option>
+              <option value="1080p">1080p</option>
+              <option value="720p">720p</option>
+              <option value="480p">480p</option>
+              <option value="auto">Auto</option>
+            </select>
+            <button type="button" id="btn-play">▶ Play</button>
+            <button type="button" class="danger" id="btn-stop">⏹ Stop</button>
+            <button type="button" class="secondary" id="btn-refresh">↻ Refresh</button>
+            <a class="secondary" id="btn-open-chrome" href="#" target="_blank" rel="noopener" style="text-decoration:none;padding:9px 14px;border-radius:8px;border:1px solid var(--border)">Open Chrome UI</a>
+          </div>
+        </div>
+        <div class="link-box" id="play-link">Chrome UI: —</div>
+        <div class="player-box">
+          <div class="overlay-badge" id="now-playing">idle</div>
+          <iframe id="chrome-frame" title="UE Chromium" allow="autoplay; fullscreen; clipboard-read; clipboard-write" allowfullscreen></iframe>
+        </div>
+        <div class="video-grid" id="video-grid"><div style="color:var(--text-dim)">Loading…</div></div>
+      </section>
+      <div style="display:grid;gap:20px">
+        <section class="card">
+          <h2>Path · Chromium / 5G</h2>
+          <table class="stat-table">
+            <tr><th>Selected</th><td id="st-video">—</td></tr>
+            <tr><th>Quality</th><td id="st-quality">4k</td></tr>
+            <tr><th>App server</th><td id="st-server">—</td></tr>
+            <tr><th>Transport</th><td>console → CDP → Chromium → SOCKS5 → PDU → YouTube<br/>UE backend → PDU → app server (catalog / heartbeat / select)</td></tr>
+            <tr><th>YouTube URL</th><td id="st-yturl">—</td></tr>
+            <tr><th>Chrome page</th><td id="st-chrome">—</td></tr>
+            <tr><th>SOCKS up / down</th><td id="st-socks">—</td></tr>
+            <tr><th>PDU iface / IP</th><td id="st-pdu">—</td></tr>
+            <tr><th>Last error</th><td id="st-error">—</td></tr>
+          </table>
+        </section>
+        <section class="card">
+          <h2>Reception console</h2>
+          <div class="log-box" id="event-log">Waiting…</div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let videos = [], selectedId = "", currentYtId = "", chromeUi = "", lastError = "";
+
+    function fmtBytes(n){n=Number(n)||0;if(n<1024)return n+" B";if(n<1048576)return(n/1024).toFixed(1)+" KiB";if(n<1073741824)return(n/1048576).toFixed(2)+" MiB";return(n/1073741824).toFixed(2)+" GiB"}
+
+    async function req(url, opts){
+      const r = await fetch(url, Object.assign({headers:{"Content-Type":"application/json"}}, opts||{}));
+      const body = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(body.detail||body.message||r.statusText);
+      return body;
+    }
+
+    function chromeUiUrl(){
+      // Same-origin path on HTTPS console (frontend proxies → Chromium).
+      return `/chrome/`;
+    }
+    function chromeUiAbsolute(){
+      return `https://${location.hostname}/chrome/`;
+    }
+
+    function mountChromeUi(){
+      chromeUi = chromeUiAbsolute();
+      $("play-link").textContent = "Chrome UI: " + chromeUi;
+      $("btn-open-chrome").href = chromeUi;
+      const f = $("chrome-frame");
+      // Prefer same-origin /chrome/ when page itself is HTTPS.
+      const src = location.protocol === "https:" ? chromeUiUrl() : chromeUi;
+      if(f.getAttribute("src") !== src) f.src = src;
+    }
+
+    function renderCatalog(){
+      const sel=$("sel-channel");
+      sel.innerHTML=`<option value="">Select…</option>`+videos.map(v=>`<option value="${v.id}">${v.name||v.id}</option>`).join("");
+      if(selectedId) sel.value=selectedId;
+      $("video-grid").innerHTML=videos.length?videos.map(v=>`
+        <button type="button" class="video-tile ${v.id===selectedId?"active":""}" data-id="${v.id}">
+          <h3>${v.name||v.id}</h3>
+          <p>${v.category||"youtube"} · ${v.youtube_id||"—"}</p>
+          <p class="mono" style="margin-top:6px;font-size:11px;color:var(--accent2)">${v.id}</p>
+        </button>`).join(""):`<div style="color:var(--text-dim)">No videos</div>`;
+      document.querySelectorAll(".video-tile").forEach(el=>{
+        el.onclick=()=>playSelected(el.getAttribute("data-id")).catch(e=>alert(e.message));
+      });
+    }
+
+    async function loadVideos(){
+      const data=await req("/api/videos");
+      videos=data.videos||[]; renderCatalog(); return videos;
+    }
+
+    async function playSelected(videoId){
+      if(!videoId) throw new Error("Select a video first");
+      selectedId=videoId; renderCatalog();
+      const quality=($("sel-quality")&&$("sel-quality").value)||"4k";
+      $("now-playing").textContent="navigating Chromium…";
+      const data=await req("/api/play",{method:"POST",body:JSON.stringify({video_id:videoId,quality})});
+      currentYtId=data.youtube_id||"";
+      $("kpi-ytid").textContent=currentYtId||"—";
+      $("kpi-mode").textContent=data.play_mode||"chromium_5g";
+      $("st-yturl").textContent=data.youtube_url||"";
+      $("st-chrome").textContent=data.chrome_url||"";
+      $("st-quality").textContent=`${data.quality||quality}${data.yt_quality?" → "+data.yt_quality:""}`;
+      $("now-playing").textContent=currentYtId||"playing";
+      mountChromeUi();
+      await fetchStatus();
+    }
+
+    async function stopPlayback(){
+      try{await req("/api/streaming/disable",{method:"POST"})}catch(_){}
+      $("now-playing").textContent="idle";
+      await fetchStatus();
+    }
+
+    async function fetchStatus(){
+      try{
+        const data=await req("/api/status"); const st=data.state||{}; const chrome=data.chrome||{}; const socks=data.socks||{};
+        $("ue-title").innerText=`${data.ue_name} (${data.console_ip})`;
+        $("kpi-net").innerText=`${data.console_ip} · ${data.console_mac}`;
+        $("kpi-pdu").innerText=st.pdu_ip?`${data.pdu_iface||st.pdu_iface||"oaitun"} (${st.pdu_ip})`:"Waiting for 5G PDU…";
+        $("kpi-ytid").innerText=st.youtube_id||currentYtId||"—";
+        $("kpi-socks").innerText=`↑${fmtBytes(socks.bytes_up||st.socks_bytes_up||0)} ↓${fmtBytes(socks.bytes_down||st.socks_bytes_down||0)}`;
+        $("kpi-cdp").innerText=chrome.cdp_ready?"ready":"waiting";
+        $("kpi-mode").innerText=st.play_mode||"—";
+        $("pill-pdu").className=`pill ${st.pdu_ready?"ok":"bad"}`;
+        $("pill-pdu").innerText=st.pdu_ready?`5G PDU: ${st.pdu_ip}`:"5G PDU: connecting…";
+        const srv=data.server||{};
+        $("pill-server").className=`pill ${srv.ok?"ok":"bad"}`;
+        $("pill-server").textContent=srv.ok?`App: ${data.server_url||srv.url||"—"}`:`App: ${(srv.error||"down").slice(0,48)}`;
+        $("st-server").textContent=srv.ok
+          ? `${data.server_url||srv.url||"—"} · via ${srv.via||"pdu"} · ok`
+          : `${data.server_url||srv.url||"—"} · ${(srv.error||"not connected").slice(0,80)}`;
+        $("pill-chrome").className=`pill ${chrome.cdp_ready?"ok":"warn"}`;
+        $("pill-chrome").textContent=chrome.cdp_ready?`Chrome: ${chrome.title||"CDP up"}`:"Chrome: starting…";
+        $("pill-socks").className=`pill ${socks.running?"ok":"bad"}`;
+        $("pill-socks").textContent=socks.running?`SOCKS: ${socks.pdu_ip||"—"}`:"SOCKS: down";
+        selectedId=st.selected_video_id||selectedId;
+        currentYtId=st.youtube_id||currentYtId;
+        $("st-video").textContent=st.selected_video_id||"—";
+        $("st-quality").textContent=st.play_quality?(st.play_quality+(st.yt_quality?" → "+st.yt_quality:"")):(st.yt_quality||"—");
+        if(st.play_quality&&$("sel-quality")){
+          const q=String(st.play_quality).toLowerCase();
+          const opt=[...$("sel-quality").options].find(o=>o.value===q);
+          if(opt) $("sel-quality").value=q;
+        }
+        $("st-yturl").textContent=st.youtube_url||"—";
+        $("st-chrome").textContent=chrome.url||st.chrome_url||"—";
+        $("st-socks").textContent=`↑${fmtBytes(socks.bytes_up||0)} / ↓${fmtBytes(socks.bytes_down||0)} · ${socks.connections||0} conn`;
+        $("st-pdu").textContent=st.pdu_ip?`${data.pdu_iface||st.pdu_iface||"—"} / ${st.pdu_ip}`:"not ready";
+        $("st-error").textContent=lastError||"—";
+        $("now-playing").textContent=st.streaming_enabled?(st.youtube_id||"playing"):"idle";
+        if(selectedId){const sel=$("sel-channel"); if(sel) sel.value=selectedId;}
+        if(! $("chrome-frame").src) mountChromeUi();
+        if(data.recent_events&&data.recent_events.length){
+          $("event-log").innerHTML=data.recent_events.slice().reverse().map(e=>`
+            <div class="log-item"><span class="log-time">${e.time||""}</span>
+            <span style="color:var(--accent2);font-weight:600">[${e.type||"evt"}]</span>
+            <span class="log-msg">${e.msg||""}</span></div>`).join("");
+        }
+      }catch(err){lastError=String(err.message||err)}
+    }
+
+    $("btn-refresh").onclick=()=>loadVideos().catch(e=>alert(e.message));
+    $("btn-play").onclick=()=>playSelected($("sel-channel").value||selectedId||(videos[0]&&videos[0].id)).catch(e=>alert(e.message));
+    $("btn-stop").onclick=()=>stopPlayback().catch(e=>alert(e.message));
+    $("sel-channel").onchange=e=>{if(e.target.value) playSelected(e.target.value).catch(err=>alert(err.message))};
+    $("sel-quality").onchange=()=>{
+      const vid=$("sel-channel").value||selectedId;
+      if(vid) playSelected(vid).catch(err=>alert(err.message));
+    };
+
+    (async()=>{
+      // Viewer only — backend autostarts Chromium when CDP+PDU are ready.
+      mountChromeUi();
+      try{await loadVideos(); await fetchStatus()}
+      catch(e){$("video-grid").textContent=e.message; lastError=e.message}
+      setInterval(fetchStatus,2000);
+    })();
+  </script>
+</body>
+</html>

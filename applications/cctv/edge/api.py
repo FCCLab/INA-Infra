@@ -1,4 +1,4 @@
-"""CCTV FastAPI control plane (Swagger at /docs). Serves the dashboard SPA."""
+"""CCTV FastAPI control plane (Swagger at /docs). Serves the console SPA."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ app = FastAPI(
     title="CCTV Analyzer API",
     description=(
         "NeuroRAN CCTV backend. UE cameras publish RTSP RECORD into the analyzer; "
-        "annotated video is published to MediaMTX. The dashboard **subscribes** via "
+        "annotated video is published to MediaMTX. The console **subscribes** via "
         "HLS (`/live/{path}/index.m3u8`) or WHEP (`/whep/{path}`). "
         "See [MediaMTX](https://github.com/bluenviron/mediamtx)."
     ),

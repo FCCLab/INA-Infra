@@ -93,7 +93,7 @@ export default function DocsPage() {
             headers={["Port", "Protocol", "Component", "Function"]}
             rows={[
               [<code>8554</code>, "TCP / UDP", "GStreamer RTSP Server", "Ingest from UE publishers (RTSP RECORD)"],
-              [<code>8080</code>, "HTTP / TCP", "FastAPI & React SPA", "Dashboard web UI and REST control plane"],
+              [<code>8080</code>, "HTTP / TCP", "FastAPI & React SPA", "Console web UI and REST control plane"],
               [<code>8555</code>, "TCP", "MediaMTX Internal", "Inference worker annotated RTSP publish"],
               [<code>8888</code>, "HTTP / TCP", "MediaMTX HLS", "HLS streaming engine (proxied at /live)"],
               [<code>8889</code>, "HTTP / TCP", "MediaMTX WHEP", "WebRTC WHEP gateway (proxied at /whep)"],

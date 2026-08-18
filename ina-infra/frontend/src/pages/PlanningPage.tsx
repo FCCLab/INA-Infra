@@ -17,8 +17,8 @@ import {
 } from "../api/client";
 import Topology from "../components/Topology";
 import ApplicationServerSettingsBox from "../components/ApplicationServerSettingsBox";
-import { AppDashboardButtons, AppDashboardTags } from "../components/AppDashboardLinks";
-import { APPLICATION_DASHBOARD_LIST } from "../lib/applicationDashboards";
+import { AppConsoleButtons, AppConsoleTags } from "../components/AppConsoleLinks";
+import { APPLICATION_CONSOLE_LIST } from "../lib/applicationConsoles";
 import NetworkSettingsForm from "../components/NetworkSettingsForm";
 import OaiImagesForm from "../components/OaiImagesForm";
 import FieldHelp from "../components/FieldHelp";
@@ -1273,7 +1273,7 @@ export default function PlanningPage() {
               <FieldHelp
                 className={currentSubnetConflict ? "field-conflict" : undefined}
                 label="Multus subnet"
-                help="Per-profile macvlan /24 (e.g. ina-infra → 10.1.140.0/24, next profile → 10.1.141.0/24). Add profile auto-picks a free /24. IPs use host = base[role] + n."
+                help="Per-profile macvlan /24 for RAN (ina-infra → 10.1.140.0/24). Application N6/console IPs are on site 10.1.137 (.211+slice), not this subnet."
               >
                 <input
                   key={`subnet-${selectedName}`}
@@ -1845,7 +1845,7 @@ export default function PlanningPage() {
                               <code>{s.app_ip || "—"}</code>
                               {appType && appType !== "none" && appType !== "custom" && (
                                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 2 }}>
-                                  <AppDashboardTags appType={appType} />
+                                  <AppConsoleTags appType={appType} />
                                 </div>
                               )}
                             </div>
@@ -2084,7 +2084,7 @@ export default function PlanningPage() {
                         marginTop: 2,
                       }}
                     >
-                      Application Dashboards & Grafana Telemetry Server
+                      Application Consoles & Grafana Dashboards
                     </div>
                   </div>
                   <a
@@ -2124,14 +2124,14 @@ export default function PlanningPage() {
                 </div>
 
                 <div
-                  className="app-dashboard-grid"
+                  className="app-console-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
                     gap: 10,
                   }}
                 >
-                  {APPLICATION_DASHBOARD_LIST.map((app) => (
+                  {APPLICATION_CONSOLE_LIST.map((app) => (
                     <div
                       key={app.id}
                       style={{
@@ -2173,7 +2173,7 @@ export default function PlanningPage() {
                           flexWrap: "wrap",
                         }}
                       >
-                        <AppDashboardButtons appType={app.id} />
+                        <AppConsoleButtons appType={app.id} />
                       </div>
                     </div>
                   ))}

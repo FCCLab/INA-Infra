@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { SliceAppType } from "../api/client";
-import { dashboardPairFor, type DashboardLink } from "../lib/applicationDashboards";
+import { consolePairFor, type ExternalLink } from "../lib/applicationConsoles";
 
 const ExtIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -10,7 +10,7 @@ const ExtIcon = (
   </svg>
 );
 
-const DASH: CSSProperties = {
+const CONSOLE: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 6,
@@ -25,13 +25,13 @@ const DASH: CSSProperties = {
 };
 
 const GRAF: CSSProperties = {
-  ...DASH,
+  ...CONSOLE,
   background: "rgba(249, 115, 22, 0.15)",
   color: "#fb923c",
   border: "1px solid rgba(249, 115, 22, 0.35)",
 };
 
-const TAG_DASH: CSSProperties = {
+const TAG_CONSOLE: CSSProperties = {
   fontSize: 11,
   padding: "3px 8px",
   whiteSpace: "nowrap",
@@ -46,7 +46,7 @@ const TAG_DASH: CSSProperties = {
 };
 
 const TAG_GRAF: CSSProperties = {
-  ...TAG_DASH,
+  ...TAG_CONSOLE,
   fontWeight: 600,
   background: "rgba(249, 115, 22, 0.12)",
   color: "#fb923c",
@@ -58,7 +58,7 @@ function Link({
   style,
   compact,
 }: {
-  item: DashboardLink;
+  item: ExternalLink;
   style: CSSProperties;
   compact?: boolean;
 }) {
@@ -70,23 +70,23 @@ function Link({
   );
 }
 
-export function AppDashboardButtons({ appType }: { appType: SliceAppType }) {
-  const pair = dashboardPairFor(appType);
+export function AppConsoleButtons({ appType }: { appType: SliceAppType }) {
+  const pair = consolePairFor(appType);
   if (!pair) return null;
   return (
     <>
-      <Link item={pair.dashboard} style={DASH} />
+      <Link item={pair.console} style={CONSOLE} />
       <Link item={pair.grafana} style={GRAF} />
     </>
   );
 }
 
-export function AppDashboardTags({ appType }: { appType: SliceAppType }) {
-  const pair = dashboardPairFor(appType);
+export function AppConsoleTags({ appType }: { appType: SliceAppType }) {
+  const pair = consolePairFor(appType);
   if (!pair) return null;
   return (
     <>
-      <Link item={pair.dashboard} style={TAG_DASH} compact />
+      <Link item={pair.console} style={TAG_CONSOLE} compact />
       <Link item={pair.grafana} style={TAG_GRAF} compact />
     </>
   );

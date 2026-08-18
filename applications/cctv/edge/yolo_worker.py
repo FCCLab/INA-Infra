@@ -33,7 +33,7 @@ def _encode_jpeg(frame_arr: Any) -> Optional[bytes]:
     try:
         import cv2
 
-        ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
         return buf.tobytes() if ok else None
     except Exception:
         return None

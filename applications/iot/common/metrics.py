@@ -25,6 +25,32 @@ from typing import Optional
 
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
+APP_UE_LATENCY_MS = Gauge(
+    "app_ue_latency_ms",
+    "Per-UE application latency (milliseconds)",
+    ["ue_id"],
+)
+APP_UE_THROUGHPUT_MBPS = Gauge(
+    "app_ue_throughput_mbps",
+    "Per-UE application throughput (Mbps)",
+    ["ue_id"],
+)
+APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
+APP_THROUGHPUT_MBPS = Gauge(
+    "app_throughput_mbps", "Aggregated application throughput (Mbps)"
+)
+
+
+def set_ue_slo(ue_id: str, latency_ms: float, throughput_mbps: float) -> None:
+    uid = str(ue_id or "ue")
+    APP_UE_LATENCY_MS.labels(ue_id=uid).set(float(latency_ms or 0.0))
+    APP_UE_THROUGHPUT_MBPS.labels(ue_id=uid).set(float(throughput_mbps or 0.0))
+
+
+def set_agg_slo(latency_ms: float, throughput_mbps: float) -> None:
+    APP_LATENCY_MS.set(float(latency_ms or 0.0))
+    APP_THROUGHPUT_MBPS.set(float(throughput_mbps or 0.0))
+
 # Delay histogram buckets (seconds). Best-effort semantics -> a wide range from
 # a few ms up to 10 s, unlike the tight ~20 ms SLO buckets of slices A/B.
 DELAY_BUCKETS = (

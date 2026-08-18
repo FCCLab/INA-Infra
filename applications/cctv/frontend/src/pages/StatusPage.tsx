@@ -144,7 +144,7 @@ export default function StatusPage() {
                 <td className="mono">:{st?.rtsp_port ?? 8554} (TCP / UDP RECORD)</td>
               </tr>
               <tr>
-                <td>HTTP API & Dashboard</td>
+                <td>HTTP API & Console</td>
                 <td className="mono">:{st?.http_port ?? 8080}</td>
               </tr>
               <tr>
@@ -227,15 +227,6 @@ export default function StatusPage() {
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: "6px" }}>
-                      <a
-                        href={c.snapshot_path}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="cam-action-btn"
-                        style={{ padding: "2px 6px" }}
-                      >
-                        Snapshot
-                      </a>
                       <a
                         href={c.hls_path}
                         target="_blank"

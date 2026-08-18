@@ -15,34 +15,37 @@ Each container has two logical NICs:
 
 ```mermaid
 flowchart LR
-  subgraph client [client container]
-    C["iot_client.py (paho-mqtt)\nN simulated devices\nfast/med/slow UL publishers\nsubscribes slice_d/dl/<dev>"]
-    CM["/metrics :9104 (ens0)"]
+  subgraph client [UE console]
+    C["backend.py (paho-mqtt)\nN MQTT messages\nperiod_s + payload each\nsubscribes slice_d/dl/ueN"]
+    CM["/metrics :9106"]
     C --- CM
   end
-  subgraph edge [edge container]
-    B["mosquitto broker\n:1883 (OTA), :1884 (loopback)"]
-    K["controller.py (paho-mqtt)\nsub slice_d/ul/#  -> UL delay\npub slice_d/dl/<dev>  fast/slow"]
-    EM["/metrics :9105 (ens0)"]
+  subgraph server [application-iot pod]
+    B["mosquitto container\n:1883 OTA, :1884 control"]
+    K["controller container\npaho-mqtt loopback :1884"]
+    EM["/metrics :9105"]
     B --- K
     K --- EM
   end
-  C -- "slice_d/ul/<dev> (OTA MQTT)" --> B
-  B -- "slice_d/dl/<dev> (OTA MQTT)" --> C
+  C -- "slice_d/ul/<ue> (OTA MQTT :1883)" --> B
+  B -- "slice_d/dl/<ue> (OTA MQTT :1883)" --> C
 ```
 
-- **Uplink** `slice_d/ul/<device_id>`: client → controller.
-- **Downlink** `slice_d/dl/<device_id>`: controller → client.
-- The controller talks to the broker over **loopback (`:1884`)** so that internal
-  hop never pollutes the OTA measurement; devices connect over **OTA (`:1883`)**.
+- **Uplink** `slice_d/ul/<device_id>`: UE → Mosquitto :1883 (OTA).
+- **Downlink** `slice_d/dl/<device_id>`: controller → Mosquitto :1884 → UE :1883.
+- Mosquitto runs in a **dedicated container**. The controller and dashboard talk
+  to it on **loopback `:1884`** in the same pod so that hop never pollutes the
+  OTA measurement; UEs connect over **OTA (`:1883`)**.
 
 ## Layout
 
 ```
 iot/
-├── client/   iot_client.py (N-device fleet), entrypoint.sh, Dockerfile
-├── edge/     controller.py + mosquitto (conf.tpl, entrypoint.sh), Dockerfile
-├── common/   metrics.py (payload build/parse, shared buckets + metric factory)
+├── client/     iot_client.py (compose/lab fleet), entrypoint.sh, Dockerfile
+├── ue/         per-UE console (backend + frontend): N messages, period, payload
+├── mosquitto/  dedicated Eclipse Mosquitto broker image
+├── edge/       controller.py (no broker), entrypoint.sh, Dockerfile
+├── common/     metrics.py (payload build/parse, shared buckets + metric factory)
 ├── docker-compose.yml
 └── README.md
 ```

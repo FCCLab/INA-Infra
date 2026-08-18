@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OTT Control · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -429,41 +430,164 @@
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }
+
+/* CCTV-like left rail + tabs for HTML consoles */
+html, body { height: 100%; overflow: hidden; }
+.app {
+  display: flex;
+  align-items: stretch;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+.app-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.rail {
+  width: 92px;
+  flex: 0 0 92px;
+  height: 100vh;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  background: var(--surface);
+}
+.rail-brand {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.rail-logo { width: 56px; height: auto; display: block; }
+.rail-nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.rail-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 62px;
+  padding: 8px 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+.rail-tab-icon { display: grid; place-items: center; width: 22px; height: 22px; }
+.rail-tab-icon svg { width: 20px; height: 20px; }
+.rail-tab-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  line-height: 1.15;
+  text-align: center;
+}
+.rail-tab:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.rail-tab-active {
+  background: rgba(22, 230, 160, 0.10);
+  color: var(--accent);
+  border-color: rgba(22, 230, 160, 0.22);
+}
+.rail-tab-active .rail-tab-label { color: var(--accent); }
+.rail-tab-active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.rail-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+.rail-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rail-status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(22, 230, 160, 0.18);
+}
+.rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint); text-align: center; }
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: rgba(11, 17, 32, 0.82);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.crumb { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.site-badge {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: rgba(22, 230, 160, 0.12);
+  padding: 5px 11px; border-radius: 20px; white-space: nowrap;
+}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 24px;
+}
+.tab-panel { display: none; }
+.tab-panel.is-active { display: block; margin-bottom: 16px; }
+.docs-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin: 8px 0 0; }
+.docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.docs-table th, .docs-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.docs-table th { color: var(--text-faint); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.docs-badge-get { color: var(--accent); font-weight: 700; font-size: 11px; }
+.docs-badge-post { color: var(--accent2); font-weight: 700; font-size: 11px; }
+.docs-badge-put { color: var(--accent-orange); font-weight: 700; font-size: 11px; }
+.docs-badge-del { color: var(--bad); font-weight: 700; font-size: 11px; }
+
   </style>
 </head>
 <body>
-  <!-- NeuroRAN Fixed Shell Header -->
-  <header>
-    <div class="brand-wrap">
-      <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="NeuroRAN">
-        <defs>
-          <linearGradient id="nr-grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#16E6A0" />
-            <stop offset="100%" stop-color="#00C2D4" />
-          </linearGradient>
-        </defs>
-        <g fill="none" stroke="url(#nr-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z" />
-          <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40" />
-        </g>
-        <g fill="url(#nr-grad)">
-          <circle cx="32" cy="28" r="4" />
-          <circle cx="14" cy="20" r="3" />
-          <circle cx="50" cy="20" r="3" />
-          <circle cx="32" cy="10" r="3" />
-          <circle cx="14" cy="40" r="3" />
-          <circle cx="50" cy="40" r="3" />
-          <circle cx="32" cy="50" r="3" />
-        </g>
-      </svg>
-      <div class="brand-text">
-        <div class="kicker">Slice 3 · High-Bandwidth Video Delivery</div>
-        <h1>OTT Stream Console <span class="badge">HD RTSP</span></h1>
-      </div>
-    </div>
-
-    <div class="header-actions">
-      <div class="row" id="header-pills">
+<div class="app theme-dark">
+  <aside class="rail">
+    <div class="rail-brand" title="OTT Control · NeuroRAN"><img class="rail-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" /></div>
+    <nav class="rail-nav" aria-label="Main navigation">
+      <button type="button" class="rail-tab rail-tab-active" data-tab="overview" onclick="setConsoleTab('overview')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16"/><path d="M8 16v-5M12 16V8M16 16v-3" stroke-linecap="round"/></svg></span>
+        <span class="rail-tab-label">Overview</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="config" onclick="setConsoleTab('config')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="rail-tab-label">Config</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="docs" onclick="setConsoleTab('docs')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="rail-tab-label">Docs</span>
+      </button>
+    </nav>
+    <div class="rail-foot"><div class="rail-status"><span class="rail-status-dot"></span><span class="rail-status-text">OTT</span></div></div>
+  </aside>
+  <div class="app-body">
+    <header class="topbar">
+      <div class="crumb" id="crumb">Stream overview · RTSP</div>
+      <span class="site-badge">INA · OTT Control</span>
+      <div class="topbar-right">
+        <div class="row" id="header-pills">
         <span class="pill"><span class="dot pulse"></span> connecting…</span>
       </div>
       <a class="ext-link" href="/api/docs" target="_blank" rel="noreferrer" title="Swagger REST API Reference">Swagger API</a>
@@ -471,11 +595,11 @@
         <span>Grafana</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
       </a>
-    </div>
-  </header>
-
-  <main>
-    <!-- KPI Summary Strip -->
+      </div>
+    </header>
+        <main class="dash">
+      <div class="tab-panel is-active" data-tab="overview">
+          <!-- KPI Summary Strip -->
     <div class="kpi-strip">
       <div class="kpi-card">
         <div class="kpi-label">Server Telemetry <span class="dot" id="kpi-srv-dot"></span></div>
@@ -507,7 +631,10 @@
       </div>
     </div>
 
-    <!-- Stream Encoding & Deployment Configuration -->
+
+      </div>
+            <div class="tab-panel" data-tab="config">
+          <!-- Stream Encoding & Deployment Configuration -->
     <section class="card tier">
       <div class="card-header">
         <div>
@@ -541,7 +668,10 @@
       <div class="msg-box" id="cfg-msg"></div>
     </section>
 
-    <!-- Live Telemetry & Metrics Scraper -->
+
+      </div>
+            <div class="tab-panel" data-tab="overview">
+          <!-- Live Telemetry & Metrics Scraper -->
     <section class="card tier">
       <div class="card-header">
         <div>
@@ -556,7 +686,26 @@
 
       <pre id="metrics-box">Connecting to local metrics endpoint…</pre>
     </section>
-  </main>
+  
+      </div>
+          <div class="tab-panel" data-tab="docs">
+        <section class="card tier">
+          <div class="card-header"><div>
+            <h2 class="card-title">OTT Control sidecar · Slice 3</h2>
+            <p class="card-subtitle">Encoding env + Prometheus scrape</p>
+          </div></div>
+          <p class="docs-lead">This sidecar rolls STREAM_PATH / bitrate on the OTT Deployment. The public portal is the React UE Console. Interactive OpenAPI: <a href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</p>
+          <table class="docs-table">
+            <thead><tr><th>Method</th><th>Endpoint</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/status</code></td><td>JSON</td><td>Metrics live, RTSP URL, encoding config</td></tr><tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/config</code></td><td>JSON</td><td>Apply stream env and roll pod</td></tr><tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/restart</code></td><td>JSON</td><td>Restart ott-server process</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -674,6 +823,15 @@
 
     $("manual-refresh").onclick = refreshStatus;
 
+
+    const CONSOLE_CRUMBS = {"overview": "Stream overview · RTSP", "config": "Encoding & server config", "docs": "Documentation & REST Reference"};
+    function setConsoleTab(id) {
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.tab === id));
+      document.querySelectorAll(".rail-tab").forEach((b) => b.classList.toggle("rail-tab-active", b.dataset.tab === id));
+      const crumb = document.getElementById("crumb");
+      if (crumb) crumb.textContent = CONSOLE_CRUMBS[id] || id;
+    }
+    setConsoleTab("overview");
     refreshStatus();
     setInterval(refreshStatus, 5000);
   </script>

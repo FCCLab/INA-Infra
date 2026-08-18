@@ -19,5 +19,5 @@ WORKDIR /app
 COPY app.py /app/app.py
 COPY static /app/static
 
-EXPOSE 8080
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+EXPOSE 80
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port ${DASHBOARD_PORT:-80}"]

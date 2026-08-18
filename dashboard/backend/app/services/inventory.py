@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from app.services import clusters as cluster_svc
 from app.services import prometheus as prom
+from app.services.config_sync import fetch_config_sync, stub_status
 from app.services.gpu_metrics import fetch_cluster_gpu_metrics
 from app.services.k8s_client import (
     api_exc_message,
@@ -672,36 +673,45 @@ def summarize_cluster(cluster: str) -> Dict[str, Any]:
             "error": err or "no client",
             "kubeconfig": str(kubeconfig_path_safe(cluster)),
             "context": cluster_svc.kube_context(cluster),
+            "config_sync": stub_status(
+                cluster,
+                overall="unknown",
+                summary="Cluster unreachable",
+                error=err or "no client",
+            ),
         }
 
     nodes_total = nodes_ready = 0
     pods_total = pods_running = 0
     dep_desired = dep_ready = 0
     probe_err: Optional[str] = None
+    config_sync = stub_status(cluster, overall="unknown", summary="Not queried")
     try:
-        t0 = time.monotonic()
-        v1 = core_v1(api)
-        node_list = v1.list_node(**with_timeout())
-        latency_ms = round((time.monotonic() - t0) * 1000, 1)
-        for n in node_list.items or []:
-            nodes_total += 1
-            if _node_ready(getattr(n.status, "conditions", None)):
-                nodes_ready += 1
-        pod_list = v1.list_pod_for_all_namespaces(**with_timeout())
-        for p in pod_list.items or []:
-            pods_total += 1
-            if (p.status.phase if p.status else None) == "Running":
-                pods_running += 1
-        apps = apps_v1(api)
-        for d in (apps.list_deployment_for_all_namespaces(**with_timeout()).items or []):
-            desired = int(getattr(d.spec, "replicas", 0) or 0)
-            ready = int(getattr(d.status, "ready_replicas", 0) or 0)
-            dep_desired += desired
-            dep_ready += ready
-    except ApiException as exc:
-        probe_err = api_exc_message(exc)
-    except Exception as exc:  # noqa: BLE001
-        probe_err = f"{type(exc).__name__}: {exc}"
+        try:
+            t0 = time.monotonic()
+            v1 = core_v1(api)
+            node_list = v1.list_node(**with_timeout())
+            latency_ms = round((time.monotonic() - t0) * 1000, 1)
+            for n in node_list.items or []:
+                nodes_total += 1
+                if _node_ready(getattr(n.status, "conditions", None)):
+                    nodes_ready += 1
+            pod_list = v1.list_pod_for_all_namespaces(**with_timeout())
+            for p in pod_list.items or []:
+                pods_total += 1
+                if (p.status.phase if p.status else None) == "Running":
+                    pods_running += 1
+            apps = apps_v1(api)
+            for d in (apps.list_deployment_for_all_namespaces(**with_timeout()).items or []):
+                desired = int(getattr(d.spec, "replicas", 0) or 0)
+                ready = int(getattr(d.status, "ready_replicas", 0) or 0)
+                dep_desired += desired
+                dep_ready += ready
+        except ApiException as exc:
+            probe_err = api_exc_message(exc)
+        except Exception as exc:  # noqa: BLE001
+            probe_err = f"{type(exc).__name__}: {exc}"
+        config_sync = fetch_config_sync(api, cluster)
     finally:
         close_quietly(api)
 
@@ -732,6 +742,7 @@ def summarize_cluster(cluster: str) -> Dict[str, Any]:
         "error": probe_err,
         "kubeconfig": str(kubeconfig_path_safe(cluster)),
         "context": cluster_svc.kube_context(cluster),
+        "config_sync": config_sync,
     }
 
 
@@ -766,5 +777,11 @@ def summarize_all() -> List[Dict[str, Any]]:
                     "error": f"{type(exc).__name__}: {exc}",
                     "kubeconfig": str(kubeconfig_path_safe(name)),
                     "context": cluster_svc.kube_context(name),
+                    "config_sync": stub_status(
+                        name,
+                        overall="unknown",
+                        summary="Cluster query failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
                 }
     return [results[n] for n in names]

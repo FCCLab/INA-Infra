@@ -1,6 +1,6 @@
 # Slice D — Background IoT / best-effort load generator.
 #
-# Two services on two networks:
+# Three services on two networks:
 #   * metrics_net : ens0-equivalent bridge. Prometheus scrapes /metrics here and
 #     chrony syncs over it. Metrics ports are also published to the host.
 #   * ota_net     : the 5G data-plane path. MQTT (broker :1883, client socket)
@@ -11,14 +11,38 @@
 # Zero-config `docker compose up --build` works out of the box; every value has
 # an inline default and can be overridden via the environment or an .env file.
 services:
+  slice-d-mosquitto:
+    build:
+      context: ./mosquitto
+      dockerfile: Dockerfile
+    image: iot-mosquitto
+    container_name: sliced-mosquitto
+    ports:
+      - "${BROKER_PORT:-1883}:1883"
+    networks:
+      metrics_net: {}
+      ota_net:
+        ipv4_address: ${EDGE_OTA_IP:-10.46.0.10}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1884 -C 1 -t '$$SYS/broker/uptime' -W 3 >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   slice-d-edge:
     build:
       context: .
       dockerfile: edge/Dockerfile
     image: sliced-edge
     container_name: sliced-edge
+    depends_on:
+      slice-d-mosquitto:
+        condition: service_healthy
     environment:
-      OTA_BIND_IP: ${EDGE_OTA_IP:-10.46.0.10}
+      LOCAL_BROKER_HOST: slice-d-mosquitto
+      LOCAL_BROKER_PORT: "1884"
       METRICS_BIND_IP: ${METRICS_BIND_IP:-0.0.0.0}
       METRICS_PORT: ${EDGE_METRICS_PORT:-9105}
       DL_FAST_PERIOD_S: ${DL_FAST_PERIOD_S:-300}
@@ -36,13 +60,9 @@ services:
       - "${EDGE_METRICS_PORT:-9105}:${EDGE_METRICS_PORT:-9105}"
     networks:
       metrics_net: {}
-      ota_net:
-        ipv4_address: ${EDGE_OTA_IP:-10.46.0.10}
     restart: unless-stopped
     healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "curl -fsS http://localhost:${EDGE_METRICS_PORT:-9105}/metrics >/dev/null && mosquitto_sub -h 127.0.0.1 -p 1884 -C 1 -t '$$SYS/broker/uptime' -W 3 >/dev/null"
+      test: ["CMD", "curl", "-fsS", "http://localhost:${EDGE_METRICS_PORT:-9105}/metrics"]
       interval: 15s
       timeout: 5s
       retries: 3

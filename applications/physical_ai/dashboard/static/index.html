@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Physical AI · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -149,35 +150,125 @@
       border-color: rgba(22, 230, 160, 0.25);
       background: rgba(22, 230, 160, 0.06);
     }
+    .ue-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .card .kpi-strip-ue { margin: 0 0 14px; }
+    .ue-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+    }
+    .ue-tok {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .ue-tok-item {
+      background: rgba(7, 11, 20, 0.45);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 0;
+    }
+    .ue-tok-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+    .ue-tok-value {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 15px;
+      font-weight: 600;
+      margin-top: 4px;
+      color: var(--text);
+    }
+    .ue-tok-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .ue-dash-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--accent); color: #04140e; font-weight: 700; font-size: 13px;
+      padding: 8px 14px; border-radius: 8px; text-decoration: none !important;
+    }
+    .ue-dash-btn:hover { filter: brightness(1.08); }
+
     .ext-link.grafana:hover {
       border-color: var(--accent);
       background: rgba(22, 230, 160, 0.14);
     }
 
-    /* Container */
-    main {
-      padding: 24px 28px 48px;
-      max-width: 1080px;
-      margin: 0 auto;
+    /* Container — full dash width (rail already takes 92px) */
+    main, main.dash {
+      padding: 16px 22px 32px;
+      max-width: none;
+      width: 100%;
+      margin: 0;
       display: grid;
-      gap: 20px;
+      gap: 16px;
     }
 
-    /* KPI Summary Strip */
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+    .section-bar {
+      width: 3px;
+      height: 13px;
+      border-radius: 2px;
+      background: linear-gradient(180deg, var(--accent), var(--accent2));
+    }
+    .section-text {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    /* KPI Summary Strip — 5 equal columns across the dash */
     .kpi-strip {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 12px;
+    }
+    @media (max-width: 1279px) {
+      .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1023px) {
+      .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 480px) {
+      .kpi-strip { grid-template-columns: 1fr; }
+    }
+    .kpi-strip-status,
+    .kpi-strip-ue {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    @media (max-width: 1023px) {
+      .kpi-strip-status,
+      .kpi-strip-ue { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     .kpi-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
-      padding: 14px 16px;
+      padding: 16px 18px 18px;
       box-shadow: 0 4px 20px -8px rgba(0, 0, 0, 0.5);
       backdrop-filter: blur(8px);
       transition: border-color 0.15s ease;
+      min-width: 0;
     }
     .kpi-card:hover {
       border-color: var(--border-2);
@@ -188,20 +279,30 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-dim);
-      margin-bottom: 6px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
     }
 
     .kpi-value {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 16px;
-      font-weight: 600;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
       color: var(--text);
       display: flex;
       align-items: center;
       gap: 8px;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .kpi-value.mono {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0;
     }
 
     /* Standard Cards */
@@ -377,7 +478,10 @@
       border-radius: 50%;
       display: inline-block;
       background: currentColor;
+      flex-shrink: 0;
     }
+    .dot.ok { color: var(--ok); background: var(--ok); }
+    .dot.bad { color: var(--bad); background: var(--bad); }
     .dot.pulse {
       animation: pulse-dot 1.8s infinite ease-in-out;
     }
@@ -440,41 +544,208 @@
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }
+
+/* CCTV-like left rail + tabs for HTML consoles */
+html, body { height: 100%; overflow: hidden; }
+.app {
+  display: flex;
+  align-items: stretch;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+.app-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.rail {
+  width: 92px;
+  flex: 0 0 92px;
+  height: 100vh;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  background: var(--surface);
+}
+.rail-brand {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.rail-logo { width: 56px; height: auto; display: block; }
+.rail-nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.rail-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+.rail-tab-icon { display: grid; place-items: center; width: 22px; height: 22px; }
+.rail-tab-icon svg { width: 20px; height: 20px; }
+.rail-tab-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  line-height: 1.15;
+  text-align: center;
+}
+.rail-tab:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.rail-tab-active {
+  background: rgba(22, 230, 160, 0.10);
+  color: var(--accent);
+  border-color: rgba(22, 230, 160, 0.22);
+}
+.rail-tab-active .rail-tab-label { color: var(--accent); }
+.rail-tab-active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.rail-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+.rail-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rail-status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(22, 230, 160, 0.18);
+}
+.rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint); text-align: center; }
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: rgba(11, 17, 32, 0.82);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.crumb { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.site-badge {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: rgba(22, 230, 160, 0.12);
+  padding: 5px 11px; border-radius: 20px; white-space: nowrap;
+}
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 22px 32px;
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+}
+.studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(200px, 1fr) auto auto;
+  gap: 10px 18px;
+  align-items: stretch;
+}
+.studio-col {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 1 / -1;
+  min-width: 0;
+}
+.studio-col label { margin-bottom: 0; }
+.studio-col textarea,
+.studio-col pre {
+  min-height: 200px;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  box-sizing: border-box;
+}
+.studio-col-out pre { grid-row: 2 / -1; }
+.studio-col .prompt-presets { margin-top: 0; }
+.studio-col .row { margin-top: 0 !important; }
+@media (max-width: 1100px) {
+  .studio-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .studio-col { display: flex; flex-direction: column; gap: 8px; grid-row: auto; }
+  .studio-col-out pre { grid-row: auto; }
+}
+.tab-panel { display: grid; gap: 16px; width: 100%; min-width: 0; }
+.docs-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin: 8px 0 0; }
+.docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.docs-table th, .docs-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.docs-table th { color: var(--text-faint); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.docs-badge-get { color: var(--accent); font-weight: 700; font-size: 11px; }
+.docs-badge-post { color: var(--accent2); font-weight: 700; font-size: 11px; }
+.docs-badge-put { color: var(--accent-orange); font-weight: 700; font-size: 11px; }
+.docs-badge-del { color: var(--bad); font-weight: 700; font-size: 11px; }
+
   </style>
 </head>
 <body>
-  <!-- NeuroRAN Fixed Shell Header -->
-  <header>
-    <div class="brand-wrap">
-      <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="NeuroRAN">
-        <defs>
-          <linearGradient id="nr-grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#16E6A0" />
-            <stop offset="100%" stop-color="#00C2D4" />
-          </linearGradient>
-        </defs>
-        <g fill="none" stroke="url(#nr-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z" />
-          <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40" />
-        </g>
-        <g fill="url(#nr-grad)">
-          <circle cx="32" cy="28" r="4" />
-          <circle cx="14" cy="20" r="3" />
-          <circle cx="50" cy="20" r="3" />
-          <circle cx="32" cy="10" r="3" />
-          <circle cx="14" cy="40" r="3" />
-          <circle cx="50" cy="40" r="3" />
-          <circle cx="32" cy="50" r="3" />
-        </g>
-      </svg>
-      <div class="brand-text">
-        <div class="kicker">Slice 2 · Edge Server (A40 GPU)</div>
-        <h1>Physical AI Console <span class="badge">Cosmos3</span></h1>
-      </div>
-    </div>
-
-    <div class="header-actions">
-      <div class="row" id="header-pills">
+<div class="app theme-dark">
+  <aside class="rail">
+    <div class="rail-brand" title="Physical AI · NeuroRAN"><img class="rail-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" /></div>
+    <nav class="rail-nav" aria-label="Main navigation">
+      <button type="button" class="rail-tab rail-tab-active" data-tab="overview" onclick="setConsoleTab('overview')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+        <span class="rail-tab-label">Overview</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="ues" onclick="setConsoleTab('ues')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        <span class="rail-tab-label">UEs</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="studio" onclick="setConsoleTab('studio')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>
+        <span class="rail-tab-label">Studio</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="token" onclick="setConsoleTab('token')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+        <span class="rail-tab-label">Token</span>
+      </button>
+      <button type="button" class="rail-tab" data-tab="docs" onclick="setConsoleTab('docs')">
+        <span class="rail-tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+        <span class="rail-tab-label">Docs</span>
+      </button>
+    </nav>
+    <div class="rail-foot"><div class="rail-status"><span class="rail-status-dot"></span><span class="rail-status-text">PAI</span></div></div>
+  </aside>
+  <div class="app-body">
+    <header class="topbar">
+      <div class="crumb" id="crumb">Physical AI · Cosmos3</div>
+      <span class="site-badge">INA · Physical AI</span>
+      <div class="topbar-right">
+        <div class="row" id="header-pills">
         <span class="pill"><span class="dot pulse"></span> connecting…</span>
       </div>
       <a class="ext-link" href="/api/docs" target="_blank" rel="noreferrer" title="Swagger REST API Reference">Swagger API</a>
@@ -482,12 +753,12 @@
         <span>Grafana</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
       </a>
-    </div>
-  </header>
-
-  <main>
-    <!-- KPI Summary Strip -->
-    <div class="kpi-strip">
+      </div>
+    </header>
+        <main class="dash">
+      <div class="tab-panel" data-tab="overview">
+    <div class="section-label"><span class="section-bar"></span><span class="section-text">Status</span></div>
+    <div class="kpi-strip kpi-strip-status">
       <div class="kpi-card">
         <div class="kpi-label">HF Secret Token <span class="dot" id="kpi-hf-dot"></span></div>
         <div class="kpi-value" id="kpi-hf">Checking…</div>
@@ -498,15 +769,96 @@
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Active Model</div>
-        <div class="kpi-value" id="kpi-model" style="font-size: 13px;">nvidia/Cosmos3-Nano</div>
+        <div class="kpi-value" id="kpi-model">nvidia/Cosmos3-Nano</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Cluster & Namespace</div>
-        <div class="kpi-value mono" id="kpi-ns" style="font-size: 13px;">ina-infra · edge</div>
+        <div class="kpi-value mono" id="kpi-ns">ina-infra · edge</div>
+      </div>
+      </div>
+      </div>
+      <div class="tab-panel" data-tab="ues">
+          <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Connected UEs</h2>
+          <p class="card-subtitle">Slice-2 UEs start sending automatically when they come up. Use Stop / Start on each card to pause or resume. Open the UE dashboard for the full log.</p>
+        </div>
+        <button type="button" class="btn-secondary" id="refresh-ues">Refresh UEs</button>
+      </div>
+    <div class="kpi-strip kpi-strip-ue">
+      <div class="kpi-card">
+        <div class="kpi-label">Connected <span class="dot" id="kpi-ue-dot"></span></div>
+        <div class="kpi-value" id="kpi-ue-connected">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Sending</div>
+        <div class="kpi-value" id="kpi-ue-sending">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">PDU ready</div>
+        <div class="kpi-value" id="kpi-ue-pdu">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Last latency</div>
+        <div class="kpi-value mono" id="kpi-ue-lat">—</div>
       </div>
     </div>
+      <div id="ue-ctrl-msg" class="msg-box"></div>
+      <div id="ue-list" class="ue-grid">Loading UEs…</div>
+    </section>
 
-    <!-- Hugging Face Token Configuration -->
+      </div>
+      <div class="tab-panel" data-tab="studio">
+          <!-- Interactive Inference & Reasoning Studio -->
+    <section class="card tier">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Physical AI Prompt & Reasoning Studio
+          </h2>
+          <p class="card-subtitle">Execute multimodal spatial reasoning and scene synthesis queries against the live vLLM server on port <code>8000</code>.</p>
+        </div>
+        <div class="row">
+          <label style="margin:0; text-transform:none;">Max Tokens:</label>
+          <select id="max-tokens" style="width: auto; padding: 4px 8px; font-size: 12px;">
+            <option value="128">128 tokens</option>
+            <option value="256" selected>256 tokens</option>
+            <option value="512">512 tokens</option>
+            <option value="1024">1024 tokens</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="studio-grid">
+      <div class="studio-col">
+      <label>Prompt / Scenario Input</label>
+      <textarea id="prompt">Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.</textarea>
+      <div class="prompt-presets">
+        <span style="font-size: 11px; color: var(--text-faint); margin-right: 4px; align-self: center;">Quick Presets:</span>
+        <button type="button" class="preset-chip" data-p="Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.">Robot Navigation</button>
+        <button type="button" class="preset-chip" data-p="Describe the spatial relationships of all objects in this scene for a robotic manipulation arm.">Spatial Scene Map</button>
+        <button type="button" class="preset-chip" data-p="Detect any safety rule violations or unauthorized personnel in this high-voltage substation zone.">Industrial Safety Check</button>
+      </div>
+      <div class="row">
+        <button type="button" id="send-chat" style="padding: 9px 18px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Run Inference
+        </button>
+        <button type="button" class="btn-secondary" id="clear-out">Clear Output</button>
+      </div>
+      </div>
+      <div class="studio-col studio-col-out">
+        <label>Reasoning Output</label>
+        <pre id="output-box">vLLM output will appear here once inference is requested…</pre>
+      </div>
+      </div>
+    </section>
+  
+      </div>
+            <div class="tab-panel" data-tab="token">
+          <!-- Hugging Face Token Configuration -->
     <section class="card tier">
       <div class="card-header">
         <div>
@@ -530,51 +882,26 @@
       <div class="msg-box" id="token-msg"></div>
     </section>
 
-    <!-- Interactive Inference & Reasoning Studio -->
-    <section class="card tier">
-      <div class="card-header">
-        <div>
-          <h2 class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Physical AI Prompt & Reasoning Studio
-          </h2>
-          <p class="card-subtitle">Execute multimodal spatial reasoning and scene synthesis queries against the live vLLM server on port <code>8000</code>.</p>
-        </div>
-        <div class="row">
-          <label style="margin:0; text-transform:none;">Max Tokens:</label>
-          <select id="max-tokens" style="width: auto; padding: 4px 8px; font-size: 12px;">
-            <option value="128">128 tokens</option>
-            <option value="256" selected>256 tokens</option>
-            <option value="512">512 tokens</option>
-            <option value="1024">1024 tokens</option>
-          </select>
-        </div>
-      </div>
 
-      <label>Prompt / Scenario Input</label>
-      <textarea id="prompt">Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.</textarea>
-      
-      <div class="prompt-presets">
-        <span style="font-size: 11px; color: var(--text-faint); margin-right: 4px; align-self: center;">Quick Presets:</span>
-        <button type="button" class="preset-chip" data-p="Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.">Robot Navigation</button>
-        <button type="button" class="preset-chip" data-p="Describe the spatial relationships of all objects in this scene for a robotic manipulation arm.">Spatial Scene Map</button>
-        <button type="button" class="preset-chip" data-p="Detect any safety rule violations or unauthorized personnel in this high-voltage substation zone.">Industrial Safety Check</button>
       </div>
-
-      <div class="row" style="margin-top: 14px;">
-        <button type="button" id="send-chat" style="padding: 9px 18px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          Run Inference
-        </button>
-        <button type="button" class="btn-secondary" id="clear-out">Clear Output</button>
+          <div class="tab-panel" data-tab="docs">
+        <section class="card tier">
+          <div class="card-header"><div>
+            <h2 class="card-title">Physical AI · Slice 2</h2>
+            <p class="card-subtitle">Cosmos3-Nano on A40 · vLLM sidecar</p>
+          </div></div>
+          <p class="docs-lead">HF token, chat inference, and UE send/receive are proxied by this console. Interactive OpenAPI: <a href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</p>
+          <table class="docs-table">
+            <thead><tr><th>Method</th><th>Endpoint</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/status</code></td><td>JSON</td><td>HF token configured, vLLM ready, namespace</td></tr><tr><td><span class="docs-badge-put">PUT</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Save Hugging Face token into Secret</td></tr><tr><td><span class="docs-badge-del">DELETE</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Remove stored token</td></tr><tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/chat</code></td><td>JSON</td><td>Run a vLLM prompt</td></tr><tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/ues</code></td><td>JSON</td><td>Slice-2 UE consoles</td></tr><tr><td><span class="docs-badge-get">GET</span></td><td><code>/api/ues/{idx}/exchanges</code></td><td>JSON</td><td>Recent send/receive log</td></tr><tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/ues/{idx}/control</code></td><td>JSON</td><td>Enable or pause UE send</td></tr><tr><td><span class="docs-badge-post">POST</span></td><td><code>/api/ues/{idx}/send-once</code></td><td>JSON</td><td>Trigger one UE inference</td></tr>
+            </tbody>
+          </table>
+        </section>
       </div>
-
-      <div style="margin-top: 14px;">
-        <label>Reasoning Output</label>
-        <pre id="output-box">vLLM output will appear here once inference is requested…</pre>
-      </div>
-    </section>
-  </main>
+    </main>
+  </div>
+</div>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -582,7 +909,11 @@
     async function req(url, opts) {
       const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
       const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      if (!r.ok) {
+        const d = body && body.detail;
+        const msg = typeof d === "string" ? d : (d && (d.detail || d.message)) || body.message || r.statusText;
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
       return body;
     }
 
@@ -692,8 +1023,199 @@
       $("output-box").textContent = "vLLM output will appear here once inference is requested…";
     };
 
+    let selectedUe = null;
+    const autoStarted = new Set(JSON.parse(sessionStorage.getItem("pai-auto-started") || "[]"));
+    function rememberAutoStart(key) {
+      autoStarted.add(key);
+      sessionStorage.setItem("pai-auto-started", JSON.stringify([...autoStarted]));
+    }
+
+    function isUeRunning(st) {
+      const v = st && st.send_enabled;
+      return v === true || v === "true" || v === 1 || v === "1";
+    }
+
+    function paintToggle(btn, running) {
+      if (!btn) return;
+      btn.disabled = false;
+      if (running) {
+        btn.className = "danger ue-ctrl-btn";
+        btn.setAttribute("data-action", "stop");
+        btn.textContent = "⏹ Stop";
+      } else {
+        btn.className = "ue-ctrl-btn";
+        btn.setAttribute("data-action", "start");
+        btn.textContent = "▶ Start";
+      }
+    }
+
+    function ueLatency(st) {
+      const rec = (st && st.last && st.last.received) || {};
+      const v = rec.latency_ms != null ? rec.latency_ms : st && st.latency_ms;
+      return (v != null && v !== "") ? Number(v) : null;
+    }
+
+    function fmtTok(n) {
+      const v = Number(n);
+      if (n == null || n === "" || Number.isNaN(v)) return "—";
+      return v.toLocaleString();
+    }
+
+    function ueTokenStats(st) {
+      const lastU = (st && st.last && st.last.received && st.last.received.usage) || {};
+      const hasCum = st && (st.prompt_tokens != null || st.completion_tokens != null);
+      return {
+        input: hasCum ? Number(st.prompt_tokens || 0) : Number(lastU.prompt_tokens || lastU.input_tokens || 0),
+        output: hasCum ? Number(st.completion_tokens || 0) : Number(lastU.completion_tokens || lastU.output_tokens || 0),
+        lastIn: Number(st && st.last_prompt_tokens != null ? st.last_prompt_tokens : (lastU.prompt_tokens || lastU.input_tokens || 0)),
+        lastOut: Number(st && st.last_completion_tokens != null ? st.last_completion_tokens : (lastU.completion_tokens || lastU.output_tokens || 0)),
+        cumulative: !!hasCum,
+      };
+    }
+
+    function paintUeStats(ues) {
+      const n = ues.length;
+      const nOk = ues.filter(u => u.connected).length;
+      const nSend = ues.filter(u => isUeRunning(u.status)).length;
+      const nPdu = ues.filter(u => !!(u.status || {}).pdu_ready).length;
+      const lats = ues.map(u => ueLatency(u.status)).filter(v => v != null && !Number.isNaN(v));
+      if ($("kpi-ue-connected")) $("kpi-ue-connected").textContent = n ? `${nOk}/${n}` : "0";
+      if ($("kpi-ue-dot")) $("kpi-ue-dot").className = `dot ${nOk ? "ok pulse" : "bad"}`;
+      if ($("kpi-ue-sending")) $("kpi-ue-sending").textContent = n ? `${nSend}/${n}` : "0";
+      if ($("kpi-ue-pdu")) $("kpi-ue-pdu").textContent = n ? `${nPdu}/${n}` : "0";
+      if ($("kpi-ue-lat")) {
+        $("kpi-ue-lat").textContent = lats.length
+          ? `${Math.round(lats.reduce((a, b) => a + b, 0) / lats.length)} ms`
+          : "—";
+      }
+    }
+
+    function renderUes(data) {
+      const ues = (data && data.ues) || [];
+      paintUeStats(ues);
+      if (!ues.length) {
+        $("ue-list").textContent = "No slice-2 UEs found. Deploy Physical AI UE clients.";
+        return;
+      }
+      $("ue-list").innerHTML = ues.map(u => {
+        const st = u.status || {};
+        const running = isUeRunning(st);
+        const sending = running ? "running" : "stopped";
+        const ok = !!u.connected;
+        const dash = u.dashboard_url || u.console_url || "";
+        const lat = ueLatency(st);
+        const tok = ueTokenStats(st);
+        const inSub = tok.cumulative ? `last ${fmtTok(tok.lastIn)}` : "last exchange";
+        const outSub = tok.cumulative ? `last ${fmtTok(tok.lastOut)}` : "last exchange";
+        const ctrlBtn = running
+          ? `<button type="button" class="danger ue-ctrl-btn" data-ue-ctrl="${u.client_index}" data-action="stop">⏹ Stop</button>`
+          : `<button type="button" class="ue-ctrl-btn" data-ue-ctrl="${u.client_index}" data-action="start">▶ Start</button>`;
+        return `<div class="ue-card" data-ue="${u.client_index}">
+          <div class="row" style="justify-content:space-between;">
+            <strong>UE ${u.client_index}</strong>
+            <span class="pill ${running ? "ok" : "bad"}">${ok ? sending : (u.pod_phase || "down")}</span>
+          </div>
+          <div class="mono" style="font-size:12px;color:var(--text-dim);margin-top:6px;">${u.name}</div>
+          <div class="mono" style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+            ${u.console_ip || "—"} · ${u.console_mac || "—"}
+          </div>
+          <div class="mono" style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+            PDU ${st.pdu_ready ? "up" : "wait"} · ${lat != null ? lat + " ms" : "no latency"}
+          </div>
+          <div class="ue-tok">
+            <div class="ue-tok-item">
+              <div class="ue-tok-label">Input tokens</div>
+              <div class="ue-tok-value">${fmtTok(tok.input)}</div>
+              <div class="ue-tok-sub">${inSub}</div>
+            </div>
+            <div class="ue-tok-item">
+              <div class="ue-tok-label">Output tokens</div>
+              <div class="ue-tok-value">${fmtTok(tok.output)}</div>
+              <div class="ue-tok-sub">${outSub}</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            ${ctrlBtn}
+            <a class="ue-dash-btn" href="${dash}" target="_blank" rel="noreferrer">Open UE dashboard</a>
+            ${u.console_url ? `<a class="ext-link" href="${u.console_url}" target="_blank" rel="noreferrer">Multus ${u.console_ip}</a>` : ""}
+          </div>
+        </div>`;
+      }).join("");
+      $("ue-list").querySelectorAll("[data-ue-ctrl]").forEach(btn => {
+        btn.onclick = (ev) => {
+          ev.stopPropagation();
+          const idx = parseInt(btn.getAttribute("data-ue-ctrl"), 10);
+          const start = btn.getAttribute("data-action") === "start";
+          paintToggle(btn, start);
+          controlUe(idx, start);
+        };
+      });
+    }
+
+    async function refreshUes() {
+      try {
+        const data = await req("/api/ues");
+        renderUes(data);
+        const ues = (data && data.ues) || [];
+        for (const u of ues) {
+          const key = String(u.name || u.client_index);
+          if (isUeRunning(u.status)) {
+            rememberAutoStart(key);
+            continue;
+          }
+          if (!u.connected || autoStarted.has(key)) continue;
+          rememberAutoStart(key);
+          controlUe(u.client_index, true);
+          break;
+        }
+      } catch (e) {
+        $("ue-list").textContent = e.message;
+      }
+    }
+
+    $("refresh-ues").onclick = refreshUes;
+
+    async function controlUe(idx, start) {
+      const msg = $("ue-ctrl-msg");
+      if (msg) { msg.className = "msg-box"; msg.textContent = ""; }
+      const cardBtn = document.querySelector(`[data-ue-ctrl="${idx}"]`);
+      paintToggle(cardBtn, start);
+      if (cardBtn) cardBtn.disabled = true;
+      try {
+        const resp = await req(`/api/ues/${idx}/control`, {
+          method: "POST",
+          body: JSON.stringify({ send_enabled: !!start }),
+        });
+        const running = isUeRunning(resp);
+        paintToggle(cardBtn, running);
+        if (msg) showMsg("ue-ctrl-msg", running ? `UE ${idx} started` : `UE ${idx} stopped`, false);
+        selectedUe = idx;
+        await refreshUes();
+      } catch (e) {
+        paintToggle(cardBtn, !start);
+        if (msg) showMsg("ue-ctrl-msg", `Unable to ${start ? "start" : "stop"} UE ${idx}: ${e.message}`, true);
+      }
+    }
+
+
+    const CONSOLE_CRUMBS = {
+      "overview": "Physical AI · Cosmos3",
+      "ues": "Physical AI · Cosmos3",
+      "studio": "Physical AI · Cosmos3",
+      "token": "Physical AI · Cosmos3",
+      "docs": "Physical AI · Cosmos3"
+    };
+    function setConsoleTab(id) {
+      document.querySelectorAll(".rail-tab").forEach((b) => b.classList.toggle("rail-tab-active", b.dataset.tab === id));
+      const panel = document.querySelector(`.tab-panel[data-tab="${id}"]`);
+      if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const crumb = document.getElementById("crumb");
+      if (crumb) crumb.textContent = CONSOLE_CRUMBS[id] || "Physical AI · Cosmos3";
+    }
     refreshStatus();
+    refreshUes();
     setInterval(refreshStatus, 6000);
+    setInterval(refreshUes, 8000);
   </script>
 </body>
 </html>

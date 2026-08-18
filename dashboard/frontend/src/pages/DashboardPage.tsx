@@ -11,7 +11,7 @@ const BRAND = {
   product: "NeuroRAN",
   title: "INA-Infra Dashboard",
   shortName: "INA",
-  logo: "/logos/NeuroRAN.svg",
+  logo: "/logos/NeuroRAN.png",
   logoPng: "/logos/NeuroRAN.png",
 };
 
@@ -128,6 +128,9 @@ export default function DashboardPage() {
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               refreshToken={refreshToken}
+              configSync={
+                clusters.find((c) => c.name === selected)?.config_sync ?? null
+              }
             />
           </section>
         </div>

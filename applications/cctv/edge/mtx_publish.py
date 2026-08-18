@@ -15,13 +15,16 @@ from gi.repository import Gst  # noqa: E402
 from common import metrics  # noqa: E402
 
 try:
-    from edge.state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for
+    from edge.state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for, normalize_canonical_client_id
 except ImportError:
-    from state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for
+    from state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for, normalize_canonical_client_id
 
 
 MTX_RTSP = os.environ.get("MTX_RTSP_URL", "rtsp://127.0.0.1:8555")
-BITRATE_KBPS = int(os.environ.get("MTX_PUBLISH_BITRATE_KBPS", "2000"))
+# Lab LAN can carry 720p easily; default was 2000 kbps (blocky HLS).
+BITRATE_KBPS = int(os.environ.get("MTX_PUBLISH_BITRATE_KBPS", "12000"))
+X264_PRESET = os.environ.get("MTX_X264_PRESET", "veryfast")
+X264_PROFILE = os.environ.get("MTX_X264_PROFILE", "high")
 
 
 class _Publisher:
@@ -36,18 +39,20 @@ class _Publisher:
             "appsrc name=src is-live=true do-timestamp=true format=time "
             f"caps=video/x-raw,format=BGR,width={self.width},height={self.height},framerate=25/1 "
             "! videoconvert ! video/x-raw,format=I420 "
-            f"! x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 "
-            f"bitrate={BITRATE_KBPS} bframes=0 "
-            "! video/x-h264,profile=baseline "
+            f"! x264enc name=enc tune=zerolatency speed-preset={X264_PRESET} key-int-max=5 "
+            f"bitrate={BITRATE_KBPS} bframes=0 sliced-threads=true "
+            f"! video/x-h264,profile={X264_PROFILE} "
             f"! rtspclientsink name=sink protocols=tcp location={location} latency=0"
         )
         self.pipeline = Gst.parse_launch(launch)
         self.appsrc = self.pipeline.get_by_name("src")
+        self.enc = self.pipeline.get_by_name("enc")
         self.appsrc.set_property("format", Gst.Format.TIME)
         self.appsrc.set_property("block", False)
-        self.appsrc.set_property("max-bytes", 2_000_000)
+        self.appsrc.set_property("max-bytes", 8_000_000)
         self._t0 = time.monotonic()
         self._n = 0
+        self._last_key = 0.0
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError(f"MediaMTX publish pipeline failed for {self.path}")
@@ -75,7 +80,19 @@ class _Publisher:
         buf.pts = pts
         buf.dts = pts
         buf.duration = int(1e9 / 25)
+        now = time.monotonic()
+        force_key = now - self._last_key >= 1.0
         with self._lock:
+            if force_key and self.enc is not None:
+                self._last_key = now
+                try:
+                    st = Gst.Structure.new_empty("GstForceKeyUnit")
+                    st.set_value("all-headers", True)
+                    self.enc.send_event(
+                        Gst.Event.new_custom(Gst.EventType.CUSTOM_UPSTREAM, st)
+                    )
+                except Exception:
+                    pass
             ret = self.appsrc.emit("push-buffer", buf)
         if ret != Gst.FlowReturn.OK:
             metrics.log_json(
@@ -118,7 +135,7 @@ class Hub:
                     return
                 self._pubs[client_id] = pub
                 with GLOBAL_LOCK:
-                    ctx = CLIENT_STREAMS.get(client_id)
+                    ctx = CLIENT_STREAMS.get(normalize_canonical_client_id(client_id)) or CLIENT_STREAMS.get(client_id)
                     if ctx is not None:
                         ctx.mtx_publishing = True
                         ctx.mtx_path = pub.path

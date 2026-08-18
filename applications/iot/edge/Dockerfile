@@ -1,6 +1,4 @@
-# Slice D edge image: Mosquitto broker + Python downlink controller in one
-# container (supervised by entrypoint.sh). eclipse-mosquitto carries no Python,
-# so we start from python:3.12-slim and apt-install the broker.
+# Slice D controller only. Mosquitto runs in a dedicated sidecar / compose service.
 FROM python:3.12-slim
 
 ENV PYTHONPATH=/app \
@@ -8,14 +6,10 @@ ENV PYTHONPATH=/app \
     DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      mosquitto \
-      mosquitto-clients \
-      gettext-base \
       chrony \
       iproute2 \
       curl \
       ca-certificates \
-      procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

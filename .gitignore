@@ -1,7 +1,92 @@
-# vm-sw VM images (qcow2 / cloud-init seed); runtime path is /var/lib/libvirt/images/vm-sw
+# =============================================================================
+# INA-Infra .gitignore
+# =============================================================================
+
+# --- VM images (qcow2 / cloud-init seed) ------------------------------------
 testbed/vm-sw/images/
-__pycache__
-*.env
-!*.env.example
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+.venv/
+venv/
+env/
+.tox/
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# --- Node.js / Frontend builds ----------------------------------------------
+node_modules/
+applications/*/frontend/dist/
+applications/*/frontend/.vite/
+applications/*/frontend/coverage/
+ina-infra/frontend/dist/
+ina-infra/frontend/.vite/
+*.tsbuildinfo
+
+# --- Environment / secrets --------------------------------------------------
 .env
+.env.*
+!*.env.example
+!.env.example
+
+# --- IDE / editor -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Docker build artifacts -------------------------------------------------
+*.tar
+*.tar.gz
+
+# --- Kubernetes generated / local state -------------------------------------
+kubeconfig
+*.kubeconfig
+*.kubecfg
+
+# --- Ansible runtime -------------------------------------------------------
+*.retry
+.ansible/
+
+# --- Terraform --------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# --- Logs -------------------------------------------------------------------
+*.log
+logs/
+
+# --- Test / coverage --------------------------------------------------------
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# --- Misc -------------------------------------------------------------------
+*.bak
+*.tmp
+*.orig
+scratch/
+
 

@@ -8,11 +8,11 @@ import {
   type UeClientStatusOut,
 } from "../api/client";
 import ApplicationSettingsBox from "../components/ApplicationSettingsBox";
-import { AppDashboardButtons } from "../components/AppDashboardLinks";
+import { AppConsoleButtons } from "../components/AppConsoleLinks";
 import Card from "../components/ui/Card";
 import SectionLabel from "../components/ui/SectionLabel";
 import KpiStrip from "../components/ui/KpiStrip";
-import { APPLICATION_DASHBOARD_LIST } from "../lib/applicationDashboards";
+import { APPLICATION_CONSOLE_LIST } from "../lib/applicationConsoles";
 
 export default function ApplicationsPage() {
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -189,18 +189,18 @@ export default function ApplicationsPage() {
       </Card>
 
       <Card className="tier">
-        <SectionLabel kicker="Per application">Dashboards</SectionLabel>
+        <SectionLabel kicker="Per application">Consoles</SectionLabel>
         <p className="hint" style={{ marginTop: 0 }}>
-          Each application has a control UI (like the CCTV dashboard) and a Grafana metrics dashboard.
+          Each application has a control console and a Grafana metrics dashboard.
         </p>
-        <div className="app-dashboard-grid">
-          {APPLICATION_DASHBOARD_LIST.map((app) => (
-            <div key={app.id} className="app-dashboard-cell">
-              <div className="app-dashboard-cell-title">
+        <div className="app-console-grid">
+          {APPLICATION_CONSOLE_LIST.map((app) => (
+            <div key={app.id} className="app-console-cell">
+              <div className="app-console-cell-title">
                 Slice {app.sliceId} · {app.name}
               </div>
-              <div className="app-dashboard-cell-actions">
-                <AppDashboardButtons appType={app.id} />
+              <div className="app-console-cell-actions">
+                <AppConsoleButtons appType={app.id} />
               </div>
             </div>
           ))}

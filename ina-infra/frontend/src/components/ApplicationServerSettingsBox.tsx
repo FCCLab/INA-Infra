@@ -220,9 +220,9 @@ export default function ApplicationServerSettingsBox({
                       <span
                         className="tag"
                         style={{ fontSize: 11, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0, fontWeight: 600, background: "rgba(59, 130, 246, 0.12)", color: "var(--accent, #60a5fa)", border: "1px solid rgba(59, 130, 246, 0.25)", borderRadius: 6 }}
-                        title={`Multus static IP allocated on subnet prefix ${profile.subnet || "10.1.140.0/24"}`}
+                        title="Multus static IP on site L2 10.1.137.0/24 (not profile 10.1.140)"
                       >
-                        N6 Data IP: 10.1.137.{160 + s.id}
+                        N6 Data IP: {`10.1.137.${210 + s.id}`}
                       </span>
                     </div>
 

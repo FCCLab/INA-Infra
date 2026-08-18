@@ -10,6 +10,7 @@ python3 "${SCRIPT_DIR}/generate_app_dashboards.py"
 
 files=(
   "${REPO_ROOT}/applications/cctv/dashboard/grafana-dashboard.json"
+  "${SCRIPT_DIR}/cctv-metrics.json"
   "${SCRIPT_DIR}/physical-ai-metrics.json"
   "${SCRIPT_DIR}/ott-dashboard.json"
   "${SCRIPT_DIR}/ott-metrics.json"

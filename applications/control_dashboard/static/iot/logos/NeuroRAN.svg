@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" width="64" height="76" role="img" aria-label="NeuroRAN">
+  <defs>
+    <linearGradient id="nr-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16E6A0"></stop>
+      <stop offset="1" stop-color="#00C2D4"></stop>
+    </linearGradient>
+  </defs>
+  
+  <g fill="none" stroke="url(#nr-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 20 L32 10 L50 20 L50 40 L32 50 L14 40 Z"></path>
+    <path d="M32 10 L32 28 M14 20 L32 28 L50 20 M14 40 L32 28 L50 40"></path>
+  </g>
+  <g fill="url(#nr-accent)">
+    <circle cx="32" cy="28" r="4"></circle>
+    <circle cx="14" cy="20" r="3"></circle>
+    <circle cx="50" cy="20" r="3"></circle>
+    <circle cx="32" cy="10" r="3"></circle>
+    <circle cx="14" cy="40" r="3"></circle>
+    <circle cx="50" cy="40" r="3"></circle>
+    <circle cx="32" cy="50" r="3"></circle>
+  </g>
+  
+  <text x="32" y="66" text-anchor="middle" font-family="&#39;Space Grotesk&#39;, &#39;IBM Plex Sans&#39;, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.02em" fill="url(#nr-accent)">NeuroRAN</text>
+  <text x="32" y="74" text-anchor="middle" font-family="&#39;IBM Plex Mono&#39;, monospace" font-size="5.6" font-weight="600" letter-spacing="0.14em" fill="#93a0b8">rApp</text>
+</svg>

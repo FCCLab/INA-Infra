@@ -121,9 +121,43 @@ data:
 EOF
 }
 
+# Preserve bound volumeName from previous GitOps YAML or the live cluster (avoids KNV2009).
+_set_pvc_volume_name() {
+  local new_file="$1"
+  local vn="$2"
+  [[ -n "$vn" ]] || return 0
+  if grep -q '^[[:space:]]*volumeName:' "$new_file"; then
+    sed -i "s|^[[:space:]]*volumeName:.*|  volumeName: ${vn}|" "$new_file"
+  else
+    sed -i "/^[[:space:]]*storageClassName:/a\\  volumeName: ${vn}" "$new_file"
+  fi
+}
+
+_preserve_pvc_volume_name() {
+  local new_file="$1"
+  local old_file="${2:-}"
+  local cluster="${3:-}"
+  local vn=""
+  if [[ -n "$old_file" && -f "$old_file" ]]; then
+    vn="$(awk '/^[[:space:]]*volumeName:/{print $2; exit}' "$old_file")"
+  fi
+  if [[ -z "$vn" && -n "$cluster" ]]; then
+    local kc ctx
+    kc="$(local_kubeconfig_path "$cluster")"
+    ctx="$(kube_context "$cluster")"
+    vn="$(kubectl --kubeconfig "$kc" --context "$ctx" -n "$GRAFANA_NS" get pvc "$GRAFANA_NAME" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)"
+  fi
+  _set_pvc_volume_name "$new_file" "$vn"
+}
+
 write_pvc() {
   local dir="$1"
-  cat >"${dir}/persistentvolumeclaim-${GRAFANA_NAME}.yaml" <<EOF
+  local cluster="${2:-}"
+  local pvc_old="${3:-}"
+  # Bound local-path PVCs get volumeName set by the provisioner; Config Sync must
+  # not try to clear it (KNV2009). Mutation-ignore stops post-create updates.
+  local pvc="${dir}/persistentvolumeclaim-${GRAFANA_NAME}.yaml"
+  cat >"${pvc}" <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -131,6 +165,8 @@ metadata:
   namespace: ${GRAFANA_NS}
   labels:
     app.kubernetes.io/name: ${GRAFANA_NAME}
+  annotations:
+    client.lifecycle.config.k8s.io/mutation: ignore
 spec:
   accessModes:
     - ReadWriteOnce
@@ -139,6 +175,7 @@ spec:
     requests:
       storage: ${GRAFANA_PVC_SIZE}
 EOF
+  _preserve_pvc_volume_name "$pvc" "$pvc_old" "$cluster"
 }
 
 # Multus NAD: macvlan on site NIC, static /24, no gateway (keep flannel default).
@@ -357,6 +394,7 @@ from pathlib import Path
 dest_dir, repo_root, ns, name = sys.argv[1:]
 files = [
     Path(repo_root) / "applications/cctv/dashboard/grafana-dashboard.json",
+    Path(repo_root) / "grafana/dashboards/cctv-metrics.json",
     Path(repo_root) / "grafana/dashboards/physical-ai-metrics.json",
     Path(repo_root) / "grafana/dashboards/ott-dashboard.json",
     Path(repo_root) / "grafana/dashboards/ott-metrics.json",
@@ -434,6 +472,12 @@ write_cluster_grafana() {
   fi
 
   mkdir -p "$dest_ns"
+  local pvc_keep=""
+  local pvc_src="${dest_ns}/persistentvolumeclaim-${GRAFANA_NAME}.yaml"
+  if [[ -f "$pvc_src" ]]; then
+    pvc_keep="$(mktemp)"
+    cp "$pvc_src" "$pvc_keep"
+  fi
   purge_grafana_manifests "$dest_ns"
 
   write_namespace "$dest_ns"
@@ -442,9 +486,10 @@ write_cluster_grafana() {
   write_datasources "$dest_ns"
   write_dashboard_provider "$dest_ns"
   write_dashboards "$dest_ns"
-  write_pvc "$dest_ns"
+  write_pvc "$dest_ns" "$cluster" "$pvc_keep"
   write_deployment "$dest_ns" "$node" "$vip"
   write_service "$dest_ns"
+  [[ -n "$pvc_keep" ]] && rm -f "$pvc_keep"
 
   echo "==> [${cluster}] ${dest_ns}"
   echo "    Multus macvlan ${vip}/24 on ${master} (${GRAFANA_IFACE}); node=${node}"
