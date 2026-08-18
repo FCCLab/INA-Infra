@@ -398,8 +398,9 @@ def _heartbeat_loop():
                     "dropped_frames": drops,
                     "total_frames": total,
                 },
-                timeout=3.0,
+                timeout=10.0,
             )
+
 
 
             vid = str(data.get("selected_video_id") or data.get("assigned_channel") or "").strip()

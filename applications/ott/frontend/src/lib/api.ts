@@ -31,13 +31,14 @@ export type ConnectedClient = {
   state: "STREAMING" | "STOPPED" | "IDLE";
   assigned_channel: string;
   net_delay_ms: number;
-  rx_fps: number;
   rx_bitrate_mbps: number;
-  dropped_frames: number;
-  total_frames_received: number;
   uptime_seconds: number;
   is_alive: boolean;
+  connection_status?: "Connected" | "Unstable" | "Disconnected";
+  last_heartbeat_ago?: number;
 };
+
+
 
 export type OttStatus = {
   ok: boolean;

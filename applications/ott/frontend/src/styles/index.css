@@ -108,23 +108,59 @@ body {
   backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px 20px;
-  display: grid;
-  grid-template-columns: 240px 140px 200px 1fr 220px;
+  padding: 16px 22px;
+  display: flex;
   align-items: center;
-  gap: 16px;
-  transition: border-color 0.2s;
+  justify-content: space-between;
+  gap: 24px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  flex-wrap: nowrap;
 }
 
 .console-card:hover {
   border-color: var(--border-2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 .ue-identity {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  min-width: 250px;
+  flex-shrink: 0;
 }
+
+.ue-status-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+.channel-selector-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 240px;
+  max-width: 320px;
+  flex: 1 1 auto;
+}
+
+.telemetry-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.ue-action-buttons {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 
 .ue-avatar {
   width: 42px;
@@ -177,7 +213,20 @@ body {
   border: 1px solid rgba(22, 230, 160, 0.3);
 }
 
-.status-badge.stopped {
+.status-badge.connected {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border: 1px solid rgba(22, 230, 160, 0.3);
+}
+
+.status-badge.unstable {
+  background: rgba(120, 130, 145, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.status-badge.stopped,
+.status-badge.disconnected {
   background: var(--bad-bg);
   color: var(--bad);
   border: 1px solid rgba(255, 90, 110, 0.3);
@@ -197,11 +246,6 @@ body {
   box-shadow: 0 0 8px currentColor;
 }
 
-.channel-selector-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 
 .channel-select {
   background: #05080f;
@@ -212,17 +256,9 @@ body {
   font-size: 12px;
   outline: none;
   cursor: pointer;
+  width: 100%;
 }
 
-.channel-select:focus {
-  border-color: var(--accent);
-}
-
-.telemetry-strip {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 
 .telemetry-chip {
   background: rgba(0, 0, 0, 0.35);

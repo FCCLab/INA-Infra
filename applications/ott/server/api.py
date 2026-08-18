@@ -222,12 +222,13 @@ async def play_youtube_on_channel(channel_id: str, req: PlayRequest):
 # --- Connected UE Client Management Endpoints ------------------------------
 
 @app.get("/api/v1/clients", tags=["Clients"])
-async def get_clients(alive_only: bool = True):
-    """List connected UEs (default: heartbeating only) with UE console links."""
+async def get_clients(alive_only: bool = False):
+    """List connected UEs (default: all registered clients) with UE console links."""
     return {
         "ok": True,
         "clients": list_clients(alive_only=alive_only),
     }
+
 
 
 @app.post("/api/v1/clients/{client_id}/start", tags=["Clients"])

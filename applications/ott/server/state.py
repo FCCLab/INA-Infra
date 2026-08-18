@@ -150,11 +150,30 @@ class ConnectedClient:
 
     def to_dict(self) -> dict:
         d = dataclasses.asdict(self)
-        d["uptime_seconds"] = max(0.0, time.time() - self.connected_at)
-        d["is_alive"] = (time.time() - self.last_heartbeat) < 15.0
+        now = time.time()
+        d["uptime_seconds"] = max(0.0, now - self.connected_at)
+        hb_diff = max(0.0, now - self.last_heartbeat)
+        d["last_heartbeat_ago"] = round(hb_diff, 1)
+
+        # Connection health tiers:
+        # - "Connected" (online, healthy heartbeat <= 15s)
+        # - "Unstable" (lagging heartbeat 15s..45s)
+        # - "Disconnected" (> 45s)
+        if hb_diff <= 15.0:
+            d["connection_status"] = "Connected"
+            d["is_alive"] = True
+        elif hb_diff <= 45.0:
+            d["connection_status"] = "Unstable"
+            d["is_alive"] = True
+        else:
+            d["connection_status"] = "Disconnected"
+            d["is_alive"] = False
+
         if not d.get("console_url") and d.get("console_ip"):
             d["console_url"] = _http_url(d["console_ip"], self.console_port)
         return d
+
+
 
 
 GLOBAL_LOCK = threading.Lock()
@@ -250,11 +269,17 @@ def get_client(client_id: str) -> Optional[ConnectedClient]:
 
 def list_clients(*, alive_only: bool = False) -> List[dict]:
     with GLOBAL_LOCK:
+        now = time.time()
+        # Automatically prune/remove clients whose heartbeat has stopped > 60s
+        dead_keys = [k for k, cl in CONNECTED_CLIENTS.items() if (now - cl.last_heartbeat) > 60.0]
+        for k in dead_keys:
+            del CONNECTED_CLIENTS[k]
         rows = [cl.to_dict() for cl in CONNECTED_CLIENTS.values()]
     if alive_only:
         rows = [r for r in rows if r.get("is_alive")]
     rows.sort(key=lambda r: r.get("id") or "")
     return rows
+
 
 
 def set_client_state(client_id: str, state: str) -> bool:

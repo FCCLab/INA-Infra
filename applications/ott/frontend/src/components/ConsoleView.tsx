@@ -63,12 +63,23 @@ export default function ConsoleView({
                 </div>
               </div>
 
-              {/* 2. Status Badge */}
-              <div>
-                <span className={`status-badge ${isStreaming ? "streaming" : "stopped"}`}>
-                  <span className="status-pulse" />
-                  {cl.state}
-                </span>
+              {/* 2. Status Badges */}
+              <div className="ue-status-col">
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "nowrap" }}>
+                  <span className={`status-badge ${(cl.connection_status || (cl.is_alive ? "Connected" : "Disconnected")).toLowerCase()}`}>
+                    <span className="status-pulse" />
+                    {cl.connection_status || (cl.is_alive ? "Connected" : "Disconnected")}
+                  </span>
+                  <span className={`status-badge ${isStreaming ? "streaming" : "stopped"}`}>
+                    <span className="status-pulse" />
+                    {cl.state}
+                  </span>
+                </div>
+                {cl.last_heartbeat_ago !== undefined && (
+                  <span style={{ fontSize: "10px", color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>
+                    HB: {cl.last_heartbeat_ago}s ago
+                  </span>
+                )}
               </div>
 
               {/* 3. Channel Selector */}
@@ -81,6 +92,8 @@ export default function ConsoleView({
                   value={cl.assigned_channel}
                   onChange={(e) => onSetChannel(cl.id, e.target.value)}
                 >
+
+
                   {channels.map((ch) => (
                     <option key={ch.id} value={ch.id}>
                       {ch.id.toUpperCase()}: {ch.name}
@@ -95,19 +108,12 @@ export default function ConsoleView({
                   <span className="lbl">Path RTT</span>
                   <span className="val">{`${cl.net_delay_ms.toFixed(1)} ms`}</span>
                 </div>
-                <div className="telemetry-chip" title="Received Frames Per Second">
-                  <span className="lbl">RX FPS</span>
-                  <span className="val">{isStreaming ? `${cl.rx_fps.toFixed(0)}` : "0"}</span>
-                </div>
                 <div className="telemetry-chip" title="Downlink Throughput">
                   <span className="lbl">Bitrate</span>
                   <span className="val">{isStreaming ? `${cl.rx_bitrate_mbps.toFixed(2)} M` : "0.00 M"}</span>
                 </div>
-                <div className="telemetry-chip" title="Dropped Frames">
-                  <span className="lbl">Drops</span>
-                  <span className="val">{cl.dropped_frames}</span>
-                </div>
               </div>
+
 
               {/* 5. Independent Action Buttons & Direct Link to UE Console */}
               <div className="ue-action-buttons">
