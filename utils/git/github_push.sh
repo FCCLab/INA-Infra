@@ -179,10 +179,6 @@ push_single_submodule() {
     return 0
   fi
 
-  if [[ "$ALL_VENDORS" != "1" ]] && ! is_managed_submodule "$target_dir"; then
-    return 0
-  fi
-
   local remote
   remote="$(detect_submodule_remote "$target_dir")"
   local url
@@ -191,6 +187,14 @@ push_single_submodule() {
   branch="$(detect_submodule_branch "$target_dir")"
 
   if [[ -z "$url" ]]; then
+    return 0
+  fi
+
+  # Skip non-GitHub repositories (e.g. GitLab/upstream vendor mirrors) and print info
+  if [[ "$url" != *"github.com"* ]]; then
+    echo "ℹ️  [skip non-github] ${rel_path}"
+    echo "    upstream: ${url} (ignored for GitHub push)"
+    echo
     return 0
   fi
 
