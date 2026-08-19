@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""UE ICMP RTT probe: long-running ping via oaitun, parse time=, write Influx."""
+"""UE ICMP RTT probe: long-running ping -I <iface>, parse time=, write Influx."""
 from __future__ import annotations
 
+import argparse
 import os
 import re
+import select
 import subprocess
 import time
 import urllib.request
@@ -23,46 +25,63 @@ PROFILE = _env("PROFILE_NAME", "ina-infra")
 APP_TYPE = _env("APP_TYPE", "unknown")
 APP_NAME = _env("APP_NAME", "app")
 CLUSTER = _env("TARGET_CLUSTER", "edge")
-TARGET = _env("RTT_PING_TARGET", "10.1.137.1")
 WRITE_URL = f"{INFLUX_URL}/api/v2/write?org={INFLUX_ORG}&bucket={INFLUX_BUCKET}&precision=ns"
 HEADERS = {
     "Authorization": f"Token {INFLUX_TOKEN}",
     "Content-Type": "text/plain; charset=utf-8",
 }
+# ping -I is SO_BINDTODEVICE; these mean the bind/netdev is gone.
+IFACE_ERR = (
+    "SO_BINDTODEVICE",
+    "No such device",
+    "Network is down",
+    "sendmsg:",
+)
 
 
-def oaituns() -> list[str]:
-    out: list[str] = []
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="ICMP RTT probe via ping -I")
+    p.add_argument(
+        "-I",
+        "--iface",
+        default=_env("RTT_PING_IFACE", "oaitun_ue1"),
+        help="bind ping to this interface (ping -I). env RTT_PING_IFACE",
+    )
+    p.add_argument(
+        "target",
+        nargs="?",
+        default=_env("RTT_PING_TARGET", "10.1.137.1"),
+        help="ping target. env RTT_PING_TARGET",
+    )
+    return p.parse_args()
+
+
+def iface_ifindex(name: str) -> int | None:
+    """Current netdev ifindex, or None if the name is not present."""
     try:
-        with open("/proc/net/dev", encoding="utf-8") as f:
-            for line in f:
-                if ":" not in line:
-                    continue
-                name = line.split(":", 1)[0].strip()
-                if name.startswith("oaitun"):
-                    out.append(name)
-    except OSError:
-        pass
-    return out
+        with open(f"/sys/class/net/{name}/ifindex", encoding="utf-8") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
 
 
-def ensure_pdu_route() -> None:
-    for ifn in oaituns():
-        try:
-            subprocess.run(
-                ["ip", "route", "replace", f"{TARGET}/32", "dev", ifn],
-                capture_output=True,
-                timeout=2,
-                check=False,
-            )
-        except Exception:
-            pass
+def wait_iface(name: str) -> int:
+    """Block until iface exists; return its ifindex (new device after a flap)."""
+    n = 0
+    while True:
+        idx = iface_ifindex(name)
+        if idx is not None:
+            return idx
+        if n == 0 or n % 10 == 0:
+            print(f"[rtt-probe] waiting for iface {name}", flush=True)
+        n += 1
+        time.sleep(1)
 
 
-def start_ping() -> subprocess.Popen[str]:
+def start_ping(ifn: str, target: str) -> subprocess.Popen[str]:
     cmds = (
-        ["stdbuf", "-oL", "-eL", "ping", "-i", "1", TARGET],
-        ["ping", "-i", "1", TARGET],
+        ["stdbuf", "-oL", "-eL", "ping", "-i", "1", "-W", "2", "-I", ifn, target],
+        ["ping", "-i", "1", "-W", "2", "-I", ifn, target],
     )
     last: Exception | None = None
     for cmd in cmds:
@@ -93,45 +112,71 @@ def publish(rtt_ms: float) -> None:
         pass
 
 
-def main() -> None:
+def iface_lost(line: str) -> bool:
+    return any(s in line for s in IFACE_ERR)
+
+
+def run_ping(ifn: str, target: str, idx: int) -> None:
+    """One forever ping bound to ifindex idx. Returns when iface flaps or ping dies."""
+    proc = start_ping(ifn, target)
     print(
-        f"[rtt-probe] ICMP stream {TARGET} via oaitun for {APP_NAME} -> {WRITE_URL}",
+        f"[rtt-probe] ping pid={proc.pid} {target} -I {ifn} ifindex={idx}",
+        flush=True,
+    )
+    stdout = proc.stdout
+    assert stdout is not None
+    try:
+        while True:
+            cur = iface_ifindex(ifn)
+            if cur != idx:
+                print(
+                    f"[rtt-probe] iface {ifn} ifindex {idx} -> {cur}; restart ping",
+                    flush=True,
+                )
+                break
+            if proc.poll() is not None:
+                break
+            ready, _, _ = select.select([stdout], [], [], 1.0)
+            if not ready:
+                continue
+            raw = stdout.readline()
+            if raw == "":
+                break
+            line = raw.rstrip("\n")
+            if line:
+                print(line, flush=True)
+            if iface_lost(line):
+                print("[rtt-probe] ping lost device; restart ping", flush=True)
+                break
+            m = re.search(r"time=([0-9.]+)", line)
+            if not m:
+                continue
+            rtt_ms = float(m.group(1))
+            if rtt_ms <= 0:
+                continue
+            try:
+                publish(rtt_ms)
+            except Exception as exc:
+                print(f"[rtt-probe] influx write error: {exc}", flush=True)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        rc = proc.wait()
+        print(f"[rtt-probe] ping exited rc={rc}", flush=True)
+
+
+def main() -> None:
+    args = parse_args()
+    ifn = args.iface
+    target = args.target
+    print(
+        f"[rtt-probe] ICMP stream {target} -I {ifn} for {APP_NAME} -> {WRITE_URL}",
         flush=True,
     )
     while True:
         try:
-            ifaces = oaituns()
-            if not ifaces:
-                print("[rtt-probe] waiting for oaitun", flush=True)
-                time.sleep(1)
-                continue
-            ensure_pdu_route()
-            proc = start_ping()
-            print(
-                f"[rtt-probe] ping pid={proc.pid} {TARGET} via {ifaces[0]}",
-                flush=True,
-            )
-            try:
-                assert proc.stdout is not None
-                for raw in proc.stdout:
-                    line = raw.rstrip("\n")
-                    if line:
-                        print(line, flush=True)
-                    m = re.search(r"time=([0-9.]+)", line)
-                    if not m:
-                        continue
-                    rtt_ms = float(m.group(1))
-                    if rtt_ms <= 0:
-                        continue
-                    try:
-                        publish(rtt_ms)
-                    except Exception as exc:
-                        print(f"[rtt-probe] influx write error: {exc}", flush=True)
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                rc = proc.wait()
-                print(f"[rtt-probe] ping exited rc={rc}; restarting", flush=True)
+            idx = wait_iface(ifn)
+            run_ping(ifn, target, idx)
         except Exception as exc:
             print(f"[rtt-probe] loop error: {exc}", flush=True)
         time.sleep(1)

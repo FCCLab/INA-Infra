@@ -452,17 +452,20 @@ def _rtt_probe_container(
     app_type: str,
     cluster: str,
     ping_target: str = "10.1.137.1",
+    ping_iface: str = "oaitun_ue1",
 ) -> dict:
     """UE sidecar: ICMP RTT via dedicated rtt-probe image."""
     env = _ue_influx_env(a_name, sid, profile_name, app_type, cluster)
     env.append({"name": "RTT_PING_TARGET", "value": ping_target})
+    env.append({"name": "RTT_PING_IFACE", "value": ping_iface})
     return {
         "name": "rtt-probe",
         "image": app_images.RTT_PROBE,
         "imagePullPolicy": "Always",
+        "args": ["-I", ping_iface, ping_target],
         "securityContext": {
             "privileged": True,
-            "capabilities": {"add": ["NET_ADMIN"]},
+            "capabilities": {"add": ["NET_RAW"]},
         },
         "env": env,
         "resources": {

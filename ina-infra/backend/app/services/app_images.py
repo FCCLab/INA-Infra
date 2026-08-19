@@ -22,7 +22,7 @@ OTT_SERVER = f"{REG}/application-ott:nws-v0.10-amd64"
 OTT_CLIENT = f"{REG}/ott-ue-console:nws-v0.33-amd64"
 IOT_SERVER = f"{REG}/sliced-edge:nws-v0.9-amd64"
 IOT_CLIENT = f"{REG}/iot-ue-console:nws-v0.10-amd64"
-RTT_PROBE = f"{REG}/rtt-probe:nws-v0.1-amd64"
+RTT_PROBE = f"{REG}/rtt-probe:nws-v0.7-amd64"
 THROUGHPUT_STATS = f"{REG}/throughput-statistics:nws-v0.2-amd64"
 
 STALE_SERVER_REPOS = frozenset({"slicea-analyzer", "hd-stream-server"})
