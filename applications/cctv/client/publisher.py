@@ -60,6 +60,9 @@ BITRATE_KBPS = _env_int("BITRATE_KBPS", 4000)
 METRICS_PORT = _env_int("METRICS_PORT", 9101)
 METRICS_ADDR = _env("METRICS_ADDR", "0.0.0.0")
 LOG_INTERVAL_S = float(_env("LOG_INTERVAL_S", "1"))
+# Rebuild the pipeline if no encoded frames for this long (GStreamer can stall
+# at clip end without EOS when filesrc + rtspclientsink deadlock).
+STALL_S = float(_env("STALL_S", "8"))
 CHRONYC_HOST = os.environ.get("CHRONYC_HOST") or None
 UE_ID = _env("APP_NAME", STREAM_PATH or "cctv-ue")
 PING_TARGET = _env("PING_TARGET", "10.1.137.1")
@@ -140,6 +143,8 @@ class Publisher:
         self._quit_reason: str | None = None
         self._frames_at_run_start = 0
         self._last_encode_ms = 0.0
+        self._zero_fps_s = 0.0
+        self._run_t0 = time.monotonic()
 
     # -- Source preparation ---------------------------------------------------
     def _prepare_source(self) -> None:
@@ -340,11 +345,26 @@ class Publisher:
                 pad = target.get_static_pad("src")
                 if pad is not None:
                     ok = pad.push_event(event)
-        if not ok:
-            metrics.log_json("warn", "segment_seek_failed", flush=flush)
+            if not ok:
+                metrics.log_json("warn", "segment_seek_failed", flush=flush)
         elif flush:
             metrics.log_json("info", "segment_seek_armed", flush=flush)
         return bool(ok)
+
+    def _request_quit(self, reason: str) -> None:
+        """Quit the GLib loop from any thread (stall watchdog, bus, etc.)."""
+        if self._quit_reason is not None:
+            return
+        self._quit_reason = reason
+
+        def _go() -> bool:
+            if self.pipeline is not None:
+                self.pipeline.set_state(Gst.State.NULL)
+            if self.loop is not None and self.loop.is_running():
+                self.loop.quit()
+            return False
+
+        GLib.idle_add(_go)
 
     # -- Bus ------------------------------------------------------------------
     def _on_bus(self, _bus, message):
@@ -403,6 +423,24 @@ class Publisher:
                 target_bitrate_kbps=BITRATE_KBPS,
                 path=STREAM_PATH,
             )
+            if fps > 0.5:
+                self._zero_fps_s = 0.0
+            else:
+                self._zero_fps_s += elapsed
+                run_age = now - self._run_t0
+                if (
+                    self.pipeline is not None
+                    and self._zero_fps_s >= STALL_S
+                    and run_age >= STALL_S
+                    and self._quit_reason is None
+                ):
+                    metrics.log_json(
+                        "error",
+                        "pipeline_stall",
+                        zero_fps_s=round(self._zero_fps_s, 1),
+                        frames_total=count,
+                    )
+                    self._request_quit("stall")
 
     # -- Run ------------------------------------------------------------------
     def run(self) -> None:
@@ -428,6 +466,8 @@ class Publisher:
             metrics.log_json("info", "starting_pipeline", uri=RTSP_URI)
             self._segment_seek_started = False
             self._quit_reason = None
+            self._zero_fps_s = 0.0
+            self._run_t0 = time.monotonic()
             with self._lock:
                 self._frames_at_run_start = self._frame_count
             try:
@@ -451,6 +491,8 @@ class Publisher:
             bus.connect("message", self._on_bus)
 
             self.pipeline.set_state(Gst.State.PLAYING)
+            self._run_t0 = time.monotonic()
+            self._zero_fps_s = 0.0
             self.loop = GLib.MainLoop()
             try:
                 self.loop.run()
@@ -468,13 +510,13 @@ class Publisher:
             if frames_this_run > 0:
                 backoff = 1.0
 
-            # Expected file-end (segment loop miss): rebuild immediately.
-            if self._quit_reason == "eos" and self._loop_file:
+            # Expected file-end or a wedged pipeline: rebuild immediately.
+            if self._quit_reason in ("eos", "stall") and self._loop_file:
                 metrics.log_json(
                     "warn",
                     "reconnecting",
                     backoff_s=0.0,
-                    reason="eos",
+                    reason=self._quit_reason,
                     frames_this_run=frames_this_run,
                 )
                 continue
