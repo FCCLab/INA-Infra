@@ -16,9 +16,9 @@ This skill defines the canonical workflow for committing and pushing changes acr
 ## Important Rules
 
 1. **Explicit Permission Required**: Never auto-commit or auto-push without explicit user request or approval.
-2. **Two-Tier GitOps Architecture**:
-   - **Gitea (Internal Primary Source of Truth)**: `http://10.1.132.200:3000/nephio/<repo>.git` (watched directly by Google Config Sync `RootSync`).
-   - **GitHub (Public Mirror & Upstream)**: `https://github.com/FCCLab/INA-Infra-<repo>.git`.
+2. **Two-Tier Architecture**:
+   - **GitHub (Primary Source & Upstream)**: `https://github.com/FCCLab/INA-Infra-<repo>.git`.
+   - **Gitea (Local GitOps Sync for Config Sync)**: `http://10.1.132.200:3000/nephio/<repo>.git` (watched directly by Google Config Sync `RootSync`).
 
 ---
 

@@ -130,30 +130,30 @@ ensure_on_branch() {
   local cluster="$2"
 
   ensure_remotes "$cluster"
-  git_auth fetch gitea "$branch"
   git fetch origin "$branch" 2>/dev/null || true
+  git_auth fetch gitea "$branch" 2>/dev/null || true
 
   if git show-ref --verify --quiet "refs/heads/${branch}"; then
     git checkout -q "$branch"
-  elif git show-ref --verify --quiet "refs/remotes/gitea/${branch}"; then
-    git checkout -q -B "$branch" "gitea/${branch}"
   elif git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
     git checkout -q -B "$branch" "origin/${branch}"
+  elif git show-ref --verify --quiet "refs/remotes/gitea/${branch}"; then
+    git checkout -q -B "$branch" "gitea/${branch}"
   else
     git checkout -q -B "$branch"
   fi
-  git branch -q --set-upstream-to="gitea/${branch}" "$branch" 2>/dev/null || true
+  git branch -q --set-upstream-to="origin/${branch}" "$branch" 2>/dev/null || true
 }
 
 mirror_github() {
   local cluster="$1"
   local branch="$2"
 
-  echo "    mirroring origin/${branch} (GitHub) ..."
+  echo "    pushing origin/${branch} (GitHub primary) ..."
   if git push origin "HEAD:${branch}"; then
     return 0
   fi
-  echo "warning: [${cluster}] GitHub mirror push failed (Gitea push succeeded)" >&2
+  echo "warning: [${cluster}] GitHub push failed (Gitea push succeeded)" >&2
   return 0
 }
 
@@ -168,15 +168,15 @@ push_cluster_repo() {
   github_url="$(github_url_for_cluster "$cluster")"
 
   if [[ "$PULL_ONLY" == "1" ]]; then
-    echo "==> [${cluster}] pull ${src_dir} (gitea)"
+    echo "==> [${cluster}] pull ${src_dir} (GitHub origin + Gitea)"
   else
-    echo "==> [${cluster}] pull+push ${src_dir} (gitea → GitHub)"
+    echo "==> [${cluster}] pull+push ${src_dir} (GitHub primary → local Gitea for GitOps)"
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "    dry-run: cd ${src_dir} && git pull gitea ${GIT_BRANCH}"
+    echo "    dry-run: cd ${src_dir} && git pull origin ${GIT_BRANCH}"
     if [[ "$PULL_ONLY" != "1" ]]; then
-      echo "    dry-run: commit if dirty && git pull gitea && git push gitea && git push origin"
+      echo "    dry-run: commit if dirty && git push origin && git push gitea"
     fi
     return 0
   fi
@@ -199,11 +199,11 @@ push_cluster_repo() {
 
   ensure_on_branch "$GIT_BRANCH" "$cluster"
   echo "    at $(git rev-parse --short HEAD) on ${GIT_BRANCH}"
-  echo "    gitea:  ${gitea_url}"
-  echo "    github: ${github_url}"
+  echo "    github (primary): ${github_url}"
+  echo "    gitea  (gitops):  ${gitea_url}"
 
-  # 1) Pull from Gitea first
-  pull_or_exit gitea "$GIT_BRANCH" "$cluster"
+  # 1) Pull from GitHub first (fallback Gitea)
+  pull_or_exit origin "$GIT_BRANCH" "$cluster"
 
   if [[ "$PULL_ONLY" == "1" ]]; then
     echo "    pull-only done @$(git rev-parse --short HEAD)"
@@ -219,25 +219,20 @@ push_cluster_repo() {
     msg="${COMMIT_MSG:-Update ${repo_name} ($(date -u +%Y-%m-%dT%H:%M:%SZ))}"
     git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
       commit -m "$msg"
-    pull_or_exit gitea "$GIT_BRANCH" "$cluster"
   fi
 
-  # 3) Push to Gitea (Config Sync source of truth)
-  if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "gitea/${GIT_BRANCH}" 2>/dev/null || echo "")" ]]; then
-    echo "    nothing to push to gitea"
-  else
-    echo "    pushing gitea/${GIT_BRANCH} ..."
-    git_auth push gitea "HEAD:${GIT_BRANCH}" \
-      || die "[${cluster}] gitea push failed"
-  fi
-
-  # 4) Mirror to GitHub
+  # 3) Push to GitHub (Primary origin)
   mirror_github "$cluster" "$GIT_BRANCH"
+
+  # 4) Push to Gitea (Local GitOps source of truth for Config Sync)
+  echo "    pushing gitea/${GIT_BRANCH} (local GitOps sync) ..."
+  git_auth push gitea "HEAD:${GIT_BRANCH}" \
+    || die "[${cluster}] gitea push failed"
 
   cd "$REPO_ROOT"
   git add "$rel_path" 2>/dev/null || true
 
-  echo "    done gitea@${gitea_url} github@${github_url} @$(git -C "$src_dir" rev-parse --short HEAD)"
+  echo "    done github@${github_url} gitea@${gitea_url} @$(git -C "$src_dir" rev-parse --short HEAD)"
   echo "    Dashboard:   https://$(dashboard_mgmt_ip "$cluster"):$(dashboard_nodeport)"
   echo "    OpenSpeedTest: http://$(openspeedtest_vip "$cluster")"
 }
