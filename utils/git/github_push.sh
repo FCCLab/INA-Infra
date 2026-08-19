@@ -126,18 +126,35 @@ detect_submodule_branch() {
     return
   fi
 
-  if git -C "$dir" show-ref --verify --quiet refs/heads/main; then
-    echo "main"
-  elif git -C "$dir" show-ref --verify --quiet refs/heads/service-models-integration-fcc; then
+  # 1. Check which remote branch contains current HEAD
+  local branch_contains
+  branch_contains="$(git -C "$dir" branch -r --contains HEAD 2>/dev/null | grep 'origin/' | head -n1 | sed 's@^[ *]*origin/@@' | sed 's@.*-> origin/@@' | tr -d ' ' || echo "")"
+  if [[ -n "$branch_contains" ]]; then
+    echo "$branch_contains"
+    return
+  fi
+
+  # 2. Check remote HEAD symbolic-ref
+  local remote_head
+  remote_head="$(git -C "$dir" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "")"
+  if [[ -n "$remote_head" ]]; then
+    echo "$remote_head"
+    return
+  fi
+
+  # 3. Known repository branch fallback
+  if git -C "$dir" show-ref --verify --quiet refs/heads/service-models-integration-fcc || git -C "$dir" show-ref --verify --quiet refs/remotes/origin/service-models-integration-fcc; then
     echo "service-models-integration-fcc"
-  elif git -C "$dir" show-ref --verify --quiet refs/heads/nw-slicing-3gpp; then
+  elif git -C "$dir" show-ref --verify --quiet refs/heads/nw-slicing-3gpp || git -C "$dir" show-ref --verify --quiet refs/remotes/origin/nw-slicing-3gpp; then
     echo "nw-slicing-3gpp"
-  elif git -C "$dir" show-ref --verify --quiet refs/heads/master; then
+  elif git -C "$dir" show-ref --verify --quiet refs/heads/main || git -C "$dir" show-ref --verify --quiet refs/remotes/origin/main; then
+    echo "main"
+  elif git -C "$dir" show-ref --verify --quiet refs/heads/master || git -C "$dir" show-ref --verify --quiet refs/remotes/origin/master; then
     echo "master"
-  elif git -C "$dir" show-ref --verify --quiet refs/heads/develop; then
+  elif git -C "$dir" show-ref --verify --quiet refs/heads/develop || git -C "$dir" show-ref --verify --quiet refs/remotes/origin/develop; then
     echo "develop"
   else
-    echo "$GIT_BRANCH"
+    echo "main"
   fi
 }
 
@@ -212,9 +229,9 @@ push_single_submodule() {
 
   # 3. Push to remote
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "    [dry-run] git push ${remote} HEAD:${branch}"
+    echo "    [dry-run] git push ${remote} HEAD:refs/heads/${branch}"
   else
-    if git push "$remote" "HEAD:${branch}" 2>&1; then
+    if git push "$remote" "HEAD:refs/heads/${branch}" 2>&1; then
       echo "    🚀 Pushed ${remote}/${branch} @$(git rev-parse --short HEAD)"
     else
       echo "    ⚠️  Push ${remote}/${branch} skipped or failed"
