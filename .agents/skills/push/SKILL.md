@@ -24,24 +24,26 @@ This skill defines the canonical workflow for committing and pushing changes acr
 
 ## Procedure
 
-### Step 1: Push Cluster GitOps Repositories (Gitea + GitHub)
+### Step 1: Push Cluster GitOps Repositories (Local Gitea + GitHub)
 
 To synchronize all four cluster submodules (`repos/mgmt`, `repos/central-repo`, `repos/regional-repo`, `repos/edge-repo`):
 
 ```bash
 cd /home/fcp/INA-Infra
-./bringup/03_push_to_git_repos/push_git_repos.sh
+./bringup/03_push_to_git_repos/push_gitea_gitops.sh
 ```
 
 Or provide a custom commit message:
 ```bash
-./bringup/03_push_to_git_repos/push_git_repos.sh -m "feat(scope): your descriptive message"
+./bringup/03_push_to_git_repos/push_gitea_gitops.sh -m "feat(scope): your descriptive message"
 ```
 
 To target a specific cluster only (e.g. `regional` or `edge`):
 ```bash
-./bringup/03_push_to_git_repos/push_git_repos.sh -m "feat(cctv): update code" regional
+./bringup/03_push_to_git_repos/push_gitea_gitops.sh -m "feat(cctv): update code" regional
 ```
+
+*(Note: `./bringup/03_push_to_git_repos/push_git_repos.sh` is preserved as a backward-compatible wrapper).*
 
 ---
 
@@ -60,10 +62,10 @@ If GitHub mirror rejects with `non-fast-forward`:
 3. Resolve any deleted/renamed file conflicts (e.g. `git rm <old-file>`).
 4. Push both to Gitea and GitHub:
    ```bash
-   git push gitea main
    git push origin main
+   git push gitea main
    ```
-5. Rerun `./bringup/03_push_to_git_repos/push_git_repos.sh` to confirm all 4 clusters are `Everything up-to-date`.
+5. Rerun `./bringup/03_push_to_git_repos/push_gitea_gitops.sh` to confirm all 4 clusters are `Everything up-to-date`.
 
 ---
 
