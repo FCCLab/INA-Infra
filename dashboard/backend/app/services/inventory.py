@@ -83,7 +83,23 @@ def _kubelet_version(status: Any) -> str:
     return str(getattr(info, "kubelet_version", "") or "") if info else ""
 
 
-def fetch_nodes(cluster: str) -> Dict[str, Any]:
+import threading
+
+_INVENTORY_CACHE_LOCK = threading.Lock()
+_SUMMARIZE_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_NODES_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_CACHE_TTL = 5.0  # seconds
+
+
+def fetch_nodes(cluster: str, use_cache: bool = True) -> Dict[str, Any]:
+    now = time.monotonic()
+    if use_cache:
+        with _INVENTORY_CACHE_LOCK:
+            if cluster in _NODES_CACHE:
+                cached_time, cached_val = _NODES_CACHE[cluster]
+                if now - cached_time < _CACHE_TTL:
+                    return cached_val
+
     api, err = load_api_client(cluster)
     if err or api is None:
         return {"cluster": cluster, "items": [], "error": err or "no client"}
@@ -121,7 +137,10 @@ def fetch_nodes(cluster: str) -> Dict[str, Any]:
                     },
                 }
             )
-        return {"cluster": cluster, "items": items, "error": None}
+        res = {"cluster": cluster, "items": items, "error": None}
+        with _INVENTORY_CACHE_LOCK:
+            _NODES_CACHE[cluster] = (now, res)
+        return res
     except ApiException as exc:
         return {"cluster": cluster, "items": [], "error": api_exc_message(exc)}
     except Exception as exc:  # noqa: BLE001
@@ -654,12 +673,20 @@ def fetch_metrics(cluster: str) -> Dict[str, Any]:
     }
 
 
-def summarize_cluster(cluster: str) -> Dict[str, Any]:
+def summarize_cluster(cluster: str, use_cache: bool = True) -> Dict[str, Any]:
+    now = time.monotonic()
+    if use_cache:
+        with _INVENTORY_CACHE_LOCK:
+            if cluster in _SUMMARIZE_CACHE:
+                cached_time, cached_val = _SUMMARIZE_CACHE[cluster]
+                if now - cached_time < _CACHE_TTL:
+                    return cached_val
+
     t0 = time.monotonic()
     api, err = load_api_client(cluster)
     latency_ms = round((time.monotonic() - t0) * 1000, 1)
     if err or api is None:
-        return {
+        res = {
             "name": cluster,
             "reachable": False,
             "latency_ms": latency_ms,
@@ -680,6 +707,9 @@ def summarize_cluster(cluster: str) -> Dict[str, Any]:
                 error=err or "no client",
             ),
         }
+        with _INVENTORY_CACHE_LOCK:
+            _SUMMARIZE_CACHE[cluster] = (now, res)
+        return res
 
     nodes_total = nodes_ready = 0
     pods_total = pods_running = 0
@@ -728,7 +758,7 @@ def summarize_cluster(cluster: str) -> Dict[str, Any]:
         health = "healthy"
         reachable = True
 
-    return {
+    res = {
         "name": cluster,
         "reachable": reachable,
         "latency_ms": latency_ms,
@@ -744,6 +774,9 @@ def summarize_cluster(cluster: str) -> Dict[str, Any]:
         "context": cluster_svc.kube_context(cluster),
         "config_sync": config_sync,
     }
+    with _INVENTORY_CACHE_LOCK:
+        _SUMMARIZE_CACHE[cluster] = (now, res)
+    return res
 
 
 def kubeconfig_path_safe(cluster: str) -> str:
