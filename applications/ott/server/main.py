@@ -42,17 +42,16 @@ def main():
     api_module.OTT_ENGINE = engine
     engine.start()
 
-    # 3. Graceful shutdown handler
-    def _sig_handler(sig, frame):
-        logger.info(f"Received signal {sig}, shutting down OTT engine...")
-        engine.stop()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, _sig_handler)
-    signal.signal(signal.SIGTERM, _sig_handler)
-
     # 4. Start FastAPI server
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=http_port, log_level="info")
+    config = uvicorn.Config(
+        fastapi_app,
+        host="0.0.0.0",
+        port=http_port,
+        log_level="info",
+        loop="asyncio",
+    )
+    server = uvicorn.Server(config)
+    server.run()
 
 
 if __name__ == "__main__":

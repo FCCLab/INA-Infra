@@ -176,7 +176,7 @@ class ConnectedClient:
 
 
 
-GLOBAL_LOCK = threading.Lock()
+GLOBAL_LOCK = threading.RLock()
 
 # Video catalog published to UEs (also used as MediaMTX path names).
 # Examples from: https://www.youtube.com/results?search_query=4k+nature+24+hours
@@ -312,20 +312,19 @@ def set_client_channel(client_id: str, channel_id: str) -> bool:
 
 
 def resolve_channel_for_client(video_or_channel_id: str, client_id: str = "") -> Optional[OttChannel]:
-    with GLOBAL_LOCK:
-        ch = CHANNELS.get(video_or_channel_id)
-        if ch and ch.is_active:
-            return ch
-        # If requested video_id (e.g. channel_5) does not exist, rotate modulo active channels
-        active = [c for c in CHANNELS.values() if c.is_active]
-        if not active:
-            return None
-        m = re.search(r"(\d+)", video_or_channel_id) or (re.search(r"(\d+)", client_id) if client_id else None)
-        if m:
-            num = int(m.group(1))
-            idx = (num - 1) % len(active)
-            return active[idx]
-        return active[0]
+    ch = CHANNELS.get(video_or_channel_id)
+    if ch and ch.is_active:
+        return ch
+    # If requested video_id (e.g. channel_5) does not exist, rotate modulo active channels
+    active = [c for c in CHANNELS.values() if c.is_active]
+    if not active:
+        return None
+    m = re.search(r"(\d+)", video_or_channel_id) or (re.search(r"(\d+)", client_id) if client_id else None)
+    if m:
+        num = int(m.group(1))
+        idx = (num - 1) % len(active)
+        return active[idx]
+    return active[0]
 
 
 def select_video_for_client(client_id: str, video_id: str) -> Optional[dict]:

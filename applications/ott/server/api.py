@@ -49,8 +49,6 @@ MTX_HLS = os.environ.get("MTX_HLS_URL", "http://127.0.0.1:8888").rstrip("/")
 MTX_WHEP = os.environ.get("MTX_WHEP_URL", "http://127.0.0.1:8889").rstrip("/")
 MTX_API = os.environ.get("MTX_API_URL", "http://127.0.0.1:9997").rstrip("/")
 
-HTTPX_CLIENT = httpx.AsyncClient(timeout=5.0)
-
 APP_UE_LATENCY_MS = Gauge(
     "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
 )
@@ -127,7 +125,7 @@ class ClientHeartbeatRequest(BaseModel):
 
 
 @app.get("/api/v1/health", tags=["System"])
-async def health():
+def health():
     return {
         "ok": True,
         "app": "application-ott",
@@ -136,7 +134,7 @@ async def health():
 
 
 @app.get("/api/v1/status", tags=["System"])
-async def status():
+def status():
     channels = list_channels()
     clients = list_clients(alive_only=True)
     active_streamers = len([c for c in clients if c.get("state") == "STREAMING"])
@@ -157,7 +155,7 @@ async def status():
 # --- Channel / Video catalog -----------------------------------------------
 
 @app.get("/api/v1/channels", tags=["Channels"])
-async def get_channels():
+def get_channels():
     return {
         "ok": True,
         "channels": list_channels(),
@@ -165,7 +163,7 @@ async def get_channels():
 
 
 @app.get("/api/v1/videos", tags=["Videos"])
-async def get_videos():
+def get_videos():
     """UE-facing video catalog with absolute MediaMTX HLS / WHEP / RTSP URLs."""
     return {
         "ok": True,
@@ -174,7 +172,7 @@ async def get_videos():
 
 
 @app.get("/api/v1/videos/{video_id}/mediamtx", tags=["Videos"])
-async def get_video_mediamtx(video_id: str):
+def get_video_mediamtx(video_id: str):
     """Return MediaMTX subscribe links for a selected video (no client binding)."""
     ch = get_channel(video_id)
     if not ch or not ch.is_active:
@@ -183,7 +181,7 @@ async def get_video_mediamtx(video_id: str):
 
 
 @app.get("/api/v1/channels/{channel_id}", tags=["Channels"])
-async def get_single_channel(channel_id: str):
+def get_single_channel(channel_id: str):
     ch = get_channel(channel_id)
     if not ch:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -191,7 +189,7 @@ async def get_single_channel(channel_id: str):
 
 
 @app.post("/api/v1/channels/{channel_id}/play", tags=["Channels"])
-async def play_youtube_on_channel(channel_id: str, req: PlayRequest):
+def play_youtube_on_channel(channel_id: str, req: PlayRequest):
     """Set a custom YouTube video URL or ID to play on a specific channel."""
     with GLOBAL_LOCK:
         ch = CHANNELS.get(channel_id)
@@ -222,7 +220,7 @@ async def play_youtube_on_channel(channel_id: str, req: PlayRequest):
 # --- Connected UE Client Management Endpoints ------------------------------
 
 @app.get("/api/v1/clients", tags=["Clients"])
-async def get_clients(alive_only: bool = False):
+def get_clients(alive_only: bool = False):
     """List connected UEs (default: all registered clients) with UE console links."""
     return {
         "ok": True,
@@ -232,7 +230,7 @@ async def get_clients(alive_only: bool = False):
 
 
 @app.post("/api/v1/clients/{client_id}/start", tags=["Clients"])
-async def start_client_stream(client_id: str):
+def start_client_stream(client_id: str):
     """Command a specific UE client to start receiving video downlink."""
     if not set_client_state(client_id, "STREAMING"):
         raise HTTPException(status_code=404, detail="Client not found")
@@ -241,7 +239,7 @@ async def start_client_stream(client_id: str):
 
 
 @app.post("/api/v1/clients/{client_id}/stop", tags=["Clients"])
-async def stop_client_stream(client_id: str):
+def stop_client_stream(client_id: str):
     """Command a specific UE client to stop receiving video downlink."""
     if not set_client_state(client_id, "STOPPED"):
         raise HTTPException(status_code=404, detail="Client not found")
@@ -250,7 +248,7 @@ async def stop_client_stream(client_id: str):
 
 
 @app.post("/api/v1/clients/{client_id}/channel", tags=["Clients"])
-async def switch_client_channel(client_id: str, req: ClientChannelRequest):
+def switch_client_channel(client_id: str, req: ClientChannelRequest):
     """Assign or switch the video channel streamed to a specific UE client."""
     if not set_client_channel(client_id, req.channel_id):
         raise HTTPException(status_code=400, detail="Invalid client or channel ID")
@@ -266,7 +264,7 @@ async def switch_client_channel(client_id: str, req: ClientChannelRequest):
 
 
 @app.post("/api/v1/clients/{client_id}/select", tags=["Clients"])
-async def client_select_video(client_id: str, req: SelectVideoRequest):
+def client_select_video(client_id: str, req: SelectVideoRequest):
     """UE selects a video; server returns MediaMTX links for that UE to play."""
     result = select_video_for_client(client_id, req.video_id)
     if not result:
@@ -280,7 +278,7 @@ class ProbeRequest(BaseModel):
 
 
 @app.post("/api/v1/probe", tags=["Clients"])
-async def latency_probe(req: ProbeRequest):
+def latency_probe(req: ProbeRequest):
     """Tiny echo for UE probe thread. RTT rises when YouTube saturates the PDU."""
     now = time.time()
     return {
@@ -292,7 +290,7 @@ async def latency_probe(req: ProbeRequest):
 
 
 @app.post("/api/v1/clients/heartbeat", tags=["Clients"])
-async def client_heartbeat(req: ClientHeartbeatRequest):
+def client_heartbeat(req: ClientHeartbeatRequest):
     """Called by UE clients to register, update telemetry, and sync play state."""
     cl = update_client_heartbeat(
         client_id=req.client_id,
@@ -346,16 +344,17 @@ async def client_heartbeat(req: ClientHeartbeatRequest):
 async def live_hls(path: str, request: Request) -> Response:
     url = f"{MTX_HLS}/{path}"
     try:
-        req = HTTPX_CLIENT.build_request(
-            request.method,
-            url,
-            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
-            params=request.query_params,
-        )
-        res = await HTTPX_CLIENT.send(req, stream=True)
-        headers = dict(res.headers)
-        headers["Access-Control-Allow-Origin"] = "*"
-        return Response(content=await res.aread(), status_code=res.status_code, headers=headers)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            req = client.build_request(
+                request.method,
+                url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
+                params=request.query_params,
+            )
+            res = await client.send(req, stream=True)
+            headers = dict(res.headers)
+            headers["Access-Control-Allow-Origin"] = "*"
+            return Response(content=await res.aread(), status_code=res.status_code, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"MediaMTX HLS unavailable: {e}")
 
@@ -365,15 +364,16 @@ async def whep_proxy(path: str, request: Request) -> Response:
     url = f"{MTX_WHEP}/{path}"
     body = await request.body()
     try:
-        req = HTTPX_CLIENT.build_request(
-            request.method,
-            url,
-            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
-            content=body,
-        )
-        res = await HTTPX_CLIENT.send(req)
-        headers = dict(res.headers)
-        headers["Access-Control-Allow-Origin"] = "*"
-        return Response(content=res.content, status_code=res.status_code, headers=headers)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            req = client.build_request(
+                request.method,
+                url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
+                content=body,
+            )
+            res = await client.send(req)
+            headers = dict(res.headers)
+            headers["Access-Control-Allow-Origin"] = "*"
+            return Response(content=res.content, status_code=res.status_code, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"MediaMTX WHEP unavailable: {e}")
