@@ -88,17 +88,17 @@ git push origin main
 Verify that Google Config Sync has synchronized the commit on the target cluster(s):
 
 ```bash
-# Check regional cluster
-kubectl --kubeconfig ~/.kube/config-regional --context regional@regional -n config-management-system get rootsync
+# Automated Config Sync status and pod check for any cluster (e.g. edge, regional, central, mgmt)
+./scripts/check-configsync.sh edge
+./scripts/check-configsync.sh regional
+./scripts/check-configsync.sh central
+./scripts/check-configsync.sh mgmt
 
-# Check edge cluster
-kubectl --kubeconfig ~/.kube/config-edge --context edge@edge -n config-management-system get rootsync
-
-# Check central cluster
-kubectl --kubeconfig ~/.kube/config-central --context central@central -n config-management-system get rootsync
-
-# Check mgmt cluster
-kubectl --kubeconfig ~/.kube/config-mgmt --context mgmt@mgmt -n config-management-system get rootsync
+# Or check RootSync directly via kubectl:
+kubectl --context edge@edge -n config-management-system get rootsync
+kubectl --context regional@regional -n config-management-system get rootsync
+kubectl --context central@central -n config-management-system get rootsync
+kubectl --context mgmt@mgmt -n config-management-system get rootsync
 ```
 
 Status condition `Sync Completed` and `SYNCERRORCOUNT: 0` confirms the GitOps package is live and applied.

@@ -27,3 +27,6 @@
 [submodule "third_party/INA-Infra-5gc-oai-packages"]
 	path = third_party/INA-Infra-5gc-oai-packages
 	url = https://github.com/FCCLab/INA-Infra-5gc-oai-packages
+[submodule "smo/osc-non-rt-ric"]
+	path = smo/osc-non-rt-ric
+	url = https://github.com/NeuroRAN/osc-non-rt-ric
