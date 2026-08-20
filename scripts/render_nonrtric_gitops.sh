@@ -138,6 +138,37 @@ for doc in docs:
         aff = pod_spec.setdefault("affinity", {})
         aff["nodeAffinity"] = affinity_patch["nodeAffinity"]
         
+    # Patch PMS ConfigMaps
+    if kind == "ConfigMap" and meta.get("name") == "policymanagementservice-application-configmap":
+        data = doc.get("data", {})
+        if "application.yml" in data:
+            data["application.yml"] = data["application.yml"].replace(
+                "filepath: /opt/app/policy-agent/data/application_configuration.json",
+                "filepath: /var/policy-management-service/application_configuration.json"
+            )
+
+    if kind == "ConfigMap" and meta.get("name") == "policymanagementservice-data-configmap":
+        data = doc.get("data", {})
+        if "application_configuration.json" in data:
+            import json
+            app_cfg = json.loads(data["application_configuration.json"])
+            cfg = app_cfg.setdefault("config", {})
+            cfg["controller"] = []
+            for r in cfg.get("ric", []):
+                r.pop("controller", None)
+            data["application_configuration.json"] = json.dumps(app_cfg)
+
+    # Patch PMS StatefulSet init container to always overwrite configuration
+    if kind == "StatefulSet" and meta.get("name") == "policymanagementservice":
+        spec = doc.get("spec", {}).get("template", {}).get("spec", {})
+        for ic in spec.get("initContainers", []):
+            if ic.get("name") == "copy":
+                ic["command"] = [
+                    "/bin/sh",
+                    "-c",
+                    "cp -f /etc/app/policy-management-service/initialdata/application_configuration.json /var/policy-management-service/application_configuration.json; chmod 666 /var/policy-management-service/application_configuration.json"
+                ]
+
     if kind in ["ServiceAccount", "Secret", "ConfigMap", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"]:
         rbac_secrets.append(doc)
     elif kind in ["Service", "NetworkPolicy", "PodDisruptionBudget", "Ingress"]:

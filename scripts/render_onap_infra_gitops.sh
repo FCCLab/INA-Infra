@@ -50,12 +50,15 @@ helm template k8s-ppnt oran-release/policy-clamp-ac-k8s-ppnt \
   >> "${TEMP_RAW}"
 
 echo "==> Processing and injecting node affinity into ONAP manifests..."
-python3 - <<EOF
+TEMP_RAW="${TEMP_RAW}" OUTPUT_DIR="${OUTPUT_DIR}" python3 - <<'EOF'
 import yaml
 import sys
 import os
 
-with open("${TEMP_RAW}", "r") as f:
+temp_raw = os.environ["TEMP_RAW"]
+out_dir = os.environ["OUTPUT_DIR"]
+
+with open(temp_raw, "r") as f:
     docs = list(yaml.safe_load_all(f))
 
 affinity_patch = {
@@ -159,7 +162,10 @@ for doc in docs:
                 data[k] = v.replace("k8s-strimzi-kafka-bootstrap:9092", "oran-smo-kafka.smo.svc.cluster.local:9092") \
                            .replace("acm-strimzi-kafka-bootstrap:9092", "oran-smo-kafka.smo.svc.cluster.local:9092") \
                            .replace("policy-pg-primary", "oran-smo-postgresql.smo.svc.cluster.local") \
-                           .replace("k8s-", "oran-smo-kafka.smo.svc.cluster.local:9092")
+                           .replace("k8s-", "oran-smo-kafka.smo.svc.cluster.local:9092") \
+                           .replace("security.protocol: SASL_PLAINTEXT", "security.protocol: PLAINTEXT") \
+                           .replace("sasl.mechanism: SCRAM-SHA-512", "sasl.mechanism: PLAIN") \
+                           .replace("sasl.jaas.config: ${SASL_JAAS_CONFIG}", "sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username=\"\" password=\"\";")
     
     if kind in ["Deployment", "StatefulSet", "DaemonSet"]:
         spec = doc.setdefault("spec", {})
@@ -188,8 +194,6 @@ for doc in docs:
         deployments.append(doc)
     else:
         rbac_secrets.append(doc)
-
-out_dir = "${OUTPUT_DIR}"
 
 def write_docs(filename, doc_list):
     path = os.path.join(out_dir, filename)

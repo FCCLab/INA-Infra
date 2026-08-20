@@ -42,6 +42,12 @@ helm template oran-smo "${TMP_BUILD_DIR}/topology-exposure-inventory" \
   --set postgresql.primary.volumePermissions.image.registry=docker.io \
   --set postgresql.primary.volumePermissions.image.repository=bitnami/os-shell \
   --set postgresql.primary.volumePermissions.image.tag=latest \
+  --set postgresql.primary.resources.limits.memory=2Gi \
+  --set postgresql.primary.resources.limits.cpu="2" \
+  --set postgresql.primary.resources.requests.memory=512Mi \
+  --set postgresql.primary.resources.requests.cpu=500m \
+  --set postgresql.primary.readinessProbe.initialDelaySeconds=15 \
+  --set postgresql.primary.livenessProbe.initialDelaySeconds=15 \
   --set kafka.controller.persistence.storageClass=local-path \
   --set kafka.image.registry=docker.io \
   --set kafka.image.repository=bitnamilegacy/kafka \
@@ -49,6 +55,10 @@ helm template oran-smo "${TMP_BUILD_DIR}/topology-exposure-inventory" \
   --set kafka.volumePermissions.image.registry=docker.io \
   --set kafka.volumePermissions.image.repository=bitnami/os-shell \
   --set kafka.volumePermissions.image.tag=latest \
+  --set kafka.resources.limits.memory=2Gi \
+  --set kafka.resources.requests.memory=512Mi \
+  --set kafka.readinessProbe.initialDelaySeconds=15 \
+  --set kafka.livenessProbe.initialDelaySeconds=15 \
   --set topology-exposure.image.registry=nexus3.o-ran-sc.org:10002 \
   --set topology-exposure.image.tag=0.1.0 \
   --set topology-exposure.liveness.initialDelaySeconds=45 \
@@ -120,6 +130,11 @@ for doc in docs:
         template = spec.setdefault("template", {})
         pod_spec = template.setdefault("spec", {})
         
+        # Make init-check robust with retry loop
+        for ic in pod_spec.get("initContainers", []):
+            if ic.get("name") == "init-check":
+                ic["command"] = ["sh", "-c", "apk add --no-cache netcat-openbsd >/dev/null 2>&1; until nc -z oran-smo-kafka 9092 && nc -z oran-smo-postgresql 5432; do echo 'Waiting for Kafka & PostgreSQL...'; sleep 3; done; echo 'All dependencies ready!'"]
+
         # Adjust health check probes for Spring Boot
         for c in pod_spec.get("containers", []):
             if "livenessProbe" in c:

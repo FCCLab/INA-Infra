@@ -880,6 +880,124 @@ def _write_edge_gnb(
         ),
         written,
     )
+    write(
+        ns_dir / "48-deployment-nws-xapp.yaml",
+        _dump(
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {
+                    "name": "nws-xapp",
+                    "namespace": namespace,
+                    "labels": {
+                        "app.kubernetes.io/name": "nws-xapp",
+                        "app.kubernetes.io/part-of": "ina-infra",
+                    },
+                },
+                "spec": {
+                    "replicas": 1,
+                    "strategy": {"type": "Recreate"},
+                    "selector": {"matchLabels": {"app.kubernetes.io/name": "nws-xapp"}},
+                    "template": {
+                        "metadata": {
+                            "labels": {
+                                "app": "nws-xapp",
+                                "app.kubernetes.io/name": "nws-xapp",
+                                "app.kubernetes.io/part-of": "ina-infra",
+                            },
+                            "annotations": {
+                                "k8s.v1.cni.cncf.io/networks": _networks_annot(
+                                    [("xapp-e2", "e2", shared.xapp_e2)],
+                                    gw,
+                                    plen,
+                                )
+                            },
+                        },
+                        "spec": {
+                            "terminationGracePeriodSeconds": 5,
+                            "nodeSelector": scheduling_node_selector(
+                                "amd64", detect_cluster_master("edge")
+                            ),
+                            "containers": [
+                                {
+                                    "name": "xapp",
+                                    "image": _get_image("xapp", ip_plan.profile if ip_plan else None),
+                                    "imagePullPolicy": "IfNotPresent",
+                                    "securityContext": {
+                                        "capabilities": {"add": ["NET_ADMIN", "NET_RAW"]}
+                                    },
+                                    "command": [
+                                        "bash",
+                                        "-lc",
+                                        (
+                                            "set -e; echo \"waiting 30s for DU E2 attach to ${NEAR_RIC_IP}\"; sleep 30; "
+                                            "exec python3 -u /xapp/xapp_slice.py --conf /etc/flexric/flexric.conf "
+                                            "--out /tmp/rt_slice_stats.json --ns-out /tmp/rt_ns_slice_policy.json --print"
+                                        ),
+                                    ],
+                                    "env": [
+                                        {"name": "PYTHONPATH", "value": "/usr/local/flexric/xApp/python3"},
+                                        {"name": "LD_LIBRARY_PATH", "value": "/usr/local/lib:/flexric/build/src/xApp"},
+                                        {"name": "FLEXRIC_CONF", "value": "/etc/flexric/flexric.conf"},
+                                        {"name": "NWS_XAPP_IN_DOCKER", "value": "1"},
+                                        {"name": "NEAR_RIC_IP", "value": shared.flexric_e2},
+                                        {"name": "NWS_XAPP_API_HOST", "value": "0.0.0.0"},
+                                        {"name": "NWS_XAPP_API_PORT", "value": "18080"},
+                                        {"name": "NWS_XAPP_LAB_IP", "value": "10.1.132.230"},
+                                    ],
+                                    "ports": [
+                                        {"name": "http", "containerPort": 18080, "protocol": "TCP"},
+                                    ],
+                                    "volumeMounts": [
+                                        {
+                                            "name": "configuration",
+                                            "mountPath": "/etc/flexric/flexric.conf",
+                                            "subPath": "flexric.conf",
+                                        }
+                                    ],
+                                }
+                            ],
+                            "volumes": [
+                                {
+                                    "name": "configuration",
+                                    "configMap": {"name": "oai-flexric-configmap"},
+                                }
+                            ],
+                        },
+                    },
+                },
+            }
+        ),
+        written,
+    )
+    write(
+        ns_dir / "49-service-nws-xapp.yaml",
+        _dump(
+            {
+                "apiVersion": "v1",
+                "kind": "Service",
+                "metadata": {
+                    "name": "nws-xapp",
+                    "namespace": namespace,
+                    "labels": {
+                        "app.kubernetes.io/name": "nws-xapp",
+                        "app.kubernetes.io/part-of": "ina-infra",
+                    },
+                },
+                "spec": {
+                    "type": "ClusterIP",
+                    "externalIPs": ["10.1.132.230"],
+                    "selector": {"app.kubernetes.io/name": "nws-xapp"},
+                    "ports": [
+                        {"name": "http-18080", "port": 18080, "targetPort": 18080, "protocol": "TCP"},
+                        {"name": "http-18081", "port": 18081, "targetPort": 18080, "protocol": "TCP"},
+                    ],
+                },
+            }
+        ),
+        written,
+    )
+
 
 def generate_ue_manifests(
     namespace: str,
