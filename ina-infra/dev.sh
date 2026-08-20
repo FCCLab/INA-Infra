@@ -71,7 +71,7 @@ setup_env() {
       export INA_SRC="$(cd "$ROOT/../algorithm/new_implementation" && pwd)"
     fi
   fi
-  export PUSH_SCRIPT="${PUSH_SCRIPT:-$ROOT/backend/scripts/push_git_repos.sh}"
+  export PUSH_SCRIPT="${PUSH_SCRIPT:-$ROOT/backend/scripts/push_gitea_gitops.sh}"
   export SSH_CFG="${SSH_CFG:-$ROOT/backend/scripts/ssh_config}"
   export PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}"
   export GRB_LICENSE_FILE="${GRB_LICENSE_FILE:-$HOME/gurobi.lic}"

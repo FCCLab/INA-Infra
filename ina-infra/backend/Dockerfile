@@ -22,7 +22,7 @@ COPY algorithm/new_implementation /app/ina_src
 ENV PYTHONPATH=/app/ina-infra/backend
 ENV INA_SRC=/app/ina_src
 ENV INA_INFRA_ROOT=/app/ina-infra
-ENV PUSH_SCRIPT=/app/ina-infra/backend/scripts/push_git_repos.sh
+ENV PUSH_SCRIPT=/app/ina-infra/backend/scripts/push_gitea_gitops.sh
 ENV SSH_CFG=/app/ina-infra/backend/scripts/ssh_config
 ENV GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic
 ENV PYTHONUNBUFFERED=1

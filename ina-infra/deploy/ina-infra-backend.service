@@ -12,7 +12,7 @@ Environment=HOME=/home/fcp
 Environment=INA_INFRA_ROOT=/home/fcp/INA-Infra/ina-infra
 Environment=INA_SRC=/home/fcp/INA-Infra/algorithm/new_implementation
 Environment=REPOS_DIR=/home/fcp/INA-Infra/repos
-Environment=PUSH_SCRIPT=/home/fcp/INA-Infra/ina-infra/backend/scripts/push_git_repos.sh
+Environment=PUSH_SCRIPT=/home/fcp/INA-Infra/ina-infra/backend/scripts/push_gitea_gitops.sh
 Environment=SSH_CFG=/home/fcp/INA-Infra/ina-infra/backend/scripts/ssh_config
 Environment=GRB_LICENSE_FILE=/home/fcp/gurobi.lic
 Environment=PYTHONPATH=/home/fcp/INA-Infra/ina-infra/backend

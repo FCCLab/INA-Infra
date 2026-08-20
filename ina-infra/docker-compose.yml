@@ -15,7 +15,7 @@ services:
       INA_SRC: /app/ina_src
       INA_INFRA_ROOT: /app/ina-infra
       REPOS_DIR: /repo/repos
-      PUSH_SCRIPT: /app/ina-infra/backend/scripts/push_git_repos.sh
+      PUSH_SCRIPT: /app/ina-infra/backend/scripts/push_gitea_gitops.sh
       SSH_CFG: /app/ina-infra/backend/scripts/ssh_config
       GRB_LICENSE_FILE: /opt/gurobi/gurobi.lic
       GITEA_HOST: ${GITEA_HOST:-10.1.132.200}
