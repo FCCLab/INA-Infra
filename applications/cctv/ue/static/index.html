@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCTV UE Console · NeuroRAN</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #070b14; --bg1: #0b1120; --card: rgba(15,23,42,.75); --surface: rgba(255,255,255,.035);
+      --surface-hover: rgba(255,255,255,.06); --border: rgba(255,255,255,.08); --border-focus: rgba(22,230,160,.4);
+      --text: #eef2f9; --text-dim: #93a0b8; --text-faint: #5e6b85;
+      --accent: #16E6A0; --accent2: #00C2D4; --bad: #ff5a6e; --ok: #16e6a0;
+      --ok-bg: rgba(22,230,160,.12); --bad-bg: rgba(255,90,110,.12); --warn: #f5c542;
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 14px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      color: var(--text); min-height: 100vh; line-height: 1.5;
+      background: radial-gradient(1200px 600px at 80% -10%, rgba(22,230,160,.10), transparent 60%),
+                  radial-gradient(1000px 700px at 10% 110%, rgba(0,194,212,.08), transparent 55%),
+                  linear-gradient(180deg, var(--bg0), var(--bg1));
+    }
+    header {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 14px 28px; border-bottom: 1px solid var(--border);
+      background: rgba(7,11,20,.85); backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 50;
+    }
+    h1 { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; color: #fff; }
+    .brand-lockup { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { width: 44px; height: auto; display: block; border-radius: 8px; }
+    h2 { font-size: 16px; font-weight: 600; }
+    .kicker { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent2); font-weight: 600; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+    .pill {
+      font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--surface); display: inline-flex; gap: 6px; align-items: center; font-family: 'IBM Plex Mono', monospace;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(22,230,160,.35); background: var(--ok-bg); }
+    .pill.bad { color: var(--bad); border-color: rgba(255,90,110,.35); background: var(--bad-bg); }
+    .pill.warn { color: var(--warn); border-color: rgba(245,197,66,.35); background: rgba(245,197,66,.12); }
+    
+    .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(22,230,160,0.7); animation: pulse 1.8s infinite; }
+    @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(22,230,160,0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(22,230,160,0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(22,230,160,0); } }
+
+    main { padding: 24px 28px 48px; max-width: 1440px; margin: 0 auto; display: grid; gap: 20px; }
+    .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+    @media (max-width: 1024px) { .layout { grid-template-columns: 1fr; } }
+    
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; }
+    .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; }
+    .kpi-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
+    .kpi-value { font-size: 15px; font-weight: 600; margin-top: 4px; word-break: break-all; }
+    
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; display: grid; gap: 16px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    
+    button {
+      background: var(--accent); color: #04140e; border: 0; border-radius: var(--radius-sm);
+      padding: 9px 15px; font-weight: 700; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+      transition: opacity 0.15s, transform 0.05s;
+    }
+    button:hover { opacity: 0.92; }
+    button:active { transform: scale(0.98); }
+    button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    button.secondary:hover { background: var(--surface-hover); }
+    button.danger { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255,90,110,.35); }
+    
+    select, input[type="text"], input[type="number"] {
+      background: #05080f; border: 1px solid var(--border); color: #fff; padding: 8px 12px;
+      border-radius: var(--radius-sm); font-size: 13px; font-family: inherit;
+    }
+    select:focus, input:focus { outline: none; border-color: var(--border-focus); }
+    
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .field-group { display: flex; flex-direction: column; gap: 4px; }
+    .field-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; }
+    
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 4px; }
+    .video-tile {
+      border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface);
+      cursor: pointer; text-align: left; color: inherit; font: inherit; transition: all 0.15s;
+    }
+    .video-tile.active, .video-tile:hover { border-color: var(--accent); background: rgba(22,230,160,.08); }
+    .video-tile h3 { font-size: 13px; margin-bottom: 3px; color: #fff; }
+    .video-tile p { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+    
+    .banner-stream {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 14px 18px; border-radius: var(--radius-md); background: rgba(22,230,160,0.06); border: 1px solid rgba(22,230,160,0.25);
+    }
+    .banner-stream.stopped {
+      background: rgba(255,255,255,0.02); border-color: var(--border);
+    }
+    
+    .log-box {
+      background: #05080f; border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; max-height: 320px; overflow-y: auto;
+    }
+    .log-item { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .log-time { color: var(--text-faint); white-space: nowrap; flex-shrink: 0; }
+    .log-level { font-weight: 600; text-transform: uppercase; font-size: 10px; padding: 1px 4px; border-radius: 3px; }
+    .log-level.info { color: var(--accent2); }
+    .log-level.warn { color: var(--warn); }
+    .log-level.error { color: var(--bad); }
+    .log-msg { color: var(--text-dim); word-break: break-all; }
+    
+    .diag-res { padding: 12px 14px; border-radius: 10px; background: #05080f; border: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-lockup">
+      <img class="brand-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN" />
+      <div>
+        <div class="kicker">Slice 1 · CCTV Video Camera over 5G PDU</div>
+        <h1 id="ue-title">5G CCTV UE Camera Terminal</h1>
+      </div>
+    </div>
+    <div class="row">
+      <span class="pill" id="pill-pdu">5G PDU: checking…</span>
+      <span class="pill" id="pill-stream">RTSP: stopped</span>
+      <span class="pill" id="pill-server">Server: —</span>
+      <span class="pill" id="pill-fps">0 FPS · 0.0 Mbps</span>
+      <button type="button" class="secondary" id="btn-refresh" style="padding: 5px 10px; font-size: 12px;">↻ Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Console IP / MAC</div><div class="kpi-value mono" id="kpi-net">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">5G PDU Tunnel</div><div class="kpi-value mono" id="kpi-pdu">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">RTSP Target</div><div class="kpi-value mono" id="kpi-target">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Uplink Throughput</div><div class="kpi-value mono" id="kpi-mbps">0.0 Mbps</div></div>
+      <div class="kpi-card"><div class="kpi-label">Framerate (FPS)</div><div class="kpi-value mono" id="kpi-fps">0 FPS</div></div>
+      <div class="kpi-card"><div class="kpi-label">Path RTT to Server</div><div class="kpi-value mono" id="kpi-rtt">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Total Frames Sent</div><div class="kpi-value mono" id="kpi-frames">0</div></div>
+      <div class="kpi-card"><div class="kpi-label">Uptime</div><div class="kpi-value mono" id="kpi-uptime">0s</div></div>
+    </div>
+
+    <div class="layout">
+      <!-- Left Column: Video Stream Control & Settings -->
+      <div style="display: grid; gap: 20px;">
+        <section class="card">
+          <div class="banner-stream" id="stream-banner">
+            <div class="row">
+              <div id="stream-indicator" style="display: inline-flex; align-items: center; gap: 8px;">
+                <span class="pulse-dot"></span>
+                <strong>Live Streaming</strong>
+              </div>
+              <span class="pill" id="stream-uri-pill">—</span>
+            </div>
+            <div class="row">
+              <button type="button" id="btn-start">▶ Start Stream</button>
+              <button type="button" class="danger" id="btn-stop">⏹ Stop</button>
+              <button type="button" class="secondary" id="btn-restart">↻ Restart</button>
+            </div>
+          </div>
+
+          <div>
+            <h2>Select Video Clip / Source</h2>
+            <div class="video-grid" id="video-sources"></div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border); padding-top: 16px; display: grid; gap: 14px;">
+            <h2>Stream Parameters</h2>
+            <div class="field-grid">
+              <div class="field-group">
+                <label class="field-label">Target Framerate (FPS)</label>
+                <select id="cfg-fps">
+                  <option value="15">15 FPS</option>
+                  <option value="25" selected>25 FPS</option>
+                  <option value="30">30 FPS</option>
+                  <option value="60">60 FPS</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Target Bitrate (kbps)</label>
+                <select id="cfg-bitrate">
+                  <option value="1500">1.5 Mbps (1500 kbps)</option>
+                  <option value="2500">2.5 Mbps (2500 kbps)</option>
+                  <option value="4000" selected>4.0 Mbps (4000 kbps)</option>
+                  <option value="6000">6.0 Mbps (6000 kbps)</option>
+                  <option value="8000">8.0 Mbps (8000 kbps)</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Resolution</label>
+                <select id="cfg-resolution">
+                  <option value="1280x720" selected>720p HD (1280x720)</option>
+                  <option value="1920x1080">1080p FHD (1920x1080)</option>
+                  <option value="640x360">360p SD (640x360)</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">RTSP Transport</label>
+                <select id="cfg-protocol">
+                  <option value="tcp" selected>TCP (Interleaved)</option>
+                  <option value="udp">UDP</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">RTSP Server Host</label>
+                <input type="text" id="cfg-host" value="10.1.137.211" />
+              </div>
+              <div class="field-group">
+                <label class="field-label">RTSP Server Port</label>
+                <input type="number" id="cfg-port" value="8554" />
+              </div>
+              <div class="field-group">
+                <label class="field-label">Stream Path</label>
+                <input type="text" id="cfg-path" value="cctv/ue1" />
+              </div>
+            </div>
+            <div class="row" style="justify-content: flex-end; margin-top: 4px;">
+              <button type="button" class="secondary" id="btn-save-config">💾 Apply & Restart Stream</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Edge Server Connection & Logs -->
+      <div style="display: grid; gap: 20px;">
+        <section class="card">
+          <h2>Edge Analyzer Connection</h2>
+          <p style="font-size: 12.5px; color: var(--text-dim);">The UE camera publishes RTSP RECORD uplink to the edge CCTV Analyzer over the 5G UPF.</p>
+
+          <div style="display: grid; gap: 10px;">
+            <div class="row" style="justify-content: space-between;">
+              <button type="button" id="btn-test-conn" style="background: var(--accent2);">⚡ Test Connection to Edge Server</button>
+              <a id="link-edge-wall" href="http://10.1.137.211:8080/" target="_blank" rel="noopener" style="color: var(--accent); font-size: 13px; text-decoration: none; font-weight: 600;">Open CCTV Video Wall ↗</a>
+            </div>
+            <div class="diag-res" id="conn-diag-box">Click "Test Connection" to probe edge RTSP and HTTP endpoints.</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="row" style="justify-content: space-between;">
+            <h2>Transmission & Event Logs</h2>
+            <button type="button" class="secondary" id="btn-clear-logs" style="padding: 4px 8px; font-size: 11px;">Clear View</button>
+          </div>
+          <div class="log-box" id="log-container">
+            <div class="log-item"><span class="log-time">--:--:--</span><span class="log-msg">Connecting to local backend…</span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let state = {};
+    let sampleVideos = [];
+    let activeVideoId = 'classroom';
+
+    async function api(path, opts = {}) {
+      const resp = await fetch('/api' + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts,
+      });
+      return resp.json();
+    }
+
+    async function loadVideos() {
+      try {
+        sampleVideos = await api('/videos');
+        const container = document.getElementById('video-sources');
+        container.innerHTML = sampleVideos.map(v => `
+          <button type="button" class="video-tile ${v.id === activeVideoId ? 'active' : ''}" onclick="selectVideo('${v.id}')">
+            <h3>${v.name}</h3>
+            <p>${v.description}</p>
+          </button>
+        `).join('');
+      } catch (err) {
+        console.error('Failed loading videos:', err);
+      }
+    }
+
+    function selectVideo(id) {
+      activeVideoId = id;
+      const v = sampleVideos.find(x => x.id === id);
+      if (!v) return;
+      document.querySelectorAll('.video-tile').forEach(t => t.classList.remove('active'));
+      const activeBtn = Array.from(document.querySelectorAll('.video-tile')).find(b => b.textContent.includes(v.name));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      api('/stream/config', {
+        method: 'POST',
+        body: JSON.stringify({
+          video_source: v.path,
+          video_url: v.url,
+          video_name: v.name,
+        }),
+      }).then(() => refresh());
+    }
+
+    async function refresh() {
+      try {
+        state = await api('/status');
+        updateUI();
+        loadLogs();
+      } catch (err) {
+        console.error('Refresh failed:', err);
+      }
+    }
+
+    function updateUI() {
+      document.getElementById('ue-title').textContent = `${state.ue_name || 'CCTV UE'} Camera Terminal`;
+      document.getElementById('kpi-net').textContent = `${state.console_ip || '—'} (${state.console_mac || '—'})`;
+      document.getElementById('kpi-pdu').textContent = state.pdu_iface || (state.pdu_ready ? 'ready' : 'waiting…');
+      document.getElementById('kpi-target').textContent = state.rtsp_url || '—';
+      document.getElementById('kpi-mbps').textContent = `${state.throughput_mbps || 0} Mbps`;
+      document.getElementById('kpi-fps').textContent = `${state.current_fps || 0} FPS`;
+      document.getElementById('kpi-rtt').textContent = state.rtt_ms ? `${state.rtt_ms} ms` : '—';
+      document.getElementById('kpi-frames').textContent = (state.frames_sent || 0).toLocaleString();
+      document.getElementById('kpi-uptime').textContent = `${state.uptime_seconds || 0}s`;
+
+      // Header pills
+      const pillPdu = document.getElementById('pill-pdu');
+      pillPdu.textContent = state.pdu_ready ? `5G PDU: ${state.pdu_iface}` : '5G PDU: waiting…';
+      pillPdu.className = 'pill ' + (state.pdu_ready ? 'ok' : 'warn');
+
+      const isStreaming = state.status === 'streaming' || state.status === 'streaming (sim)';
+      const pillStream = document.getElementById('pill-stream');
+      pillStream.textContent = `RTSP: ${state.status}`;
+      pillStream.className = 'pill ' + (isStreaming ? 'ok' : (state.status === 'connecting' ? 'warn' : 'bad'));
+
+      const pillServer = document.getElementById('pill-server');
+      pillServer.textContent = state.server_reachable ? 'Server: reachable' : 'Server: unverified';
+      pillServer.className = 'pill ' + (state.server_reachable ? 'ok' : 'warn');
+
+      document.getElementById('pill-fps').textContent = `${state.current_fps || 0} FPS · ${state.throughput_mbps || 0} Mbps`;
+
+      // Stream banner
+      const banner = document.getElementById('stream-banner');
+      const indicator = document.getElementById('stream-indicator');
+      banner.className = 'banner-stream ' + (isStreaming ? '' : 'stopped');
+      indicator.innerHTML = isStreaming 
+        ? `<span class="pulse-dot"></span><strong>Live Streaming (${state.fps} FPS)</strong>`
+        : `<span style="width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block"></span><strong>Stream Stopped</strong>`;
+      document.getElementById('stream-uri-pill').textContent = state.rtsp_url || '—';
+
+      // Inputs (only if not focused)
+      if (document.activeElement !== document.getElementById('cfg-host')) document.getElementById('cfg-host').value = state.rtsp_target_host || '10.1.137.211';
+      if (document.activeElement !== document.getElementById('cfg-port')) document.getElementById('cfg-port').value = state.rtsp_port || 8554;
+      if (document.activeElement !== document.getElementById('cfg-path')) document.getElementById('cfg-path').value = state.stream_path || 'cctv/ue1';
+      if (document.activeElement !== document.getElementById('cfg-fps')) document.getElementById('cfg-fps').value = state.fps || 25;
+      if (document.activeElement !== document.getElementById('cfg-bitrate')) document.getElementById('cfg-bitrate').value = state.bitrate_kbps || 4000;
+      if (document.activeElement !== document.getElementById('cfg-protocol')) document.getElementById('cfg-protocol').value = state.rtsp_protocol || 'tcp';
+
+      const resVal = `${state.width || 1280}x${state.height || 720}`;
+      if (document.activeElement !== document.getElementById('cfg-resolution')) {
+        const resSelect = document.getElementById('cfg-resolution');
+        if (Array.from(resSelect.options).some(o => o.value === resVal)) resSelect.value = resVal;
+      }
+    }
+
+    async function loadLogs() {
+      try {
+        const logs = await api('/logs?limit=40');
+        const container = document.getElementById('log-container');
+        if (logs.length === 0) return;
+        container.innerHTML = logs.map(l => `
+          <div class="log-item">
+            <span class="log-time">${l.time || '--:--:--'}</span>
+            <span class="log-level ${l.level || 'info'}">${l.level || 'info'}</span>
+            <span class="log-msg">${l.msg || ''}</span>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('Failed loading logs:', err);
+      }
+    }
+
+    // Action handlers
+    document.getElementById('btn-start').onclick = () => api('/stream/start', { method: 'POST' }).then(() => refresh());
+    document.getElementById('btn-stop').onclick = () => api('/stream/stop', { method: 'POST' }).then(() => refresh());
+    document.getElementById('btn-restart').onclick = () => api('/stream/restart', { method: 'POST' }).then(() => refresh());
+    document.getElementById('btn-refresh').onclick = () => refresh();
+
+    document.getElementById('btn-save-config').onclick = async () => {
+      const resParts = document.getElementById('cfg-resolution').value.split('x');
+      const payload = {
+        rtsp_target_host: document.getElementById('cfg-host').value.trim(),
+        rtsp_port: parseInt(document.getElementById('cfg-port').value) || 8554,
+        stream_path: document.getElementById('cfg-path').value.trim(),
+        fps: parseInt(document.getElementById('cfg-fps').value) || 25,
+        bitrate_kbps: parseInt(document.getElementById('cfg-bitrate').value) || 4000,
+        rtsp_protocol: document.getElementById('cfg-protocol').value,
+        width: parseInt(resParts[0]) || 1280,
+        height: parseInt(resParts[1]) || 720,
+      };
+      await api('/stream/config', { method: 'POST', body: JSON.stringify(payload) });
+      refresh();
+    };
+
+    document.getElementById('btn-test-conn').onclick = async () => {
+      const box = document.getElementById('conn-diag-box');
+      box.textContent = 'Probing RTSP socket, HTTP API, and ICMP ping…';
+      try {
+        const res = await api('/test-connection', { method: 'POST' });
+        box.innerHTML = `
+          <div style="color: ${res.ok ? 'var(--ok)' : 'var(--bad)'}; font-weight: 600; margin-bottom: 4px;">
+            ${res.ok ? '✔ Connection Verified' : '✖ Connection Issues Detected'}
+          </div>
+          <div>${res.detail}</div>
+          <div style="margin-top: 4px; font-size: 11px; color: var(--text-faint);">RTT: ${res.rtt_ms}ms · PDU: ${res.pdu_iface}</div>
+        `;
+      } catch (err) {
+        box.textContent = 'Test failed: ' + err;
+      }
+      refresh();
+    };
+
+    document.getElementById('btn-clear-logs').onclick = () => {
+      document.getElementById('log-container').innerHTML = '<div class="log-item"><span class="log-time">--:--:--</span><span class="log-msg">Log view cleared.</span></div>';
+    };
+
+    // Auto-refresh loop
+    loadVideos().then(refresh);
+    setInterval(refresh, 2500);
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+# CCTV UE console: backend (RTSP streamer over PDU) and frontend (UI) — linux/amd64.
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:/root/.local/bin:${PATH} \
+    DASHBOARD_STATIC=/app/ue/static \
+    CONSOLE_ROLE=backend \
+    GST_DEBUG=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      iproute2 \
+      iputils-ping \
+      python3 \
+      python3-pip \
+      gstreamer1.0-tools \
+      gstreamer1.0-plugins-base \
+      gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad \
+      gstreamer1.0-plugins-ugly \
+      gstreamer1.0-libav \
+      gstreamer1.0-rtsp \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv \
+    && /root/.local/bin/uv pip install --python /opt/venv fastapi uvicorn pydantic prometheus-client httpx
+
+WORKDIR /app
+RUN mkdir -p /data
+COPY ue/ /app/ue/
+COPY client/ /app/client/
+COPY common/ /app/common/
+
+RUN chmod +x /app/ue/entrypoint.sh /app/client/entrypoint.sh 2>/dev/null || true
+
+EXPOSE 80 8090
+ENTRYPOINT ["/app/ue/entrypoint.sh"]

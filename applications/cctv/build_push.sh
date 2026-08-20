@@ -32,6 +32,15 @@ docker build --platform "${PLATFORM}" -f frontend/Dockerfile \
 echo "==> Pushing ${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}"
 docker push "${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}"
 
+echo "==> Building cctv-ue-console:${IMAGE_TAG} (${PLATFORM})"
+docker build --platform "${PLATFORM}" -f Dockerfile.ue-console \
+  -t "cctv-ue-console:${IMAGE_TAG}" \
+  -t "${REGISTRY}/cctv-ue-console:${IMAGE_TAG}" \
+  .
+
+echo "==> Pushing ${REGISTRY}/cctv-ue-console:${IMAGE_TAG}"
+docker push "${REGISTRY}/cctv-ue-console:${IMAGE_TAG}"
+
 if [ "${BUILD_PUBLISHER}" = "1" ]; then
   echo "==> Building application-cctv-publisher:${IMAGE_TAG} (${PLATFORM})"
   docker build --platform "${PLATFORM}" -f client/Dockerfile \
@@ -41,12 +50,13 @@ if [ "${BUILD_PUBLISHER}" = "1" ]; then
   echo "==> Pushing ${REGISTRY}/application-cctv-publisher:${IMAGE_TAG}"
   docker push "${REGISTRY}/application-cctv-publisher:${IMAGE_TAG}"
 else
-  echo "==> Skipping publisher (set BUILD_PUBLISHER=1 to build/push it)"
+  echo "==> Skipping legacy publisher (set BUILD_PUBLISHER=1 to build/push it)"
 fi
 
 echo "Done:"
 echo "  - ${REGISTRY}/application-cctv:${IMAGE_TAG}"
 echo "  - ${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}"
+echo "  - ${REGISTRY}/cctv-ue-console:${IMAGE_TAG}"
 if [ "${BUILD_PUBLISHER}" = "1" ]; then
   echo "  - ${REGISTRY}/application-cctv-publisher:${IMAGE_TAG}"
 fi

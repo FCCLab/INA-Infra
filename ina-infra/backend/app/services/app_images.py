@@ -15,7 +15,8 @@ REG = "10.1.132.30:5000"
 
 CCTV_SERVER = f"{REG}/application-cctv:nws-v0.9-amd64"
 CCTV_FRONTEND = f"{REG}/application-cctv-frontend:nws-v0.15-amd64"
-CCTV_CLIENT = f"{REG}/application-cctv-publisher:nws-v0.10-amd64"
+CCTV_UE_CONSOLE = f"{REG}/cctv-ue-console:nws-v0.1-amd64"
+CCTV_CLIENT = CCTV_UE_CONSOLE
 PHYSICAL_AI_SERVER = f"{REG}/cosmo3-vllm:nws-v0.7"
 PHYSICAL_AI_CLIENT = f"{REG}/cosmo3-ue-console:nws-v0.18-amd64"
 OTT_SERVER = f"{REG}/application-ott:nws-v0.10-amd64"

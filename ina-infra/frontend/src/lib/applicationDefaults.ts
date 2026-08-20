@@ -16,7 +16,7 @@ const TYPE_DEFAULTS: Record<Exclude<SliceAppType, "none" | "custom">, AppTypeDef
   cctv: {
     name: "CCTV Vision Streaming",
     server_image: `${REG}/application-cctv:nws-v0.9-amd64`,
-    client_image: `${REG}/application-cctv-publisher:nws-v0.10-amd64`,
+    client_image: `${REG}/cctv-ue-console:nws-v0.1-amd64`,
     server_port: 8554,
     metrics_port: 9102,
     server_params: {

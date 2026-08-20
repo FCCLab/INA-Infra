@@ -776,7 +776,7 @@ export const DEFAULT_APP_CONFIGS: Record<number, SliceApplicationConfig> = {
     enabled: true,
     target_cluster: "auto",
     server_image: "10.1.132.30:5000/application-cctv:nws-v0.9-amd64",
-    client_image: "10.1.132.30:5000/application-cctv-publisher:nws-v0.10-amd64",
+    client_image: "10.1.132.30:5000/cctv-ue-console:nws-v0.1-amd64",
     server_port: 8554,
     metrics_port: 9102,
     params: {

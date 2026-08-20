@@ -113,6 +113,19 @@ def _physical_ai_server_image(image: Optional[str], gpu_arch: str) -> str:
     return f"{repo}:nws-v0.7-arm64-cu128"
 
 
+CCTV_UE_CONSOLE_IMAGE = "10.1.132.30:5000/cctv-ue-console:nws-v0.1-amd64"
+CCTV_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
+CCTV_BACKEND_PORT = 8090
+
+
+def cctv_console_ip(client_index: int, slice_id: int = 1) -> str:
+    return site_ips.ue_console_ip(slice_id, client_index)
+
+
+def cctv_console_mac(slice_id: int, client_index: int) -> str:
+    return site_ips.ue_console_mac(slice_id, client_index)
+
+
 PHYSICAL_AI_UE_CONSOLE_IMAGE = "10.1.132.30:5000/cosmo3-ue-console:nws-v0.18-amd64"
 PHYSICAL_AI_CONSOLE_PORT = site_ips.UE_CONSOLE_PORT
 PHYSICAL_AI_BACKEND_PORT = 8090
@@ -1698,6 +1711,104 @@ def build_client_container(
     return None
 
 
+def build_cctv_ue_containers(
+    profile_name: str,
+    app_cfg: SliceApplicationConfig,
+    server_ip: Optional[str] = None,
+    client_index: int = 1,
+) -> List[dict]:
+    """UE pod sidecars: backend (RTSP streamer over PDU) and frontend (Multus console)."""
+    sid = app_cfg.slice_id
+    p = app_cfg.params or {}
+    idx = max(int(client_index), 1)
+    if not server_ip:
+        server_ip = site_ips.application_multus_ip(sid)
+    rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8554)
+    http_port = int(p.get("http_port") or 8080)
+    base_stream_path = str(p.get("stream_path") or f"cctv/ue{sid}")
+    stream_path = (
+        base_stream_path
+        if idx <= 1
+        else f"{base_stream_path}_cam{idx}"
+    )
+    console_ip = cctv_console_ip(idx, sid)
+    console_mac = cctv_console_mac(sid, idx)
+    ue_name = f"oai-ue-slice-{sid}-client-{idx}"
+    raw_client = (app_cfg.client_image or "").strip()
+    override = str(p.get("ue_console_image") or "").strip()
+    img = app_images.resolve_client_image("cctv", override or raw_client)
+    video_src, video_url, _vlabel = cctv_videos.clip_for_client(p, idx)
+    client_m_port = int(p.get("client_metrics_port") or (9100 + idx))
+
+    common = [
+        {"name": "TARGET_SERVER_IP", "value": server_ip},
+        {"name": "RTSP_TARGET_HOST", "value": server_ip},
+        {"name": "RTSP_SERVER", "value": server_ip},
+        {"name": "RTSP_PORT", "value": str(rtsp_port)},
+        {"name": "HTTP_PORT", "value": str(http_port)},
+        {"name": "SERVER_URL", "value": f"http://{server_ip}:{http_port}"},
+        {"name": "STREAM_PATH", "value": stream_path},
+        {"name": "VIDEO_SOURCE", "value": video_src},
+        {"name": "VIDEO_URL", "value": video_url},
+        {"name": "FPS", "value": str(p.get("fps") or 25)},
+        {"name": "BITRATE_KBPS", "value": str(p.get("bitrate_kbps") or 4000)},
+        {"name": "RTSP_PROTOCOL", "value": str(p.get("rtsp_protocol") or "tcp")},
+        {"name": "PDU_IFACE", "value": f"oaitun_ue{sid}"},
+        {"name": "PDU_ROUTE_HOSTS", "value": f"10.1.137.1,{server_ip}"},
+        {"name": "PDU_WAIT_TIMEOUT", "value": "300"},
+        {"name": "SLICE_ID", "value": str(sid)},
+        {"name": "CLIENT_INDEX", "value": str(idx)},
+        {"name": "PROFILE_NAME", "value": profile_name},
+        {"name": "UE_NAME", "value": ue_name},
+        {"name": "CONSOLE_IP", "value": console_ip},
+        {"name": "CONSOLE_MAC", "value": console_mac},
+        {"name": "BACKEND_URL", "value": f"http://127.0.0.1:{CCTV_BACKEND_PORT}"},
+        {"name": "BACKEND_PORT", "value": str(CCTV_BACKEND_PORT)},
+        {"name": "FRONTEND_PORT", "value": str(CCTV_CONSOLE_PORT)},
+        {"name": "DASHBOARD_STATIC", "value": "/app/ue/static"},
+        {"name": "STREAMING_ENABLED", "value": str(p.get("streaming_enabled", "1"))},
+    ]
+    resources = {
+        "requests": {"cpu": "200m", "memory": "256Mi"},
+        "limits": {"cpu": "2", "memory": "2Gi"},
+    }
+    backend = {
+        "name": "backend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "securityContext": {
+            "privileged": True,
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "backend"},
+            {"name": "APP_NAME", "value": f"slice{sid}-cctv-client-{idx}"},
+            {"name": "METRICS_PORT", "value": str(client_m_port)},
+        ],
+        "ports": [
+            {"name": "backend", "containerPort": CCTV_BACKEND_PORT},
+            {"name": "metrics", "containerPort": client_m_port},
+        ],
+        "resources": resources,
+    }
+    frontend = {
+        "name": "frontend",
+        "image": img,
+        "imagePullPolicy": "Always",
+        "env": [
+            *common,
+            {"name": "CONSOLE_ROLE", "value": "frontend"},
+        ],
+        "ports": [{"name": "console", "containerPort": CCTV_CONSOLE_PORT}],
+        "resources": {
+            "requests": {"cpu": "50m", "memory": "64Mi"},
+            "limits": {"cpu": "500m", "memory": "256Mi"},
+        },
+    }
+    return [backend, frontend, *build_ue_metrics_sidecars(profile_name, app_cfg, client_index)]
+
+
 def build_physical_ai_ue_containers(
     profile_name: str,
     app_cfg: SliceApplicationConfig,
@@ -2383,7 +2494,11 @@ def deploy_application_stream(
                 ]
 
             for c_idx in range(1, client_count + 1):
-                if app.app_type == "physical_ai":
+                if app.app_type == "cctv":
+                    client_containers = build_cctv_ue_containers(
+                        profile_name, app, server_ip=server_ip, client_index=c_idx
+                    )
+                elif app.app_type == "physical_ai":
                     client_containers = build_physical_ai_ue_containers(
                         profile_name, app, server_ip=server_ip, client_index=c_idx
                     )
@@ -2416,7 +2531,15 @@ def deploy_application_stream(
                 console_ip = None
                 console_mac = None
                 console_port = None
-                if app.app_type == "physical_ai":
+                if app.app_type == "cctv":
+                    console_ip = cctv_console_ip(c_idx, sid)
+                    console_mac = cctv_console_mac(sid, c_idx)
+                    console_port = CCTV_CONSOLE_PORT
+                    yield log_event(
+                        "stdout",
+                        f"  [client/edge] UE {c_idx} console {console_ip} mac={console_mac}",
+                    )
+                elif app.app_type == "physical_ai":
                     console_ip = physical_ai_console_ip(c_idx)
                     console_mac = physical_ai_console_mac(sid, c_idx)
                     console_port = PHYSICAL_AI_CONSOLE_PORT
