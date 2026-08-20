@@ -758,6 +758,9 @@ def _render_profile_oai_controllers(
 def apply_to_gitea(req: PlApplyRequest) -> PlApplyResponse:
     from app.services import profile_store
 
+    if not req.dry_run:
+        _sync_repos(req.clusters or ["central", "regional", "edge"])
+
     try:
         written, clusters, master_note = render_profile(req)
     except Exception as exc:  # noqa: BLE001
@@ -1155,6 +1158,30 @@ def _clear_profile_crb_subjects(ns: str, clusters: List[str]) -> List[str]:
     return touched
 
 
+def _sync_repos(clusters: List[str]) -> None:
+    """Pull upstream changes for target clusters before modifying local files."""
+    script = _push_script()
+    if not script.is_file():
+        return
+    env = ina_paths.script_env()
+    env.setdefault("GITEA_HOST", "10.1.132.200")
+    env.setdefault("GITEA_PORT", "3000")
+    env.setdefault("GITEA_USER", "nephio")
+    env.setdefault("GITEA_PASS", "secret")
+    try:
+        subprocess.run(
+            ["bash", str(script), "--pull-only", *clusters],
+            cwd=str(ina_paths.ina_infra_root()),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
 def _remove_profile_ns_dirs(ns: str, clusters: List[str]) -> List[str]:
     repos = _repos_dir()
     removed: List[str] = []
@@ -1208,6 +1235,9 @@ def undeploy_from_gitea(req: PlUndeployRequest) -> PlUndeployResponse:
         )
     ns = profile.name
     clusters = _profile_ns_clusters(ns, req.clusters)
+
+    if not req.dry_run:
+        _sync_repos(clusters)
 
     removed = _remove_profile_ns_dirs(ns, clusters)
 
@@ -1321,6 +1351,10 @@ def _gitea_push_env() -> Dict[str, str]:
 def iter_apply_sse(req: PlApplyRequest) -> Iterator[str]:
     """SSE stream for deploy (render + optional Gitea push)."""
     from app.services import profile_store
+
+    if not req.dry_run:
+        yield status_event("Syncing git remotes…")
+        _sync_repos(req.clusters or ["central", "regional", "edge"])
 
     yield status_event("Rendering manifests…")
     try:
@@ -1588,6 +1622,10 @@ def iter_undeploy_sse(req: PlUndeployRequest) -> Iterator[str]:
         f"{'Clearing' if req.dry_run else 'Undeploying'} namespace {ns} "
         f"from {', '.join(clusters)}…"
     )
+
+    if not req.dry_run:
+        yield status_event(f"Syncing git remotes for {', '.join(clusters)}…")
+        _sync_repos(clusters)
 
     removed = _remove_profile_ns_dirs(ns, clusters)
     for path in removed:

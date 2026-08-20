@@ -1689,7 +1689,7 @@ def expected_deployments(
         return names
 
     if cluster == "edge":
-        names.extend(["oai-cu-cp", "oai-du", "oai-flexric"])
+        names.extend(["oai-cu-cp", "oai-du", "oai-flexric", "nws-xapp"])
 
     dm = deploy_map or {}
     for n in range(1, n_slices + 1):
