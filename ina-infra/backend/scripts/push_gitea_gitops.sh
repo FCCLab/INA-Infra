@@ -201,24 +201,23 @@ push_cluster_repo() {
   echo "    github (primary): ${github_url}"
   echo "    gitea  (gitops):  ${gitea_url}"
 
-  # 1) Pull from GitHub first (fallback Gitea)
-  pull_or_exit origin "$GIT_BRANCH" "$cluster"
-
   if [[ "$PULL_ONLY" == "1" ]]; then
+    pull_or_exit origin "$GIT_BRANCH" "$cluster"
     echo "    pull-only done @$(git rev-parse --short HEAD)"
     cd "$REPO_ROOT"
     return 0
   fi
 
-  # 2) Commit local changes
+  # 1) Commit local changes first if dirty (prevents merge conflict against dirty working tree)
   git add -A
-  if git diff --staged --quiet; then
-    echo "    no local changes"
-  else
+  if ! git diff --staged --quiet; then
     msg="${COMMIT_MSG:-Update ${repo_name} ($(date -u +%Y-%m-%dT%H:%M:%SZ))}"
     git -c user.name="nephio-gitops" -c user.email="nephio@nephio.org" \
       commit -m "$msg"
   fi
+
+  # 2) Pull latest from GitHub first (fallback Gitea)
+  pull_or_exit origin "$GIT_BRANCH" "$cluster"
 
   # 3) Push to GitHub (Primary origin)
   mirror_github "$cluster" "$GIT_BRANCH"
