@@ -27,5 +27,7 @@
 | [oai.md](oai.md) | OAI macvlan IP plan, split RAN + slice UPFs |
 | [oai-deployment.md](oai-deployment.md) | Split RAN deployment notes |
 | [oai-benchmark.md](oai-benchmark.md) | `oai-benchmark` stack, RF config, CU-UP/PRB throughput sweeps |
+| [oai-rlc-optimization.md](oai-rlc-optimization.md) | 5G RLC AM optimization, realtime clock pacing, UDP throughput tuning |
+
 
 Nephio kpt packages: [`bringup/nephio/`](../bringup/nephio/).
