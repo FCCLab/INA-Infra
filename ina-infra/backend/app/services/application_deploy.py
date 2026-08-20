@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -1595,7 +1596,8 @@ def build_client_container(
     if app_type == "cctv":
         client_name = "cctv-publisher"
         rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8554)
-        base_stream_path = str(p.get("stream_path") or f"cctv/ue{sid}")
+        raw_stream_path = str(p.get("stream_path") or f"cctv/ue{sid}").strip()
+        base_stream_path = re.sub(r"(_cam\d+)+$", "", raw_stream_path)
         stream_path = (
             base_stream_path
             if client_index <= 1
@@ -1725,7 +1727,8 @@ def build_cctv_ue_containers(
         server_ip = site_ips.application_multus_ip(sid)
     rtsp_port = int(p.get("rtsp_port") or app_cfg.server_port or 8554)
     http_port = int(p.get("http_port") or 8080)
-    base_stream_path = str(p.get("stream_path") or f"cctv/ue{sid}")
+    raw_stream_path = str(p.get("stream_path") or f"cctv/ue{sid}").strip()
+    base_stream_path = re.sub(r"(_cam\d+)+$", "", raw_stream_path)
     stream_path = (
         base_stream_path
         if idx <= 1
@@ -2460,33 +2463,7 @@ def deploy_application_stream(
 
             client_volumes = None
             if app.app_type == "cctv":
-                cm_name = f"slice{sid}-cctv-client-code"
-                pub_path = "/home/fcp/INA-Infra/applications/cctv/client/publisher.py"
-                pub_code = ""
-                if os.path.exists(pub_path):
-                    with open(pub_path, "r", encoding="utf-8") as f:
-                        pub_code = f.read()
-                cm_manifest = {
-                    "apiVersion": "v1",
-                    "kind": "ConfigMap",
-                    "metadata": {
-                        "name": cm_name,
-                        "namespace": profile_name,
-                    },
-                    "data": {"publisher.py": pub_code},
-                }
-                subprocess.run(
-                    [*kc_edge, "apply", "-f", "-"],
-                    input=yaml.dump_all([cm_manifest]),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
                 client_volumes = [
-                    {
-                        "name": "cctv-client-code",
-                        "configMap": {"name": cm_name, "defaultMode": 0o755},
-                    },
                     {
                         "name": "cctv-data",
                         "emptyDir": {},

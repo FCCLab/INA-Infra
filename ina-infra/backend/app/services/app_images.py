@@ -28,7 +28,13 @@ THROUGHPUT_STATS = f"{REG}/throughput-statistics:nws-v0.2-amd64"
 
 STALE_SERVER_REPOS = frozenset({"slicea-analyzer", "hd-stream-server"})
 STALE_CLIENT_REPOS = frozenset(
-    {"slicea-publisher", "hd-stream-client", "cosmo3-aiperf", "sliced-client"}
+    {
+        "application-cctv-publisher",
+        "slicea-publisher",
+        "hd-stream-client",
+        "cosmo3-aiperf",
+        "sliced-client",
+    }
 )
 
 _SERVER = {
@@ -83,6 +89,9 @@ def resolve_client_image(app_type: str, stored: Optional[str] = None) -> str:
     if not img:
         return canonical
     if _image_repo(img) in STALE_CLIENT_REPOS:
+        return canonical
+    # CCTV: only cctv-ue-console image is valid for multi-container UE console
+    if (app_type or "").lower() == "cctv" and _image_repo(img) != "cctv-ue-console":
         return canonical
     img = _prefer_newer_nws(img, canonical)
     # OTT: force roll when 4K is not re-pinned after ads (< v0.33).

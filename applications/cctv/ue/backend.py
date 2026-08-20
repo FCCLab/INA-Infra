@@ -51,12 +51,15 @@ SERVER_URL = (
     or f"http://{TARGET_SERVER_IP}:{HTTP_PORT}"
 ).rstrip("/")
 
-BASE_STREAM_PATH = os.environ.get("STREAM_PATH") or f"cctv/ue{SLICE_ID}"
-STREAM_PATH = (
-    BASE_STREAM_PATH
-    if CLIENT_INDEX <= 1
-    else f"{BASE_STREAM_PATH}_cam{CLIENT_INDEX}"
-)
+_raw_stream_path = (os.environ.get("STREAM_PATH") or "").strip()
+if _raw_stream_path:
+    STREAM_PATH = _raw_stream_path
+else:
+    STREAM_PATH = (
+        f"cctv/ue{SLICE_ID}"
+        if CLIENT_INDEX <= 1
+        else f"cctv/ue{SLICE_ID}_cam{CLIENT_INDEX}"
+    )
 
 PDU_IFACE_CFG = os.environ.get("PDU_IFACE", f"oaitun_ue{SLICE_ID}")
 PDU_ROUTE_HOSTS = os.environ.get(
@@ -439,7 +442,7 @@ class StreamManager:
             # Local video file looped stream
             pipeline = [
                 "gst-launch-1.0", "-e",
-                "filesrc", f"location={resolved_src}", "do-timestamp=true",
+                "filesrc", f"location={resolved_src}",
                 "!", "decodebin",
                 "!", "videoconvert",
                 "!", "videorate",
