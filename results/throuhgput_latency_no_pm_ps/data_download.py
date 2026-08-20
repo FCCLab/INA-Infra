@@ -315,7 +315,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="lookback window in minutes (default: 10)",
     )
     p.add_argument("--out", type=Path, default=DEFAULT_OUT, help="output directory (default: ./data)")
-    p.add_argument("--url", default=env("INFLUX_URL", "http://10.1.137.104:8086"))
+    p.add_argument("--url", default=env("INFLUX_URL", "http://10.1.132.230:8086"))
     p.add_argument("--token", default=env("INFLUX_TOKEN", "ina-infra-influxdb-token"))
     p.add_argument("--org", default=env("INFLUX_ORG", "ina-infra"))
     p.add_argument("--bucket", default=env("INFLUX_BUCKET", "default"))

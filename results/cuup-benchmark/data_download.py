@@ -364,7 +364,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     p.add_argument(
         "--url",
-        default=env("INFLUX_URL", "http://10.1.137.104:8086"),
+        default=env("INFLUX_URL", "http://10.1.132.230:8086"),
         help="InfluxDB base URL",
     )
     p.add_argument("--token", default=env("INFLUX_TOKEN", "ina-infra-influxdb-token"))
