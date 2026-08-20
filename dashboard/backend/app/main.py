@@ -48,6 +48,12 @@ app.add_middleware(
 app.include_router(router)
 
 
+@app.get("/health", include_in_schema=False)
+@app.get("/api/health", include_in_schema=False)
+def health_check() -> dict:
+    return {"status": "ok"}
+
+
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")

@@ -12,6 +12,7 @@ Full system docs live under **[docs/](docs/)**:
 |-----|--------|
 | [docs/readme.md](docs/readme.md) | Index |
 | [docs/architecture.md](docs/architecture.md) | Components and data flow |
+| [docs/k8s_deployment.md](docs/k8s_deployment.md) | Deploy to Kubernetes (mgmt cluster) |
 | [docs/prometheus.md](docs/prometheus.md) | Per-cluster Prom, node_exporter, DCGM, GitOps |
 | [docs/api.md](docs/api.md) | REST API |
 | [docs/operations.md](docs/operations.md) | Run, env vars, troubleshooting |
