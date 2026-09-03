@@ -180,6 +180,8 @@ spec:
           value: '80'
         - name: UE_CONSOLE_PORT
           value: '80'
+        - name: UE_CONSOLE_OCTET_BASE
+          value: '220'
         volumeMounts:
         - name: dashboard-code
           mountPath: /app/app.py
