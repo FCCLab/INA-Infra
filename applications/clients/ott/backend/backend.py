@@ -57,7 +57,18 @@ SERVER_URL = (
 ).rstrip("/")
 SERVER_RTSP_HOST = os.environ.get("TARGET_SERVER_IP", "10.1.137.213")
 SERVER_RTSP_PORT = int(os.environ.get("SERVER_RTSP_PORT", "8555"))
-PDU_IFACE_CFG = os.environ.get("PDU_IFACE", f"oaitun_ue{SLICE_ID}")
+# ---------------------------------------------------------------------------
+# Network Interfaces: To-Server (default: RAN interface) & API (default: eth0)
+# ---------------------------------------------------------------------------
+TO_SERVER_IFACE_CFG = (
+    os.environ.get("TO_SERVER_IFACE")
+    or os.environ.get("SERVER_IFACE")
+    or os.environ.get("RAN_IFACE")
+    or os.environ.get("PDU_IFACE")
+    or f"oaitun_ue{SLICE_ID}"
+)
+API_IFACE_CFG = os.environ.get("API_IFACE") or "eth0"
+PDU_IFACE_CFG = TO_SERVER_IFACE_CFG
 PDU_ROUTE_HOSTS = os.environ.get(
     "PDU_ROUTE_HOSTS",
     ",".join(
@@ -76,6 +87,7 @@ UE_ID = os.environ.get("APP_NAME") or CLIENT_ID
 # Runtime-resolved OAI tunnel name (often oaitun_ue1 even on slice 3).
 _pdu_iface_live = PDU_IFACE_CFG
 _pdu_lock = threading.Lock()
+_api_iface_live = API_IFACE_CFG
 
 if Gauge is not None:
     APP_UE_LATENCY_MS = Gauge(
@@ -219,10 +231,40 @@ def _log_event(event_type: str, msg: str, **kwargs):
     logger.info(f"[{event_type}] {msg}")
 
 
+def get_interface_ip(ifname: str) -> Optional[str]:
+    """Retrieve the primary IPv4 address of a network interface."""
+    if not ifname:
+        return None
+    try:
+        out = subprocess.check_output(
+            ["ip", "-4", "-br", "addr", "show", "dev", ifname],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).strip()
+        parts = out.split()
+        if len(parts) >= 3:
+            return parts[2].split("/")[0]
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_api_iface() -> str:
+    global _api_iface_live
+    if _api_iface_live and Path(f"/sys/class/net/{_api_iface_live}").is_dir():
+        return _api_iface_live
+    for cand in [API_IFACE_CFG, "eth0"]:
+        if cand and Path(f"/sys/class/net/{cand}").is_dir():
+            _api_iface_live = cand
+            return cand
+    return API_IFACE_CFG
+
+
 def _discover_pdu_iface() -> Optional[str]:
     """OAI often names the tunnel oaitun_ue1 regardless of slice id."""
     candidates = []
-    for raw in (PDU_IFACE_CFG, "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue4", "oaitun_ue5"):
+    for raw in (TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, f"oaitun_ue{SLICE_ID}", "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue4", "oaitun_ue5"):
         if raw and raw not in candidates:
             candidates.append(raw)
     try:
@@ -246,6 +288,8 @@ def _discover_pdu_iface() -> Optional[str]:
         except Exception:
             continue
     return None
+
+_resolve_to_server_iface = _discover_pdu_iface
 
 
 def _pin_server_via_pdu(iface: str) -> bool:
@@ -900,10 +944,39 @@ def _socks_pdu_refresh_loop() -> None:
         time.sleep(5.0)
 
 
+@app.get("/api/interfaces")
+def api_interfaces() -> dict:
+    to_srv_iface = _discover_pdu_iface() or _pdu_iface() or TO_SERVER_IFACE_CFG
+    to_srv_ip = get_interface_ip(to_srv_iface) if to_srv_iface else None
+    api_if = _resolve_api_iface()
+    api_ip = get_interface_ip(api_if)
+    return {
+        "ok": True,
+        "to_server_interface": {
+            "name": to_srv_iface,
+            "configured": TO_SERVER_IFACE_CFG,
+            "type": "ran",
+            "ip": to_srv_ip,
+            "ready": bool(to_srv_ip),
+        },
+        "api_interface": {
+            "name": api_if,
+            "configured": API_IFACE_CFG,
+            "type": "api",
+            "ip": api_ip,
+            "ready": bool(api_ip),
+        },
+    }
+
+
 @app.get("/api/status")
 def get_status():
     chrome = chrome_ctl.status()
     socks = PDU_SOCKS.stats()
+    to_srv_iface = _discover_pdu_iface() or _pdu_iface() or TO_SERVER_IFACE_CFG
+    to_srv_ip = get_interface_ip(to_srv_iface) if to_srv_iface else None
+    api_if = _resolve_api_iface()
+    api_ip = get_interface_ip(api_if)
     with _lock:
         st = dict(_state)
         st["socks_bytes_up"] = socks.get("bytes_up") or 0
@@ -919,6 +992,26 @@ def get_status():
         "client_index": CLIENT_INDEX,
         "console_ip": CONSOLE_IP,
         "console_mac": CONSOLE_MAC,
+        "to_server_iface": to_srv_iface,
+        "to_server_ip": to_srv_ip,
+        "api_iface": api_if,
+        "api_ip": api_ip,
+        "interfaces": {
+            "to_server": {
+                "name": to_srv_iface,
+                "configured": TO_SERVER_IFACE_CFG,
+                "type": "ran",
+                "ip": to_srv_ip,
+                "ready": bool(to_srv_ip),
+            },
+            "api": {
+                "name": api_if,
+                "configured": API_IFACE_CFG,
+                "type": "api",
+                "ip": api_ip,
+                "ready": bool(api_ip),
+            },
+        },
         "server_url": SERVER_URL,
         "server": {
             "url": SERVER_URL,

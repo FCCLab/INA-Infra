@@ -36,11 +36,23 @@ SERVER_URL = (
     or "http://10.1.137.212:8000"
 ).rstrip("/")
 MODEL_NAME = os.environ.get("MODEL_NAME") or os.environ.get("MODEL") or "nvidia/Cosmos3-Nano"
-PDU_IFACE_CFG = os.environ.get("PDU_IFACE", f"oaitun_ue{SLICE_ID}")
+# ---------------------------------------------------------------------------
+# Network Interfaces: To-Server (default: RAN interface) & API (default: eth0)
+# ---------------------------------------------------------------------------
+TO_SERVER_IFACE_CFG = (
+    os.environ.get("TO_SERVER_IFACE")
+    or os.environ.get("SERVER_IFACE")
+    or os.environ.get("RAN_IFACE")
+    or os.environ.get("PDU_IFACE")
+    or f"oaitun_ue{SLICE_ID}"
+)
+API_IFACE_CFG = os.environ.get("API_IFACE") or "eth0"
+PDU_IFACE_CFG = TO_SERVER_IFACE_CFG
 PDU_ROUTE_HOSTS = os.environ.get("PDU_ROUTE_HOSTS", "")
 PDU_WAIT_TIMEOUT = int(os.environ.get("PDU_WAIT_TIMEOUT", "300"))
 _pdu_iface_live = PDU_IFACE_CFG
 _pdu_lock = threading.Lock()
+_api_iface_live = API_IFACE_CFG
 INTERVAL_S = float(os.environ.get("SEND_INTERVAL_S", "8"))
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
 PROMPT = os.environ.get(
@@ -142,9 +154,39 @@ def _usage_tokens(usage: Any) -> tuple[int, int, int]:
     return prompt, completion, total
 
 
+def get_interface_ip(ifname: str) -> Optional[str]:
+    """Retrieve the primary IPv4 address of a network interface."""
+    if not ifname:
+        return None
+    try:
+        out = subprocess.check_output(
+            ["ip", "-4", "-br", "addr", "show", "dev", ifname],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).strip()
+        parts = out.split()
+        if len(parts) >= 3:
+            return parts[2].split("/")[0]
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_api_iface() -> str:
+    global _api_iface_live
+    if _api_iface_live and Path(f"/sys/class/net/{_api_iface_live}").is_dir():
+        return _api_iface_live
+    for cand in [API_IFACE_CFG, "eth0"]:
+        if cand and Path(f"/sys/class/net/{cand}").is_dir():
+            _api_iface_live = cand
+            return cand
+    return API_IFACE_CFG
+
+
 def _discover_pdu_iface() -> Optional[str]:
     candidates = []
-    for raw in (PDU_IFACE_CFG, "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue4", "oaitun_ue5"):
+    for raw in (TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, f"oaitun_ue{SLICE_ID}", "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue4", "oaitun_ue5"):
         if raw and raw not in candidates:
             candidates.append(raw)
     try:
@@ -168,6 +210,8 @@ def _discover_pdu_iface() -> Optional[str]:
         except Exception:
             continue
     return None
+
+_resolve_to_server_iface = _discover_pdu_iface
 
 
 def _server_hosts() -> list[str]:
@@ -502,10 +546,55 @@ def api_status() -> dict:
         "server_url": SERVER_URL,
         "model": MODEL_NAME,
         "pdu_iface": _pdu_iface_live or PDU_IFACE_CFG,
+        "to_server_iface": _pdu_iface_live or TO_SERVER_IFACE_CFG,
+        "to_server_ip": get_interface_ip(_pdu_iface_live or TO_SERVER_IFACE_CFG),
+        "api_iface": _resolve_api_iface(),
+        "api_ip": get_interface_ip(_resolve_api_iface()),
+        "interfaces": {
+            "to_server": {
+                "name": _pdu_iface_live or TO_SERVER_IFACE_CFG,
+                "configured": TO_SERVER_IFACE_CFG,
+                "type": "ran",
+                "ip": get_interface_ip(_pdu_iface_live or TO_SERVER_IFACE_CFG),
+                "ready": bool(get_interface_ip(_pdu_iface_live or TO_SERVER_IFACE_CFG)),
+            },
+            "api": {
+                "name": _resolve_api_iface(),
+                "configured": API_IFACE_CFG,
+                "type": "api",
+                "ip": get_interface_ip(_resolve_api_iface()),
+                "ready": bool(get_interface_ip(_resolve_api_iface())),
+            },
+        },
         "interval_s": INTERVAL_S,
         "exchanges": n,
         "last": last,
         **st,
+    }
+
+
+@app.get("/api/interfaces")
+def api_interfaces() -> dict:
+    to_srv_iface = _resolve_to_server_iface() or TO_SERVER_IFACE_CFG
+    to_srv_ip = get_interface_ip(to_srv_iface) if to_srv_iface else None
+    api_if = _resolve_api_iface()
+    api_ip = get_interface_ip(api_if)
+    return {
+        "ok": True,
+        "to_server_interface": {
+            "name": to_srv_iface,
+            "configured": TO_SERVER_IFACE_CFG,
+            "type": "ran",
+            "ip": to_srv_ip,
+            "ready": bool(to_srv_ip),
+        },
+        "api_interface": {
+            "name": api_if,
+            "configured": API_IFACE_CFG,
+            "type": "api",
+            "ip": api_ip,
+            "ready": bool(api_ip),
+        },
     }
 
 
