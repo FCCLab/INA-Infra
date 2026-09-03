@@ -711,9 +711,9 @@ def generate_server_manifests(
         server_img = app_images.resolve_server_image("cctv", app_cfg.server_image)
 
         def _read_edge(name: str) -> str:
-            path = f"/home/fcp/INA-Infra/applications/server/cctv/edge/{name}"
+            path = f"/home/fcp/INA-Infra/applications/servers/cctv/edge/{name}"
             if not os.path.exists(path):
-                path = f"/home/fcp/INA-Infra/applications/cctv/edge/{name}"
+                path = f"/home/fcp/INA-Infra/applications/server/cctv/edge/{name}"
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
@@ -909,9 +909,9 @@ def generate_server_manifests(
         latency_proxy_port = int(p.get("latency_proxy_port") or 18080)
 
         def _read_dash(name: str) -> str:
-            path = f"/home/fcp/INA-Infra/applications/server/physical_ai/dashboard/{name}"
+            path = f"/home/fcp/INA-Infra/applications/servers/physical_ai/dashboard/{name}"
             if not os.path.exists(path):
-                path = f"/home/fcp/INA-Infra/applications/physical_ai/dashboard/{name}"
+                path = f"/home/fcp/INA-Infra/applications/server/physical_ai/dashboard/{name}"
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
@@ -1187,9 +1187,9 @@ def generate_server_manifests(
         server_img = app_images.resolve_server_image("ott", app_cfg.server_image)
 
         def _read_ott(name: str) -> str:
-            path = f"/home/fcp/INA-Infra/applications/server/ott/server/{name}"
+            path = f"/home/fcp/INA-Infra/applications/servers/ott/server/{name}"
             if not os.path.exists(path):
-                path = f"/home/fcp/INA-Infra/applications/ott/server/{name}"
+                path = f"/home/fcp/INA-Infra/applications/server/ott/server/{name}"
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
@@ -2272,9 +2272,9 @@ def patch_ue_pod_with_client(
         containers.append(client_container)
         if client_container.get("name") == "cctv-publisher":
             cm_name = f"slice{sid}-cctv-client-code"
-            pub_path = "/home/fcp/INA-Infra/applications/server/cctv/client/publisher.py"
+            pub_path = "/home/fcp/INA-Infra/applications/servers/cctv/client/publisher.py"
             if not os.path.exists(pub_path):
-                pub_path = "/home/fcp/INA-Infra/applications/cctv/client/publisher.py"
+                pub_path = "/home/fcp/INA-Infra/applications/server/cctv/client/publisher.py"
             pub_code = ""
             if os.path.exists(pub_path):
                 with open(pub_path, "r", encoding="utf-8") as f:
