@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-upf-nf-conf
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  upf.yaml: "############# Common configuration\n# Log level for all the NFs\nlog_level:\n\
+    \  upf: {{ conf['logLevel'] }}\n# If you enable registration, the other NFs will\
+    \ use the NRF discovery mechanism\nregister_nf:\n  upf: 'yes'\nhttp_version: 2\n\
+    http_request_timeout: 3000  # ms (v2.1+; v2.0.1 ignored ~100ms hardcode)\n## general\
+    \ single_nssai configuration\n## Defines YAML anchors, which are reused in the\
+    \ config file\nsnssais:\n  {%- for i in conf['PLMN']['plmnInfo']%}\n  {%- for\
+    \ s in i['nssai']%}\n  - &slice_{{ i['nssai'].index(s) }}\n    sst: {{ s['sst']\
+    \ }}\n    sd: \"{{ s['sd'] if 'sd' in s.keys() else 'FFFFFF' }}\"\n  {%- endfor\
+    \ %}\n  {%- endfor %}\n############## SBI Interfaces\n### Each NF takes its local\
+    \ SBI interfaces and remote interfaces from here, unless it gets them using NRF\
+    \ discovery mechanisms\nnfs:\n  upf:\n    host: {{ conf['fqdn']['upf'] }}\n  \
+    \  sbi:\n      port: 80\n      api_version: v1\n      interface_name: {{ conf['nfInterfaces']['sbi']\
+    \ }}\n    n3:\n      interface_name: {{ conf['nfInterfaces']['n3'] }}\n      port:\
+    \ 2152\n    n4:\n      interface_name: {{ conf['nfInterfaces']['n4'] }}\n    \
+    \  port: 8805\n    n6:\n      interface_name: {{ conf['nfInterfaces']['n6'] }}\n\
+    \    n9:\n      interface_name: {{ conf['nfInterfaces']['n9'] }}\n      port:\
+    \ 2152\n  smf:\n    host: {{ conf['fqdn']['smf'] }}\n    sbi:\n      port: 80\n\
+    \    n4:\n      port: 8805\n  nrf:\n    host: {{ conf['fqdn']['nrf'] }}\n    sbi:\n\
+    \      port: 80\n      api_version: v1\n\n############## NF-specific configuration\n\
+    upf:\n  support_features:\n    enable_bpf_datapath: no    # If \"on\": BPF is\
+    \ used as datapath else simpleswitch is used, DEFAULT= off\n    enable_snat: yes\
+    \           # If \"on\": Source natting is done for UE, DEFAULT= off\n  remote_n6_gw:\
+    \ 10.1.137.1      # Site internet GW on Multus N6 (Glass 10.1.137)\n  upf_info:\n\
+    \    sNssaiUpfInfoList:\n      {%- for i in conf['PLMN']['plmnInfo'] %}\n    \
+    \  {%- for x in i['nssai'] %}\n      - sNssai: *slice_{{ i['nssai'].index(x) }}\n\
+    \        dnnUpfInfoList:\n      {%- for d in x['dnnInfo'] %}\n          - dnn:\
+    \ {{ d['name'] }}\n      {%- endfor %}\n      {%- endfor %}\n      {%- endfor\
+    \ %}\n## DNN configuration\ndnns:\n  {%- for i in conf['PLMN']['plmnInfo'] %}\n\
+    \  {%- for x in i['nssai'] %}\n  {%- for d in x['dnnInfo'] %}\n  - dnn: \"{{ d['name']\
+    \ }}\"\n    pdu_session_type: \"IPV4\"\n    ipv4_subnet: \"{{ d['subnet'] }}\"\
+    \n  {%- endfor %}\n  {%- endfor %}\n  {%- endfor %}\n"

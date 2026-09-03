@@ -1,0 +1,46 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFDeployment
+metadata:
+  name: upf-slice-3
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  provider: upf.openairinterface.org
+  capacity:
+    maxDownlinkThroughput: 5G
+    maxUplinkThroughput: 5G
+  parametersRefs:
+  - name: upf-slice-3-config
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFConfig
+  interfaces:
+  - name: n3
+    ipv4:
+      address: 10.1.140.23/24
+      gateway: 10.1.140.1
+    vlanID: 4
+  - name: n4
+    ipv4:
+      address: 10.1.140.43/24
+      gateway: 10.1.140.1
+    vlanID: 2
+  - name: n6
+    ipv4:
+      address: 0.0.0.0/24
+      gateway: 10.1.137.1
+    vlanID: 3
+  networkInstances:
+  - name: vpc-internal
+    interfaces:
+    - n4
+  - name: vpc-internet
+    dataNetworks:
+    - name: oai3
+      pool:
+      - prefix: 10.140.3.0/24
+    interfaces:
+    - n6
+  - name: vpc-ran
+    interfaces:
+    - n3

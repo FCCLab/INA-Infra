@@ -1,0 +1,82 @@
+timestamp,slice_id,slice_name,app_type,tier,ue_pod,target_ip,e2e_latency_ms,status_code,bytes_received,sla_target_ms,sla_met,success
+2026-09-02T16:03:45.097828+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,68.131,200,141,10.0,False,True
+2026-09-02T16:03:45.161422+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,125.675,200,815,50.0,False,True
+2026-09-02T16:03:45.180255+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,144.087,200,1142,20.0,False,True
+2026-09-02T16:03:45.323887+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,287.478,200,16312,100.0,False,True
+2026-09-02T16:03:45.788070+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,76.085,200,141,10.0,False,True
+2026-09-02T16:03:45.895761+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,130.526,200,815,50.0,False,True
+2026-09-02T16:03:45.933170+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,146.131,200,1142,20.0,False,True
+2026-09-02T16:03:46.180435+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,237.639,200,16306,100.0,False,True
+2026-09-02T16:03:46.483611+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,80.263,200,141,10.0,False,True
+2026-09-02T16:03:46.650306+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,138.93,200,815,50.0,False,True
+2026-09-02T16:03:46.714408+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,173.532,200,1142,20.0,False,True
+2026-09-02T16:03:47.001362+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,213.913,200,16309,100.0,False,True
+2026-09-02T16:03:47.177643+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,89.463,200,141,10.0,False,True
+2026-09-02T16:03:47.377422+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,105.681,200,815,50.0,False,True
+2026-09-02T16:03:47.479236+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,148.399,200,1141,20.0,False,True
+2026-09-02T16:03:47.859522+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,215.95,200,16308,100.0,False,True
+2026-09-02T16:03:47.894437+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,83.22,200,141,10.0,False,True
+2026-09-02T16:03:48.117330+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,105.161,200,815,50.0,False,True
+2026-09-02T16:03:48.266156+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,168.05,200,1141,20.0,False,True
+2026-09-02T16:03:48.595594+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,74.052,200,141,10.0,False,True
+2026-09-02T16:03:48.720459+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,233.658,200,16306,100.0,False,True
+2026-09-02T16:03:48.895928+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,149.858,200,815,50.0,False,True
+2026-09-02T16:03:49.074486+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,180.736,200,1150,20.0,False,True
+2026-09-02T16:03:49.285856+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,64.748,200,141,10.0,False,True
+2026-09-02T16:03:49.562304+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,214.291,200,16308,100.0,False,True
+2026-09-02T16:03:49.641538+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,119.744,200,815,50.0,False,True
+2026-09-02T16:03:49.840014+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,149.371,200,1150,20.0,False,True
+2026-09-02T16:03:49.968427+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,71.413,200,141,10.0,False,True
+2026-09-02T16:03:50.364021+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,110.971,200,815,50.0,False,True
+2026-09-02T16:03:50.404136+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,228.123,200,16308,100.0,False,True
+2026-09-02T16:03:50.582103+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,126.301,200,1142,20.0,False,True
+2026-09-02T16:03:50.648594+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,77.394,200,141,10.0,False,True
+2026-09-02T16:03:51.150943+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,163.127,200,815,50.0,False,True
+2026-09-02T16:03:51.267290+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,235.259,200,16309,100.0,False,True
+2026-09-02T16:03:51.334426+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,73.965,200,141,10.0,False,True
+2026-09-02T16:03:51.349689+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,148.426,200,1151,20.0,False,True
+2026-09-02T16:03:51.884885+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,114.293,200,815,50.0,False,True
+2026-09-02T16:03:52.042723+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,82.039,200,141,10.0,False,True
+2026-09-02T16:03:52.118139+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,243.529,200,16310,100.0,False,True
+2026-09-02T16:03:52.130945+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,160.251,200,1136,20.0,False,True
+2026-09-02T16:03:52.609324+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,111.637,200,815,50.0,False,True
+2026-09-02T16:03:52.733858+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,73.596,200,141,10.0,False,True
+2026-09-02T16:03:52.883744+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,139.493,200,1149,20.0,False,True
+2026-09-02T16:03:52.959709+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,227.891,200,16309,100.0,False,True
+2026-09-02T16:03:53.359618+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,137.673,200,815,50.0,False,True
+2026-09-02T16:03:53.427818+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,71.534,200,141,10.0,False,True
+2026-09-02T16:03:53.632366+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,137.019,200,1150,20.0,False,True
+2026-09-02T16:03:53.791040+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,226.952,200,16309,100.0,False,True
+2026-09-02T16:03:54.093898+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,119.057,200,815,50.0,False,True
+2026-09-02T16:03:54.127890+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,74.655,200,141,10.0,False,True
+2026-09-02T16:03:54.405864+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,158.047,200,1168,20.0,False,True
+2026-09-02T16:03:54.643611+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,214.096,200,16318,100.0,False,True
+2026-09-02T16:03:54.819373+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,79.89,200,141,10.0,False,True
+2026-09-02T16:03:54.840479+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,126.305,200,815,50.0,False,True
+2026-09-02T16:03:55.167704+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,147.518,200,1159,20.0,False,True
+2026-09-02T16:03:55.483045+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,220.364,200,16318,100.0,False,True
+2026-09-02T16:03:55.507592+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,66.385,200,141,10.0,False,True
+2026-09-02T16:03:55.585460+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,118.396,200,815,50.0,False,True
+2026-09-02T16:03:55.907604+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,134.731,200,1150,20.0,False,True
+2026-09-02T16:03:56.209528+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,79.856,200,141,10.0,False,True
+2026-09-02T16:03:56.319226+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,227.681,200,16320,100.0,False,True
+2026-09-02T16:03:56.324512+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,130.488,200,815,50.0,False,True
+2026-09-02T16:03:56.626757+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,122.496,200,1159,20.0,False,True
+2026-09-02T16:03:56.890599+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,70.217,200,141,10.0,False,True
+2026-09-02T16:03:57.060194+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,119.155,200,815,50.0,False,True
+2026-09-02T16:03:57.169573+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,230.339,200,16310,100.0,False,True
+2026-09-02T16:03:57.392900+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,147.677,200,1159,20.0,False,True
+2026-09-02T16:03:57.590301+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,91.697,200,141,10.0,False,True
+2026-09-02T16:03:57.933803+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,251.521,200,815,50.0,False,True
+2026-09-02T16:03:58.013630+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,224.132,200,16310,100.0,False,True
+2026-09-02T16:03:58.166018+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,154.96,200,1159,20.0,False,True
+2026-09-02T16:03:58.252203+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,61.547,200,141,10.0,False,True
+2026-09-02T16:03:58.672944+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,130.183,200,815,50.0,False,True
+2026-09-02T16:03:58.881715+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,259.028,200,16312,100.0,False,True
+2026-09-02T16:03:58.896216+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,122.323,200,1150,20.0,False,True
+2026-09-02T16:03:58.935688+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,84.738,200,141,10.0,False,True
+2026-09-02T16:03:59.399111+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,107.656,200,815,50.0,False,True
+2026-09-02T16:03:59.627082+00:00,1,CCTV Video Analytics,cctv,regional,oai-ue-slice-1-client-1-566bb85df8-7gw9r,10.1.137.211,116.252,200,1151,20.0,False,True
+2026-09-02T16:03:59.634647+00:00,2,Physical-AI Teleoperation,physical_ai,edge,oai-ue-slice-2-client-1-754f86b9bc-qwfcs,10.1.137.212,88.947,200,141,10.0,False,True
+2026-09-02T16:03:59.685148+00:00,4,IoT Telemetry Ingestion,iot,central,oai-ue-slice-4-client-1-79b9755488-w9s76,10.1.137.214,193.591,200,16309,100.0,False,True
+2026-09-02T16:04:00.127286+00:00,3,OTT 4K Video Streaming,ott,central,oai-ue-slice-3-client-1-74ccfdd9f8-f4kpb,10.1.137.213,116.094,200,815,50.0,False,True

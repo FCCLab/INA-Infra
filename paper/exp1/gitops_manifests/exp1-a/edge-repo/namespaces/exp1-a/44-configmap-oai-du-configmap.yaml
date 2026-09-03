@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-du-configmap
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+data:
+  gnb.conf: "Active_gNBs = ( \"oai-du\");\nAsn1_verbosity = \"none\";\ngNBs =\n(\n\
+    \ {\n    gNB_ID = 0xe00;\n    gNB_DU_ID = 0xe00;\n    gNB_name  =  \"oai-du\"\
+    ;\n    disable_harq = 0;\n    TIMERS = {\n      sr_ProhibitTimer = 0;\n      sr_TransMax\
+    \ = 64;\n      sr_ProhibitTimer_v1700 = 0;\n      t300 = 400;\n      t301 = 400;\n\
+    \      t310 = 2000;\n      n310 = 20;\n      t311 = 3000;\n      n311 = 1;\n \
+    \     t319 = 400;\n    };\n    tracking_area_code  =  0x0051;\n    uess_agg_levels\
+    \ = [8, 8, 8, 5, 2];\n    coreset_duration = 2;\n    plmn_list = ({ mcc = 001;\
+    \ mnc = 01; mnc_length = 2; snssaiList = ({ sst = 1, sd = 0xFFFFFF }, { sst =\
+    \ 1, sd = 0x000001 }, { sst = 1, sd = 0x000002 }, { sst = 1, sd = 0x000003 },\
+    \ { sst = 1, sd = 0x000004 }) });\n    nr_cellid = 12345678;\n    min_rxtxtime\
+    \ = 6;\n    servingCellConfigCommon = (\n    {\n      physCellId = 0;\n      absoluteFrequencySSB\
+    \ = 620640;\n      dl_frequencyBand = 78;\n      dl_absoluteFrequencyPointA =\
+    \ 620112;\n      dl_offstToCarrier = 0;\n      dl_subcarrierSpacing = 1;\n   \
+    \   dl_carrierBandwidth = 133;\n      initialDLBWPlocationAndBandwidth = 36300;\n\
+    \      initialDLBWPsubcarrierSpacing = 1;\n      initialDLBWPcontrolResourceSetZero\
+    \ = 10;\n      initialDLBWPsearchSpaceZero = 0;\n      ul_frequencyBand = 78;\n\
+    \      ul_offstToCarrier = 0;\n      ul_subcarrierSpacing = 1;\n      ul_carrierBandwidth\
+    \ = 133;\n      pMax = 20;\n      initialULBWPlocationAndBandwidth = 36300;\n\
+    \      initialULBWPsubcarrierSpacing = 1;\n      prach_ConfigurationIndex = 98;\n\
+    \      prach_msg1_FDM = 0;\n      prach_msg1_FrequencyStart = 0;\n      zeroCorrelationZoneConfig\
+    \ = 12;\n      preambleReceivedTargetPower = -104;\n      preambleTransMax = 6;\n\
+    \      powerRampingStep = 1;\n      ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR\
+    \ = 4;\n      ssb_perRACH_OccasionAndCB_PreamblesPerSSB = 15;\n      ra_ContentionResolutionTimer\
+    \ = 7;\n      rsrp_ThresholdSSB = 19;\n      prach_RootSequenceIndex_PR = 2;\n\
+    \      prach_RootSequenceIndex = 1;\n      msg1_SubcarrierSpacing = 1,\n     \
+    \ restrictedSetConfig = 0,\n      msg3_DeltaPreamble = 1;\n      p0_NominalWithGrant\
+    \ =-90;\n      pucchGroupHopping = 0;\n      hoppingId = 40;\n      p0_nominal\
+    \ = -90;\n      ssb_PositionsInBurst_Bitmap = 1;\n      ssb_periodicityServingCell\
+    \ = 2;\n      dmrs_TypeA_Position = 0;\n      subcarrierSpacing = 1;\n      referenceSubcarrierSpacing\
+    \ = 1;\n      dl_UL_TransmissionPeriodicity = 6;\n      nrofDownlinkSlots = 7;\n\
+    \      nrofDownlinkSymbols = 6;\n      nrofUplinkSlots = 2;\n      nrofUplinkSymbols\
+    \ = 6;\n      ssPBCH_BlockPower = -25;\n     }\n  );\n    SCTP :\n    {\n    \
+    \    SCTP_INSTREAMS  = 2;\n        SCTP_OUTSTREAMS = 2;\n    };\n  }\n);\n\nMACRLCs\
+    \ = (\n  {\n    num_cc = 1;\n    tr_s_preference = \"local_L1\";\n    tr_n_preference\
+    \ = \"f1\";\n    local_n_address = \"10.1.140.203\";\n    remote_n_address = \"\
+    10.1.140.201\";\n    local_n_portc = 500;\n    local_n_portd = 2152;\n    remote_n_portc\
+    \ = 501;\n    remote_n_portd = 2152;\n    pusch_TargetSNRx10 = 150;\n    pucch_TargetSNRx10\
+    \ = 150;\n    stats_max_ue = 17;\n    # NSBOTH: same NS scheduler for UL and DL;\
+    \ slice list from profile n_slices.\n    dl_scheduler_type = 1;\n    ul_scheduler_type\
+    \ = 1;\n    pusch_FailureThres = 1000;\n    pucch_FailureThres = 1000;\n    dl_harq_round_max\
+    \ = 8;\n    ul_harq_round_max = 8;\n  }\n);\n\nSlices = (\n  { slice_id = 0; sst\
+    \ = 1; sd = 0xffffff; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 100.0; },\n  { slice_id = 1; sst = 1; sd = 0x000001; dedicated_prb_ratio =\
+    \ 0.0; min_prb_ratio = 0.0; max_prb_ratio = 100.0; },\n  { slice_id = 2; sst =\
+    \ 1; sd = 0x000002; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 100.0; },\n  { slice_id = 3; sst = 1; sd = 0x000003; dedicated_prb_ratio =\
+    \ 0.0; min_prb_ratio = 0.0; max_prb_ratio = 50.0; },\n  { slice_id = 4; sst =\
+    \ 1; sd = 0x000004; dedicated_prb_ratio = 0.0; min_prb_ratio = 0.0; max_prb_ratio\
+    \ = 50.0; }\n);\n\nL1s = (\n{\n  num_cc = 1;\n  tr_n_preference = \"local_mac\"\
+    ;\n  prach_dtx_threshold = 200;\n}\n);\n\nRUs = (\n    {\n    local_rf = \"yes\"\
+    \n    nb_tx = 1\n    nb_rx = 1\n    att_tx = 0\n    att_rx = 0;\n    bands = [78];\n\
+    \    max_pdschReferenceSignalPower = -27;\n    max_rxgain = 75;\n    eNB_instances\
+    \ = [0];\n    bf_weights = [0x00007fff, 0x0000, 0x0000, 0x0000];\n    clock_src\
+    \ = \"internal\";\n    }\n);\n\nrfsimulator: {\n    serveraddr = \"server\";\n\
+    \    serverport = \"4043\";\n    options = ();\n    modelname = \"AWGN\";\n  \
+    \  IQfile = \"/tmp/rfsimulator.iqs\"\n}\n\n# DU is time source; CU-CP connects\
+    \ as client (OAI CU/DU iq_samples).\ntime_management = {\n  time_source = \"iq_samples\"\
+    ;\n  mode = \"server\";\n  server_ip = \"10.1.140.203\";\n  server_port = 7374;\n\
+    };log_config :\n{\n    global_log_level = \"info\";\n    hw_log_level = \"info\"\
+    ;\n    phy_log_level = \"info\";\n    mac_log_level = \"info\";\n    rlc_log_level\
+    \ = \"info\";\n    f1ap_log_level = \"info\";\n};\n\ne2_agent = {\n  near_ric_ip_addr\
+    \ = \"10.1.140.205\";\n  sm_dir = \"/usr/local/lib/flexric/\";\n};\n"

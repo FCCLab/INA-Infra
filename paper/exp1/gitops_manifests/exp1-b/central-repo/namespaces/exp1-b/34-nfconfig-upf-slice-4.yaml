@@ -1,0 +1,28 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFConfig
+metadata:
+  name: upf-slice-4-config
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/slice: '4'
+spec:
+  configRefs:
+  - apiVersion: cellular.nephio.org/v1alpha1
+    kind: PLMN
+    metadata:
+      name: oai-plmn
+    spec:
+      plmnInfo:
+      - plmnID:
+          mcc: '001'
+          mnc: '01'
+        tac: 81
+        nssai:
+        - sst: 1
+          sd: '000004'
+          dnnInfo:
+          - name: oai4
+            sessionType: ipv4
+            dns: 1.1.1.1
+            subnet: 10.140.4.0/24

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-cu-up-1-configmap
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/slice: '1'
+data:
+  gnb.conf: "Active_gNBs = ( \"oai-cu-up-1\");\nAsn1_verbosity = \"none\";\nsa = 1;\n\
+    gNBs =\n(\n {\n    gNB_ID = 0xe00;\n    gNB_CU_UP_ID = 0xe01;\n    gNB_name  =\
+    \  \"oai-cu-up-1\";\n    tracking_area_code  =  0x0051;\n    plmn_list = ({ mcc\
+    \ = 001;\n                   mnc = 01;\n                   mnc_length =2;\n  \
+    \                 snssaiList = ({ sst = 1, sd = 0x000001 })\n                });\n\
+    \n    tr_s_preference = \"f1\";\n    local_s_address = \"10.1.140.101\";\n   \
+    \ remote_s_address = \"0.0.0.0\";\n    local_s_portc   = 501;\n    local_s_portd\
+    \   = 2152;\n    remote_s_portc  = 500;\n    remote_s_portd  = 2152;\n\n    SCTP\
+    \ :\n    {\n        SCTP_INSTREAMS  = 2;\n        SCTP_OUTSTREAMS = 2;\n    };\n\
+    \n    E1_INTERFACE =\n    (\n      {\n        type = \"up\";\n        ipv4_cucp\
+    \ = \"10.1.140.202\";\n        ipv4_cuup = \"10.1.140.81\";\n      }\n    )\n\n\
+    \    NETWORK_INTERFACES :\n    {\n        GNB_IPV4_ADDRESS_FOR_NG_AMF        \
+    \      = \"10.1.140.121\";\n        GNB_IPV4_ADDRESS_FOR_NGU                 =\
+    \ \"10.1.140.121\";\n        GNB_PORT_FOR_S1U                         = 2152;\n\
+    \    };\n  }\n);\n\nsecurity = {\n  ciphering_algorithms = ( \"nea0\" );\n  integrity_algorithms\
+    \ = ( \"nia2\", \"nia0\" );\n  drb_ciphering = \"yes\";\n  drb_integrity = \"\
+    no\";\n};\n\nlog_config :\n{\nglobal_log_level                      =\"info\"\
+    ;\npdcp_log_level                        =\"info\";\nf1ap_log_level          \
+    \              =\"info\";\nngap_log_level                        =\"info\";\n\
+    };\n"

@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-cu-up-2
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/name: oai-cu-up-2
+    app.kubernetes.io/part-of: ina-infra
+    slice: '2'
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-cu-up-2
+  template:
+    metadata:
+      labels:
+        app: oai-cu-up-2
+        app.kubernetes.io/name: oai-cu-up-2
+        slice: '2'
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "cuup-slice2-e1", "interface": "e1",
+          "ips": ["10.1.140.82/24"], "gateways": ["10.1.140.3"]}, {"name": "cuup-slice2-f1u",
+          "interface": "f1u", "ips": ["10.1.140.102/24"], "gateways": ["10.1.140.3"]},
+          {"name": "cuup-slice2-n3", "interface": "n3", "ips": ["10.1.140.122/24"],
+          "gateways": ["10.1.140.3"]}]'
+        oai.nephio.org/upf-n3: 10.1.140.22
+        oai.nephio.org/site: edge
+    spec:
+      serviceAccountName: oai-cu-up-2-sa
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        ina-infra.nephio.lab/multus-master: enp7s0
+      containers:
+      - name: bringup-order
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - 'set -eu
+
+          echo "bringup-order sidecar role=cu-up-2"
+
+          echo ''depends on (see exp1-b/bringup_order.md):''
+
+          echo ''  - none (starts before CU-CP)''
+
+          echo ''  - E1: dials CU-CP :38462 after CU-CP is up''
+
+          echo ''gated by bringup-* initContainers; sleeping''
+
+          sleep infinity'
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+      - name: cuup
+        image: 10.1.132.30:5000/oai-nr-cuup:nws-v0.8.2-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --log_config.global_log_options level,nocolor,time
+        - name: USE_VOLUMED_CONF
+          value: 'yes'
+        ports:
+        - name: n3
+          containerPort: 2152
+          protocol: UDP
+        - name: e1
+          containerPort: 38462
+          protocol: SCTP
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - pgrep -f softmodem >/dev/null
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 24
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-cu-up-2-configmap

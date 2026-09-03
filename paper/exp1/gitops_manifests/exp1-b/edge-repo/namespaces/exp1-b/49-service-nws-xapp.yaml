@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nws-xapp
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/name: nws-xapp
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  type: ClusterIP
+  externalIPs:
+  - 10.1.132.230
+  selector:
+    app.kubernetes.io/name: nws-xapp
+  ports:
+  - name: http-18080
+    port: 18080
+    targetPort: 18080
+    protocol: TCP
+  - name: http-18081
+    port: 18081
+    targetPort: 18080
+    protocol: TCP

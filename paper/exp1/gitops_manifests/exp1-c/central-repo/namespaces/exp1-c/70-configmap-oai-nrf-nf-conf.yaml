@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-nrf-nf-conf
+  namespace: exp1-c
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  nrf.yaml: "############# Common configuration\n# Log level\nlog_level:\n  nrf: {{\
+    \ conf['logLevel'] }}\nhttp_version: 2  # allowed value 1 and 2, make sure all\
+    \ NFs use the same HTTP version\n############## SBI Interfaces\n### Each NF takes\
+    \ its local SBI interfaces and remote interfaces from here, unless it gets them\
+    \ using NRF discovery mechanisms\nnfs:\n  nrf:\n    host: {{ conf['fqdn']['nrf']\
+    \ }}\n    sbi:\n      port: 80\n      api_version: v1\n      interface_name: {{\
+    \ conf['nfInterfaces']['sbi'] }}\n############## NF-specific configuration\nnrf:\n\
+    \  nrf_name: \"OAI-NRF\"\n"

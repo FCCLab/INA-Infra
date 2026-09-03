@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-cu-cp-configmap
+  namespace: exp1-c
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+data:
+  gnb.conf: "Active_gNBs = ( \"oai-cu-cp\");\nAsn1_verbosity = \"none\";\nsa = 1;\n\
+    \ngNBs =\n(\n {\n    gNB_ID = 0xe00;\n    gNB_name  =  \"oai-cu-cp\";\n    tracking_area_code\
+    \  =  0x0051;\n    plmn_list = ({ mcc = 001;\n                   mnc = 01;\n \
+    \                  mnc_length =2;\n                   snssaiList = ({ sst = 1,\
+    \ sd = 0xFFFFFF }, { sst = 1, sd = 0x000001 }, { sst = 1, sd = 0x000002 }, { sst\
+    \ = 1, sd = 0x000003 }, { sst = 1, sd = 0x000004 })\n                });\n\n \
+    \   nr_cellid = 12345678;\n    tr_s_preference = \"f1\";\n    local_s_address\
+    \ = \"10.1.140.201\";\n    remote_s_address = \"0.0.0.0\";\n    local_s_portc\
+    \   = 501;\n    local_s_portd   = 2152;\n    remote_s_portc  = 500;\n    remote_s_portd\
+    \  = 2152;\n\n    SCTP :\n    {\n        SCTP_INSTREAMS  = 2;\n        SCTP_OUTSTREAMS\
+    \ = 2;\n    };\n\n    amf_ip_address      = ( { ipv4       = \"10.1.140.10\";\
+    \ });\n\n    E1_INTERFACE =\n    (\n      {\n        type = \"cp\";\n        ipv4_cucp\
+    \ = \"10.1.140.202\";\n        port_cucp = 38462;\n        ipv4_cuup = \"0.0.0.0\"\
+    ;\n        port_cuup = 38462;\n      }\n    )\n\n    NETWORK_INTERFACES :\n  \
+    \  {\n        GNB_IPV4_ADDRESS_FOR_NG_AMF              = \"10.1.140.200\";\n \
+    \   };\n  }\n);\n\nsecurity = {\n  ciphering_algorithms = ( \"nea0\" );\n  integrity_algorithms\
+    \ = ( \"nia2\", \"nia0\" );\n  drb_ciphering = \"yes\";\n  drb_integrity = \"\
+    no\";\n};\n\n# Follow DU IQ sample time (OAI time_management.md CU/DU iq_samples).\n\
+    time_management = {\n  mode = \"client\";\n  server_ip = \"10.1.140.203\";\n \
+    \ server_port = 7374;\n};\n\nlog_config :\n{\nglobal_log_level               \
+    \       =\"info\";\nhw_log_level                          =\"info\";\nphy_log_level\
+    \                         =\"info\";\nmac_log_level                         =\"\
+    info\";\nrlc_log_level                         =\"debug\";\npdcp_log_level   \
+    \                     =\"info\";\nrrc_log_level                         =\"info\"\
+    ;\nf1ap_log_level                        =\"info\";\nngap_log_level          \
+    \              =\"debug\";\n};\n"

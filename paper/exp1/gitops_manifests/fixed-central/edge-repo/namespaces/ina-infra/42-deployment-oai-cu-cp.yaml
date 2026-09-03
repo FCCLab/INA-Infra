@@ -1,0 +1,233 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-cu-cp
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: oai-cu-cp
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-cu-cp
+  template:
+    metadata:
+      labels:
+        app: oai-cu-cp
+        app.kubernetes.io/name: oai-cu-cp
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "cucp-e1", "interface": "e1", "ips":
+          ["10.1.140.202/24"], "gateways": ["10.1.140.3"]}, {"name": "cucp-f1c", "interface":
+          "f1c", "ips": ["10.1.140.201/24"], "gateways": ["10.1.140.3"]}, {"name":
+          "cucp-n2", "interface": "n2", "ips": ["10.1.140.200/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-cu-cp-sa
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        ina-infra.nephio.lab/multus-master: enp7s0
+      initContainers:
+      - name: bringup-cuup
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - "set -eu\nwait_tcp() {\n  # $1=label $2=host $3=port \u2014 process accepting\
+          \ TCP (e.g. DU rfsim).\n  label=\"$1\"; host=\"$2\"; port=\"$3\"\n  echo\
+          \ \"waiting for ${label} tcp://${host}:${port}\"\n  until (echo >/dev/tcp/${host}/${port})\
+          \ >/dev/null 2>&1 \\\n     || nc -z -w2 \"$host\" \"$port\" >/dev/null 2>&1;\
+          \ do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_sctp() {\n\
+          \  # $1=label $2=host $3=port \u2014 SCTP listener (E1 / F1-C).\n  label=\"\
+          $1\"; host=\"$2\"; port=\"$3\"\n  echo \"waiting for ${label} sctp://${host}:${port}\"\
+          \n  until ncat --sctp -z -w2 \"$host\" \"$port\" >/dev/null 2>&1 \\\n  \
+          \   || nmap -sY -p \"$port\" --host-timeout 3s \"$host\" 2>/dev/null | grep\
+          \ -q \"open\"; do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\n\
+          wait_ping() {\n  # $1=label $2=host \u2014 Multus / L3 up (CU-UP has no\
+          \ E1 listener).\n  label=\"$1\"; host=\"$2\"\n  echo \"waiting for ${label}\
+          \ icmp://${host}\"\n  until ping -c1 -W2 \"$host\" >/dev/null 2>&1; do\n\
+          \    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_nrf_upf() {\n\
+          \  # $1=label $2=nrf_sbi $3=match_ip \u2014 UPF registered at NRF (HTTP/2).\n\
+          \  label=\"$1\"; nrf=\"$2\"; match=\"$3\"\n  url=\"http://${nrf}/nnrf-nfm/v1/nf-instances?nf-type=UPF\"\
+          \n  echo \"waiting for ${label} via NRF ${nrf} (match ${match})\"\n  until\
+          \ curl -fsS --connect-timeout 2 --http2-prior-knowledge \"$url\" 2>/dev/null\
+          \ \\\n      | grep -q \"$match\"; do\n    sleep 2\n  done\n  echo \"  ${label}\
+          \ ready (NRF registered)\"\n}\necho \"dependency wait (bringup-cuup): service\
+          \ ready checks\"\nwait_ping \"cu-up-1/e1\" \"10.1.140.81\"\nwait_ping \"\
+          cu-up-2/e1\" \"10.1.140.82\"\nwait_ping \"cu-up-3/e1\" \"10.1.140.83\"\n\
+          wait_ping \"cu-up-4/e1\" \"10.1.140.84\"\necho \"all dependencies ready\
+          \ \u2014 starting main container\""
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: bringup-amf
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - "set -eu\nwait_tcp() {\n  # $1=label $2=host $3=port \u2014 process accepting\
+          \ TCP (e.g. DU rfsim).\n  label=\"$1\"; host=\"$2\"; port=\"$3\"\n  echo\
+          \ \"waiting for ${label} tcp://${host}:${port}\"\n  until (echo >/dev/tcp/${host}/${port})\
+          \ >/dev/null 2>&1 \\\n     || nc -z -w2 \"$host\" \"$port\" >/dev/null 2>&1;\
+          \ do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_sctp() {\n\
+          \  # $1=label $2=host $3=port \u2014 SCTP listener (E1 / F1-C).\n  label=\"\
+          $1\"; host=\"$2\"; port=\"$3\"\n  echo \"waiting for ${label} sctp://${host}:${port}\"\
+          \n  until ncat --sctp -z -w2 \"$host\" \"$port\" >/dev/null 2>&1 \\\n  \
+          \   || nmap -sY -p \"$port\" --host-timeout 3s \"$host\" 2>/dev/null | grep\
+          \ -q \"open\"; do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\n\
+          wait_ping() {\n  # $1=label $2=host \u2014 Multus / L3 up (CU-UP has no\
+          \ E1 listener).\n  label=\"$1\"; host=\"$2\"\n  echo \"waiting for ${label}\
+          \ icmp://${host}\"\n  until ping -c1 -W2 \"$host\" >/dev/null 2>&1; do\n\
+          \    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_nrf_upf() {\n\
+          \  # $1=label $2=nrf_sbi $3=match_ip \u2014 UPF registered at NRF (HTTP/2).\n\
+          \  label=\"$1\"; nrf=\"$2\"; match=\"$3\"\n  url=\"http://${nrf}/nnrf-nfm/v1/nf-instances?nf-type=UPF\"\
+          \n  echo \"waiting for ${label} via NRF ${nrf} (match ${match})\"\n  until\
+          \ curl -fsS --connect-timeout 2 --http2-prior-knowledge \"$url\" 2>/dev/null\
+          \ \\\n      | grep -q \"$match\"; do\n    sleep 2\n  done\n  echo \"  ${label}\
+          \ ready (NRF registered)\"\n}\necho \"dependency wait (bringup-amf): service\
+          \ ready checks\"\nwait_sctp \"amf/n2\" \"10.1.140.10\" \"38412\"\necho \"\
+          all dependencies ready \u2014 starting main container\""
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: bringup-upf
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - "set -eu\nwait_tcp() {\n  # $1=label $2=host $3=port \u2014 process accepting\
+          \ TCP (e.g. DU rfsim).\n  label=\"$1\"; host=\"$2\"; port=\"$3\"\n  echo\
+          \ \"waiting for ${label} tcp://${host}:${port}\"\n  until (echo >/dev/tcp/${host}/${port})\
+          \ >/dev/null 2>&1 \\\n     || nc -z -w2 \"$host\" \"$port\" >/dev/null 2>&1;\
+          \ do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_sctp() {\n\
+          \  # $1=label $2=host $3=port \u2014 SCTP listener (E1 / F1-C).\n  label=\"\
+          $1\"; host=\"$2\"; port=\"$3\"\n  echo \"waiting for ${label} sctp://${host}:${port}\"\
+          \n  until ncat --sctp -z -w2 \"$host\" \"$port\" >/dev/null 2>&1 \\\n  \
+          \   || nmap -sY -p \"$port\" --host-timeout 3s \"$host\" 2>/dev/null | grep\
+          \ -q \"open\"; do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\n\
+          wait_ping() {\n  # $1=label $2=host \u2014 Multus / L3 up (CU-UP has no\
+          \ E1 listener).\n  label=\"$1\"; host=\"$2\"\n  echo \"waiting for ${label}\
+          \ icmp://${host}\"\n  until ping -c1 -W2 \"$host\" >/dev/null 2>&1; do\n\
+          \    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_nrf_upf() {\n\
+          \  # $1=label $2=nrf_sbi $3=match_ip \u2014 UPF registered at NRF (HTTP/2).\n\
+          \  label=\"$1\"; nrf=\"$2\"; match=\"$3\"\n  url=\"http://${nrf}/nnrf-nfm/v1/nf-instances?nf-type=UPF\"\
+          \n  echo \"waiting for ${label} via NRF ${nrf} (match ${match})\"\n  until\
+          \ curl -fsS --connect-timeout 2 --http2-prior-knowledge \"$url\" 2>/dev/null\
+          \ \\\n      | grep -q \"$match\"; do\n    sleep 2\n  done\n  echo \"  ${label}\
+          \ ready (NRF registered)\"\n}\necho \"dependency wait (bringup-upf): service\
+          \ ready checks\"\nwait_nrf_upf \"upf-slice-1\" \"10.1.140.11\" \"10.1.140.41\"\
+          \nwait_nrf_upf \"upf-slice-2\" \"10.1.140.11\" \"10.1.140.42\"\nwait_nrf_upf\
+          \ \"upf-slice-3\" \"10.1.140.11\" \"10.1.140.43\"\nwait_nrf_upf \"upf-slice-4\"\
+          \ \"10.1.140.11\" \"10.1.140.44\"\necho \"all dependencies ready \u2014\
+          \ starting main container\""
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      containers:
+      - name: bringup-order
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - "set -eu\necho \"bringup-order sidecar role=cu-cp\"\necho 'depends on (see\
+          \ ina-infra/bringup_order.md):'\necho '  - CU-UP Multus E1 (ping) \u2014\
+          \ all slices'\necho '  - AMF N2 SCTP :38412'\necho '  - UPF registered at\
+          \ NRF \u2014 all slices'\necho 'gated by bringup-* initContainers; sleeping'\n\
+          sleep infinity"
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+      - name: cucp
+        image: 10.1.132.30:5000/oai-cucp:nws-v0.8.3-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: TZ
+          value: Europe/Paris
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --log_config.global_log_options level,nocolor,time
+        - name: USE_VOLUMED_CONF
+          value: 'yes'
+        ports:
+        - name: n2
+          containerPort: 36412
+          protocol: SCTP
+        - name: e1
+          containerPort: 38462
+          protocol: SCTP
+        - name: f1c
+          containerPort: 38472
+          protocol: UDP
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - pgrep -f softmodem >/dev/null
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 24
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-cu-cp-configmap

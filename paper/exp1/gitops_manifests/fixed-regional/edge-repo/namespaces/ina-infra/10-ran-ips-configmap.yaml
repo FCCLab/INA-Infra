@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-ran-ips
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: ina-ran-ips
+    app.kubernetes.io/part-of: ina-infra
+data:
+  cucp_n2: "10.1.140.200"
+  cucp_f1c: "10.1.140.201"
+  cucp_e1: "10.1.140.202"
+  du_f1: "10.1.140.203"
+  du_rf: "10.1.140.204"
+  flexric_e2: "10.1.140.205"
+  xapp_e2: "10.1.140.206"
+  peers: |
+    CU-CP N2 -> AMF N2 10.1.140.10
+    DU F1 -> CU-CP F1-C 10.1.140.201
+    UE RFsim -> DU RF 10.1.140.204:4043
+    E2 -> FlexRIC 10.1.140.205

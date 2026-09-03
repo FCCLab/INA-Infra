@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ina-infra
+  labels:
+    app.kubernetes.io/name: ina-infra
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/profile: ina-infra

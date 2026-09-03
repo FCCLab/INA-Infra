@@ -253,24 +253,9 @@ def _ue_pod_ip(idx: int) -> Optional[str]:
 
 
 def _ue_upstreams(idx: int) -> list[str]:
-    """Prefer in-cluster Service/pod IP; Multus is last (N6 macvlan can RST during UE recreate)."""
-    name = _ue_deploy_name(idx)
-    hosts = [
-        f"{name}:{UE_CONSOLE_PORT}",
-        f"{name}.{_ns()}.svc:{UE_CONSOLE_PORT}",
-    ]
-    pod_ip = _ue_pod_ip(idx)
-    if pod_ip:
-        hosts.append(f"{pod_ip}:{UE_CONSOLE_PORT}")
-    hosts.append(f"{_console_ip(idx)}:{UE_CONSOLE_PORT}")
-    # de-dupe preserve order
-    seen: set[str] = set()
-    out: list[str] = []
-    for h in hosts:
-        if h not in seen:
-            seen.add(h)
-            out.append(h)
-    return out
+    """Query UE console strictly via Multus IP."""
+    ip = _console_ip(idx)
+    return [f"{ip}:80", f"{ip}:8090", f"{ip}:{UE_CONSOLE_PORT}"]
 
 
 def _ue_http_idx(
@@ -345,6 +330,7 @@ def api_ues() -> dict:
         sc, live = _ue_http_idx(idx, "/api/status", timeout=3)
         if sc != 200:
             live = {"ok": False, "http_status": sc, **(live if isinstance(live, dict) else {})}
+        multus_url = _http_url(ip) if ip else f"http://{_console_ip(idx)}:80"
         ues.append(
             {
                 "name": name,
@@ -355,8 +341,8 @@ def api_ues() -> dict:
                 "sidecars": sidecar,
                 "console_ip": ip,
                 "console_mac": mac,
-                "console_url": _http_url(ip) if ip else "",
-                "dashboard_url": f"/ue/{idx}/",
+                "console_url": multus_url,
+                "dashboard_url": multus_url,
                 "connected": (ready >= 1) or (phase == "Running"),
                 "status": live,
             }
@@ -388,62 +374,6 @@ def api_ue_send_once(idx: int) -> dict:
     if code != 200:
         raise HTTPException(status_code=code if code >= 400 else 502, detail=resp)
     return resp
-
-
-@app.get("/ue/{idx}")
-def ue_dash_redir(idx: int) -> RedirectResponse:
-    return RedirectResponse(url=f"/ue/{idx}/", status_code=307)
-
-
-@app.api_route("/ue/{idx}/", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-async def ue_dash_root(idx: int, request: Request) -> Response:
-    return await ue_dash_proxy(idx, "", request)
-
-
-@app.api_route("/ue/{idx}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-async def ue_dash_proxy(idx: int, path: str, request: Request) -> Response:
-    """Same-origin proxy. Prefer ClusterIP/pod IP; Multus N6 is fallback."""
-    suffix = path if path else ""
-    q = request.url.query
-    data = None
-    if request.method not in ("GET", "HEAD"):
-        data = await request.body()
-    headers = {}
-    ctype = request.headers.get("content-type")
-    if ctype:
-        headers["Content-Type"] = ctype
-    last_err = "unreachable"
-    last_host = ""
-    for host in _ue_upstreams(idx):
-        last_host = host
-        target = f"http://{host}/{suffix}"
-        if q:
-            target = f"{target}?{q}"
-        req = urllib.request.Request(target, data=data, headers=headers, method=request.method)
-        try:
-            with urllib.request.urlopen(req, timeout=130) as resp:
-                raw = resp.read()
-                media = resp.headers.get("Content-Type", "application/octet-stream")
-                status = resp.status
-            break
-        except urllib.error.HTTPError as exc:
-            raw = exc.read()
-            media = exc.headers.get("Content-Type", "application/octet-stream") if exc.headers else "application/octet-stream"
-            status = exc.code
-            break
-        except urllib.error.URLError as exc:
-            last_err = str(exc.reason)
-            continue
-    else:
-        raise HTTPException(status_code=503, detail=f"UE {idx} dashboard unreachable ({last_host}): {last_err}")
-    if "text/html" in (media or "") and raw:
-        html = raw.decode("utf-8", errors="replace")
-        html = html.replace('fetch("/api', f'fetch("/ue/{idx}/api')
-        html = html.replace("req(\"/api", f"req(\"/ue/{idx}/api")
-        html = html.replace("req(`/api", f"req(`/ue/{idx}/api")
-        raw = html.encode("utf-8")
-        media = "text/html; charset=utf-8"
-    return Response(content=raw, status_code=status, media_type=media)
 
 
 _slo_lock = threading.Lock()

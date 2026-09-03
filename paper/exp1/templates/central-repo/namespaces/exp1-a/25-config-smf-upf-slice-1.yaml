@@ -1,0 +1,52 @@
+apiVersion: ref.nephio.org/v1alpha1
+kind: Config
+metadata:
+  name: smf-core-upf-slice-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+    ina-infra.nephio.lab/slice: "1"
+spec:
+  config:
+    apiVersion: workload.nephio.org/v1alpha1
+    kind: NFDeployment
+    metadata:
+      name: upf-slice-1
+      namespace: exp1-a
+    spec:
+      provider: upf.openairinterface.org
+      capacity:
+        maxDownlinkThroughput: 5G
+        maxUplinkThroughput: 5G
+      interfaces:
+      - name: n3
+        ipv4:
+          address: 10.1.140.21/24
+          gateway: 10.1.140.1
+        vlanID: 4
+      - name: n4
+        ipv4:
+          address: 10.1.140.41/24
+          gateway: 10.1.140.1
+        vlanID: 2
+      - name: n6
+        # DHCP on Multus (Glass 10.1.137); UPF discovers IP via ioctl on iface n6.
+        ipv4:
+          address: 0.0.0.0/24
+          gateway: 10.1.137.1
+        vlanID: 3
+      networkInstances:
+      - name: vpc-internal
+        interfaces:
+        - n4
+      - name: vpc-internet
+        dataNetworks:
+        - name: oai1
+          pool:
+          - prefix: 10.140.1.0/24
+        interfaces:
+        - n6
+      - name: vpc-ran
+        interfaces:
+        - n3

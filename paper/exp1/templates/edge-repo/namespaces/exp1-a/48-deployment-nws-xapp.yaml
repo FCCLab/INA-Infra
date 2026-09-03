@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nws-xapp
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: nws-xapp
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nws-xapp
+  template:
+    metadata:
+      labels:
+        app: nws-xapp
+        app.kubernetes.io/name: nws-xapp
+        app.kubernetes.io/part-of: ina-infra
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "xapp-e2", "interface": "e2", "ips":
+          ["10.1.140.206/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        ina-infra.nephio.lab/multus-master: enp7s0
+      containers:
+      - name: xapp
+        image: 10.1.132.30:5000/nws-xapp:nws-v0.6-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        command:
+        - bash
+        - -lc
+        - set -e; echo "waiting 30s for DU E2 attach to ${NEAR_RIC_IP}"; sleep 30;
+          exec python3 -u /xapp/xapp_slice.py --conf /etc/flexric/flexric.conf --out
+          /tmp/rt_slice_stats.json --ns-out /tmp/rt_ns_slice_policy.json --print
+        env:
+        - name: PYTHONPATH
+          value: /usr/local/flexric/xApp/python3
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/lib:/flexric/build/src/xApp
+        - name: FLEXRIC_CONF
+          value: /etc/flexric/flexric.conf
+        - name: NWS_XAPP_IN_DOCKER
+          value: '1'
+        - name: NEAR_RIC_IP
+          value: 10.1.140.205
+        - name: NWS_XAPP_API_HOST
+          value: 0.0.0.0
+        - name: NWS_XAPP_API_PORT
+          value: '18080'
+        - name: NWS_XAPP_LAB_IP
+          value: 10.1.132.230
+        ports:
+        - name: http
+          containerPort: 18080
+          protocol: TCP
+        volumeMounts:
+        - name: configuration
+          mountPath: /etc/flexric/flexric.conf
+          subPath: flexric.conf
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-flexric-configmap

@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-du
+  namespace: exp1-c
+  labels:
+    app.kubernetes.io/name: oai-du
+    app.kubernetes.io/part-of: ina-infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-du
+  template:
+    metadata:
+      labels:
+        app: oai-du
+        app.kubernetes.io/name: oai-du
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "du-f1", "interface": "f1", "ips":
+          ["10.1.140.203/24"], "gateways": ["10.1.140.3"]}, {"name": "du-rf", "interface":
+          "rf", "ips": ["10.1.140.204/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-du-sa
+      terminationGracePeriodSeconds: 5
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      initContainers:
+      - name: bringup-cucp
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - "set -eu\nwait_tcp() {\n  # $1=label $2=host $3=port \u2014 process accepting\
+          \ TCP (e.g. DU rfsim).\n  label=\"$1\"; host=\"$2\"; port=\"$3\"\n  echo\
+          \ \"waiting for ${label} tcp://${host}:${port}\"\n  until (echo >/dev/tcp/${host}/${port})\
+          \ >/dev/null 2>&1 \\\n     || nc -z -w2 \"$host\" \"$port\" >/dev/null 2>&1;\
+          \ do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_sctp() {\n\
+          \  # $1=label $2=host $3=port \u2014 SCTP listener (E1 / F1-C).\n  label=\"\
+          $1\"; host=\"$2\"; port=\"$3\"\n  echo \"waiting for ${label} sctp://${host}:${port}\"\
+          \n  until ncat --sctp -z -w2 \"$host\" \"$port\" >/dev/null 2>&1 \\\n  \
+          \   || nmap -sY -p \"$port\" --host-timeout 3s \"$host\" 2>/dev/null | grep\
+          \ -q \"open\"; do\n    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\n\
+          wait_ping() {\n  # $1=label $2=host \u2014 Multus / L3 up (CU-UP has no\
+          \ E1 listener).\n  label=\"$1\"; host=\"$2\"\n  echo \"waiting for ${label}\
+          \ icmp://${host}\"\n  until ping -c1 -W2 \"$host\" >/dev/null 2>&1; do\n\
+          \    sleep 2\n  done\n  echo \"  ${label} ready\"\n}\nwait_nrf_upf() {\n\
+          \  # $1=label $2=nrf_sbi $3=match_ip \u2014 UPF registered at NRF (HTTP/2).\n\
+          \  label=\"$1\"; nrf=\"$2\"; match=\"$3\"\n  url=\"http://${nrf}/nnrf-nfm/v1/nf-instances?nf-type=UPF\"\
+          \n  echo \"waiting for ${label} via NRF ${nrf} (match ${match})\"\n  until\
+          \ curl -fsS --connect-timeout 2 --http2-prior-knowledge \"$url\" 2>/dev/null\
+          \ \\\n      | grep -q \"$match\"; do\n    sleep 2\n  done\n  echo \"  ${label}\
+          \ ready (NRF registered)\"\n}\necho \"dependency wait (bringup-cucp): service\
+          \ ready checks\"\nwait_sctp \"cu-cp/f1c\" \"10.1.140.201\" \"38472\"\necho\
+          \ \"all dependencies ready \u2014 starting main container\""
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      containers:
+      - name: bringup-order
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - 'set -eu
+
+          echo "bringup-order sidecar role=du"
+
+          echo ''depends on (see exp1-c/bringup_order.md):''
+
+          echo ''  - CU-CP F1-C SCTP :38472''
+
+          echo ''gated by bringup-* initContainers; sleeping''
+
+          sleep infinity'
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+      - name: du
+        image: 10.1.132.30:5000/oai-du:nws-v0.8.3-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: --rfsim --log_config.global_log_options level,nocolor,time
+        ports:
+        - name: f1c
+          containerPort: 38472
+          protocol: SCTP
+        - name: f1u
+          containerPort: 2152
+          protocol: UDP
+        - name: rfsim
+          containerPort: 4043
+          protocol: TCP
+        - name: tmgr
+          containerPort: 7374
+          protocol: TCP
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-gnb/etc/gnb.conf
+          subPath: gnb.conf
+      - name: debug
+        image: docker.io/nicolaka/netshoot
+        command:
+        - sleep
+        - infinity
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-du-configmap

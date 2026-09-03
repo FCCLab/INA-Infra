@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-smf-op-conf
+  namespace: exp1-c
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  smf.yaml: "nad: \n  parent: 'enp7s0'\n  create: False\nnfInterfaces:\n  n4: 'n4'\n\
+    \  sbi: 'eth0'\nports:\n  - name: 'n4'\n    port: 8805\n    protocol: UDP\n  -\
+    \ name: 'sbi'\n    port: 80\n    protocol: TCP\nlogLevel: debug\nimage: '10.1.132.30:5000/oaisoftwarealliance/oai-smf:v2.2.1-dnn-fix-4'\n\
+    ueSettings:\n  mtu: 1500\n  secondary: 1.1.1.1\nfqdn:\n  nrf: 'oai-nrf'\n  udm:\
+    \ 'oai-udm'\n  amf: 'oai-amf'\ncompute:\n  req:\n    cpu: '100m'\n    memory:\
+    \ '512Mi'\n  limits:\n    cpu: '100m'\n    memory: '512Mi'\n"

@@ -1,0 +1,910 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-cctv-code
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/name: application-cctv
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '1'
+    ina.lab/app-type: cctv
+    ina.lab/role: server
+data:
+  cctv.py: "\"\"\"CCTV Edge Server: RTSP RECORD Ingest + Multi-Client YOLO Vision AI + MediaMTX Pub/Sub.\"\"\"\n\nfrom __future__ import annotations\n\nimport collections\nimport io\nimport multiprocessing as mp\nimport os\nfrom pathlib import Path\nimport re\nimport sys\nimport threading\nimport time\nfrom dataclasses import dataclass\nfrom typing import Any, Dict, List, Optional\n\nimport gi\n\ngi.require_version(\"Gst\", \"1.0\")\ngi.require_version(\"GstRtspServer\", \"1.0\")\nfrom gi.repository import GLib, Gst, GstRtspServer  # noqa: E402\n\nfrom common import metrics  # noqa: E402\nfrom prometheus_client import Counter, Gauge, Histogram  # noqa: E402\n\ntry:\n    from edge.state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext, normalize_canonical_client_id\nexcept ImportError:\n    from state import CLIENT_STREAMS, GLOBAL_LOCK, ClientStreamContext, normalize_canonical_client_id\n\nGst.init(None)\n\n\ndef _env(name: str, default: str) -> str:\n    return os.environ.get(name, default)\n\n\ndef _env_int(name: str, default: int) -> int:\n    try:\n        return int(os.environ.get(name, str(default)))\n    except ValueError:\n        return default\n\n\ndef _env_bool(name: str, default: bool) -> bool:\n    return os.environ.get(name, str(default)).strip().lower() in (\"1\", \"true\", \"yes\", \"on\")\n\n\n# --- Configuration ---------------------------------------------------------\nBIND_ADDRESS = _env(\"BIND_ADDRESS\", \"0.0.0.0\")\nRTSP_PORT = _env_int(\"RTSP_PORT\", 8554)\nSTREAM_PATH = _env(\"STREAM_PATH\", \"slicea\")\nRTSP_LATENCY_MS = _env_int(\"RTSP_LATENCY_MS\", 0)\n\nHTTP_PORT = _env_int(\"HTTP_PORT\", 8080)\nFRONTEND_DIR = Path(_env(\"FRONTEND_DIR\", \"/app/frontend/dist\"))\n\nYOLO_ENABLED = _env_bool(\"YOLO_ENABLED\", True)\nYOLO_MODEL = _env(\"YOLO_MODEL\", \"yolov8n.pt\")\nYOLO_DEVICE = _env(\"YOLO_DEVICE\", \"auto\")\nYOLO_PROCESS_PER_CLIENT = _env_bool(\"YOLO_PROCESS_PER_CLIENT\", True)\nYOLO_INTRA_THREADS = max(0, _env_int(\"YOLO_INTRA_THREADS\", 0))\nFRAME_SKIP = max(1, _env_int(\"FRAME_SKIP\", 1))\nYOLO_IDLE_S = float(_env(\"YOLO_IDLE_S\", \"90\"))\n# How long after the last frame before a client entry is removed entirely from state.\nSTALE_CLIENT_S = float(_env(\"STALE_CLIENT_S\", \"30\"))\n\nMETRICS_PORT = _env_int(\"METRICS_PORT\", 9102)\nMETRICS_ADDR = _env(\"METRICS_ADDR\", \"0.0.0.0\")\nLOG_INTERVAL_S = float(_env(\"LOG_INTERVAL_S\", \"1\"))\nCHRONYC_HOST = os.environ.get(\"CHRONYC_HOST\") or None\n\n\ndef normalize_client_name(client_id: str) -> str:\n    s = str(client_id).lower().strip()\n    if s.startswith(\"slice\") and \"client\" in s:\n        return s\n    m = re.search(r\"cam(\\d+)\", s)\n    if m:\n        return f\"slice1-cctv-client-{m.group(1)}\"\n    m = re.search(r\"ue(\\d+)\", s)\n    if m:\n        return f\"slice1-cctv-client-{m.group(1)}\"\n    if \"slicea\" in s or s == \"cam\":\n        return \"slice1-cctv-client-1\"\n    m = re.search(r\"(\\d+)\", s)\n    if m:\n        return f\"slice1-cctv-client-{m.group(1)}\"\n    return \"slice1-cctv-client-1\"\n\n\n# --- Prometheus Metrics -----------------------------------------------------\nNET_DELAY = Histogram(\n    \"cctv_net_delay_seconds\",\n    \"Capture-to-appsink delay (encode + network + decode)\",\n    buckets=metrics.LATENCY_BUCKETS,\n)\nYOLO_DELAY = Histogram(\n    \"cctv_yolo_delay_seconds\",\n    \"YOLO inference latency per processed frame\",\n    buckets=metrics.LATENCY_BUCKETS,\n)\nE2E_DELAY = Histogram(\n    \"cctv_e2e_delay_seconds\",\n    \"Capture-to-post-inference end-to-end delay\",\n    buckets=metrics.LATENCY_BUCKETS,\n)\nCLIENT_NET_DELAY_MS = Gauge(\"cctv_client_net_delay_ms\", \"5G Network Delay per client in ms\", [\"client\"])\nCLIENT_YOLO_DELAY_MS = Gauge(\"cctv_client_yolo_delay_ms\", \"YOLO AI Latency per client in ms\", [\"client\"])\nCLIENT_E2E_DELAY_MS = Gauge(\"cctv_client_e2e_delay_ms\", \"End-to-End Latency per client in ms\", [\"client\"])\nCLIENT_INGRESS_FPS = Gauge(\"cctv_client_ingress_fps\", \"Ingress FPS per client\", [\"client\"])\nCLIENT_EGRESS_FPS = Gauge(\"cctv_client_egress_fps\", \"Egress FPS per client\", [\"client\"])\n\nFRAMES_PROCESSED = Counter(\n    \"cctv_frames_processed_total\", \"Frames pulled from appsink\"\n)\nFRAMES_DROPPED = Counter(\n    \"cctv_frames_dropped_total\", \"Frames dropped before appsink (offset gaps)\"\n)\nFRAMES_WITHOUT_TS = Counter(\n    \"cctv_frames_without_ts_total\",\n    \"Frames lacking a reference-timestamp meta (SR not yet received)\",\n)\nFPS_GAUGE = Gauge(\"cctv_fps\", \"Frames per second (edge CCTV server)\")\nINGRESS_FPS_GAUGE = Gauge(\"application_ingress_fps\", \"Ingress frame rate at CCTV appsink\")\nEGRESS_FPS_GAUGE = Gauge(\"application_egress_fps\", \"Egress processed frame rate after YOLO\")\nCLOCK_OFFSET = Gauge(\n    \"cctv_clock_offset_seconds\", \"Absolute chrony clock offset (edge)\"\n)\nAPPLICATION_CLOCK_OFFSET_MS = Gauge(\n    \"application_clock_offset_ms\",\n    \"Host clock offset vs reference (ms)\",\n    [\"origin\"],\n)\nAPPLICATION_THROUGHPUT_BPS = Gauge(\n    \"application_throughput_bytes_per_sec\",\n    \"N6/Multus ingest rate (bytes/sec RX)\",\n    [\"origin\"],\n)\nAPP_UE_LATENCY_MS = Gauge(\n    \"app_ue_latency_ms\", \"Per-UE application latency (milliseconds)\", [\"ue_id\"]\n)\nAPP_UE_THROUGHPUT_MBPS = Gauge(\n    \"app_ue_throughput_mbps\", \"Per-UE application throughput (Mbps)\", [\"ue_id\"]\n)\nAPP_LATENCY_MS = Gauge(\"app_latency_ms\", \"Aggregated application latency (milliseconds)\")\nAPP_THROUGHPUT_MBPS = Gauge(\n    \"app_throughput_mbps\", \"Aggregated application throughput (Mbps)\"\n)\n\n\ndef _kernel_clock_offset_seconds() -> Optional[float]:\n    \"\"\"Kernel NTP PLL offset (adjtimex). Used when chronyd is not in the pod.\"\"\"\n    try:\n        import ctypes\n        import ctypes.util\n\n        class _Timex(ctypes.Structure):\n            _fields_ = [\n                (\"modes\", ctypes.c_uint),\n                (\"offset\", ctypes.c_long),\n                (\"freq\", ctypes.c_long),\n                (\"maxerror\", ctypes.c_long),\n                (\"esterror\", ctypes.c_long),\n                (\"status\", ctypes.c_int),\n                (\"constant\", ctypes.c_long),\n                (\"precision\", ctypes.c_long),\n                (\"tolerance\", ctypes.c_long),\n                (\"time_tv_sec\", ctypes.c_long),\n                (\"time_tv_usec\", ctypes.c_long),\n                (\"tick\", ctypes.c_long),\n                (\"ppsfreq\", ctypes.c_long),\n                (\"jitter\", ctypes.c_long),\n                (\"shift\", ctypes.c_int),\n                (\"stabil\", ctypes.c_long),\n                (\"jitcnt\", ctypes.c_long),\n                (\"calcnt\", ctypes.c_long),\n                (\"errcnt\", ctypes.c_long),\n                (\"stbcnt\", ctypes.c_long),\n                (\"tai\", ctypes.c_int),\n                (\"_pad\", ctypes.c_int * 11),\n            ]\n\n        libc = ctypes.CDLL(ctypes.util.find_library(\"c\"), use_errno=True)\n        tx = _Timex()\n        if libc.adjtimex(ctypes.byref(tx)) < 0:\n            return None\n        sta_nano = 0x2000\n        if tx.status & sta_nano:\n            return float(tx.offset) / 1e9\n        return float(tx.offset) / 1e6\n    except Exception:\n        return None\n\n\ndef _dataplane_rx_bytes() -> Optional[int]:\n    \"\"\"RX bytes on Multus/N6 (net1) or OAI UE tun (oaitun*).\"\"\"\n    try:\n        with open(\"/proc/net/dev\", encoding=\"utf-8\") as f:\n            for line in f:\n                if \":\" not in line:\n                    continue\n                iface, rest = line.split(\":\", 1)\n                name = iface.strip()\n                if name.startswith(\"net1\") or name.startswith(\"oaitun\"):\n                    return int(rest.split()[0])\n    except (OSError, ValueError, IndexError):\n        return None\n    return None\n\n\ndef _cgroup_cpu_quota() -> int:\n    \"\"\"Visible CPU budget (cgroup quota, else os.cpu_count).\"\"\"\n    p = Path(\"/sys/fs/cgroup/cpu.max\")\n    try:\n        if p.is_file():\n            parts = p.read_text().split()\n            if len(parts) >= 2 and parts[0] != \"max\":\n                quota, period = int(parts[0]), int(parts[1])\n                if period > 0:\n                    return max(1, quota // period)\n    except (OSError, ValueError):\n        pass\n    return max(1, os.cpu_count() or 2)\n\n\ndef _intra_threads(n_workers: int) -> int:\n    if YOLO_INTRA_THREADS:\n        return YOLO_INTRA_THREADS\n    quota = _cgroup_cpu_quota()\n    usable = max(1, quota - 1)\n    assumed = max(int(n_workers), 4)\n    return max(1, usable // assumed)\n\n\ndef _cpu_set_for_index(index: int, threads: int) -> List[int]:\n    n = _cgroup_cpu_quota()\n    host_n = os.cpu_count() or n\n    width = min(host_n, max(n, threads))\n    start = (index * threads) % max(1, width)\n    return [(start + i) % max(1, width) for i in range(threads)]\n\n\n@dataclass\nclass _YoloProc:\n    client_id: str\n    proc: Any\n    in_q: Any\n    out_q: Any\n    index: int\n    threads: int\n    cpu_set: List[int]\n\n\ndef _mtx():\n    try:\n        from edge.mtx_publish import HUB\n        return HUB\n    except ImportError:\n        from mtx_publish import HUB\n        return HUB\n\n\nclass CCTVServer:\n    \"\"\"Main CCTV Ingest and Vision AI Stream Processing Server.\"\"\"\n\n    def __init__(self) -> None:\n        self.loop = GLib.MainLoop()\n        self.server: GstRtspServer.RTSPServer | None = None\n        self._model = None\n        self._device = None\n        self._stop = False\n        self._stream_contexts: Dict[str, ClientStreamContext] = {}\n        self._mp = mp.get_context(\"spawn\")\n        self._workers: Dict[str, _YoloProc] = {}\n        self._worker_lock = threading.Lock()\n        self._worker_index = 0\n        self._last_dp_rx: Optional[int] = None\n        self._last_dp_t: Optional[float] = None\n\n    def _get_context(self, client_id: str) -> ClientStreamContext:\n\
+    \        canonical_id = normalize_canonical_client_id(client_id)\n        with GLOBAL_LOCK:\n            if canonical_id not in self._stream_contexts:\n                ctx = ClientStreamContext(canonical_id)\n                self._stream_contexts[canonical_id] = ctx\n                CLIENT_STREAMS[canonical_id] = ctx\n            ctx = self._stream_contexts[canonical_id]\n            if not hasattr(ctx, \"decoded_count\"):\n                ctx.decoded_count = 0\n            if not hasattr(ctx, \"last_decoded_count\"):\n                ctx.last_decoded_count = 0\n            if not hasattr(ctx, \"analyzed_count\"):\n                ctx.analyzed_count = 0\n            if not hasattr(ctx, \"last_analyzed_count\"):\n                ctx.last_analyzed_count = 0\n            if not hasattr(ctx, \"egress_fps\"):\n                ctx.egress_fps = 0.0\n            return ctx\n\n    def _load_model(self) -> None:\n        if not YOLO_ENABLED:\n            return\n        if YOLO_PROCESS_PER_CLIENT:\n            metrics.log_json(\n                \"info\",\n                \"yolo_process_pool\",\n                model=YOLO_MODEL,\n                device=YOLO_DEVICE,\n                cpu_quota=_cgroup_cpu_quota(),\n                process_per_client=True,\n            )\n            return\n        from ultralytics import YOLO\n\n        self._device = None if YOLO_DEVICE == \"auto\" else YOLO_DEVICE\n        self._model = YOLO(YOLO_MODEL)\n        if self._device:\n            self._model.to(self._device)\n\n        resolved = self._device\n        try:\n            import torch\n\n            cuda = torch.cuda.is_available()\n            if resolved is None:\n                resolved = \"cuda:0\" if cuda else \"cpu\"\n            gpu_name = torch.cuda.get_device_name(0) if cuda else None\n        except Exception:\n            cuda = False\n            gpu_name = None\n        metrics.log_json(\n            \"info\",\n            \"yolo_loaded\",\n            model=YOLO_MODEL,\n            device=resolved,\n            cuda_available=cuda,\n            gpu=gpu_name,\n            process_per_client=False,\n        )\n\n    def _ensure_worker(self, client_id: str) -> Optional[_YoloProc]:\n        if not YOLO_ENABLED or not YOLO_PROCESS_PER_CLIENT:\n            return None\n        with self._worker_lock:\n            existing = self._workers.get(client_id)\n            if existing is not None and existing.proc.is_alive():\n                return existing\n            if existing is not None:\n                try:\n                    existing.proc.kill()\n                except Exception:\n                    pass\n            try:\n                edge_dir = str(Path(__file__).resolve().parent)\n                if edge_dir not in sys.path:\n                    sys.path.insert(0, edge_dir)\n                from yolo_worker import run as yolo_run\n            except ImportError:\n                from edge.yolo_worker import run as yolo_run\n\n            device = None if YOLO_DEVICE == \"auto\" else YOLO_DEVICE\n            n = len(self._workers) + 1\n            threads = _intra_threads(n)\n            idx = self._worker_index\n            self._worker_index += 1\n            cpu_set = _cpu_set_for_index(idx, threads)\n            in_q = self._mp.Queue(maxsize=1)\n            out_q = self._mp.Queue(maxsize=2)\n            proc = self._mp.Process(\n                target=yolo_run,\n                name=f\"yolo-{client_id}\",\n                args=(in_q, out_q, client_id, YOLO_MODEL, device, threads, cpu_set),\n                daemon=True,\n            )\n            proc.start()\n            handle = _YoloProc(\n                client_id=client_id,\n                proc=proc,\n                in_q=in_q,\n                out_q=out_q,\n                index=idx,\n                threads=threads,\n                cpu_set=cpu_set,\n            )\n            self._workers[client_id] = handle\n            metrics.log_json(\n                \"info\",\n                \"yolo_worker_started\",\n                client_id=client_id,\n                pid=proc.pid,\n                threads=threads,\n                cpu_set=cpu_set,\n            )\n            return handle\n\n    def _stop_worker(self, client_id: str) -> None:\n        with self._worker_lock:\n            handle = self._workers.pop(client_id, None)\n        if handle is None:\n            return\n        try:\n            handle.in_q.put_nowait(None)\n        except Exception:\n            pass\n        handle.proc.join(timeout=2.0)\n        if handle.proc.is_alive():\n            handle.proc.terminate()\n            handle.proc.join(timeout=1.0)\n        metrics.log_json(\"info\", \"yolo_worker_stopped\", client_id=client_id)\n\n    def _submit_yolo(self, client_id: str, seq: int, frame, t_capture_ns: Optional[int] = None) -> None:\n        handle = self._ensure_worker(client_id)\n        if handle is None:\n            return\n        payload = (seq, frame, t_capture_ns)\n        try:\n            handle.in_q.put_nowait(payload)\n        except Exception:\n            try:\n                handle.in_q.get_nowait()\n            except Exception:\n                pass\n            try:\n                handle.in_q.put_nowait(payload)\n            except Exception:\n                pass\n\n    def _collect_loop(self) -> None:\n        while not self._stop:\n            handles = []\n            with self._worker_lock:\n                handles = list(self._workers.values())\n            had = False\n            for handle in handles:\n                try:\n                    res = handle.out_q.get_nowait()\n                except Exception:\n                    continue\n                had = True\n                if len(res) >= 7:\n                    seq, jpeg, labels, count, delay, t_cap, err = res[:7]\n                else:\n                    seq, jpeg, labels, count, delay, err = res[:6]\n                    t_cap = None\n                ctx = self._get_context(handle.client_id)\n                c_name = normalize_client_name(handle.client_id)\n                YOLO_DELAY.observe(max(float(delay), 0.0))\n                yolo_ms = round(float(delay) * 1000.0, 2)\n                CLIENT_YOLO_DELAY_MS.labels(client=c_name).set(yolo_ms)\n                with GLOBAL_LOCK:\n                    ctx.yolo_delay_ms = yolo_ms\n                    ctx.yolo_samples.append(float(delay))\n                    ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)\n                    E2E_DELAY.observe(ctx.e2e_delay_ms / 1000.0)\n                    ctx.e2e_samples.append(ctx.e2e_delay_ms / 1000.0)\n                    CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)\n                    if jpeg:\n                        ctx.latest_jpeg = jpeg\n                    ctx.detections_count = int(count or 0)\n                    ctx.detected_objects = list(labels or [])\n                if err:\n                    metrics.log_json(\n                        \"warn\",\n                        \"yolo_worker_predict\",\n                        client_id=handle.client_id,\n                        error=str(err),\n                    )\n                if jpeg:\n                    _mtx().push_jpeg(handle.client_id, jpeg)\n            if not had:\n                time.sleep(0.003)\n\n    def _reap_idle_workers(self) -> None:\n        now = time.monotonic()\n        idle: List[str] = []\n        stale: List[str] = []\n        with GLOBAL_LOCK:\n            for cid, ctx in self._stream_contexts.items():\n                elapsed = now - ctx.last_frame_time\n                if elapsed >= STALE_CLIENT_S:\n                    stale.append(cid)\n                elif YOLO_PROCESS_PER_CLIENT and elapsed >= YOLO_IDLE_S:\n                    idle.append(cid)\n        # Stop YOLO workers for long-idle (but not yet stale) clients\n        for cid in idle:\n            if cid in self._workers:\n                self._stop_worker(cid)\n        # Fully remove stale clients (no frames for STALE_CLIENT_S seconds)\n        for cid in stale:\n            self._stop_worker(cid)\n            _mtx().stop(cid)\n            with GLOBAL_LOCK:\n                self._stream_contexts.pop(cid, None)\n                CLIENT_STREAMS.pop(cid, None)\n            metrics.log_json(\"info\", \"client_removed_stale\", client_id=cid, stale_s=STALE_CLIENT_S)\n\n    @staticmethod\n    def _build_launch() -> str:\n        return (\n            \"( rtph264depay name=depay0 wait-for-keyframe=true ! avdec_h264 max-threads=1 ! videoconvert ! \"\n            \"video/x-raw,format=BGR ! \"\n            \"queue name=q leaky=downstream max-size-buffers=1 \"\n            \"max-size-bytes=0 max-size-time=0 ! \"\n            \"appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false )\"\n        )\n\n    def _on_media_configure(self, factory, media, client_id: str = \"default\") -> None:\n        element = media.get_element()\n        sink = element.get_by_name(\"sink\")\n        if sink is not None:\n            sink.connect(\"new-sample\", lambda s: self._on_sample(s, client_id))\n\n        queue = element.get_by_name(\"q\")\n        if queue is not None:\n            qpad = queue.get_static_pad(\"sink\")\n            if qpad is not None:\n                qpad.add_probe(\n                    Gst.PadProbeType.BUFFER,\n                    lambda pad, info: self._on_decoded_frame(pad, info, client_id),\n                )\n\n        # Clear old buffering state on new connection / reconnection\n        with GLOBAL_LOCK:\n            if client_id in self._stream_contexts:\n                ctx = self._stream_contexts[client_id]\n                ctx.min_net_delay_s = None\n                ctx.recent_raw_delays.clear()\n                ctx.net_samples = []\n                ctx.yolo_samples = []\n                ctx.e2e_samples = []\n                ctx.decoded_count = 0\n                ctx.analyzed_count = 0\n\
+    \                ctx.last_decoded_count = 0\n                ctx.bytes_in = 0\n                ctx.last_bytes_in = 0\n                ctx.last_analyzed_count = 0\n                ctx.fps = 0.0\n                ctx.egress_fps = 0.0\n                ctx.net_delay_ms = 0.0\n                ctx.yolo_delay_ms = 0.0\n                ctx.e2e_delay_ms = 0.0\n                ctx.last_frame_time = time.monotonic()\n\n        media.connect(\"prepared\", self._on_media_prepared)\n        metrics.log_json(\"info\", \"media_configured\", client_id=client_id)\n\n    def _on_media_prepared(self, media) -> None:\n        element = media.get_element()\n        parent = element.get_parent() if element is not None else None\n        target = parent if isinstance(parent, Gst.Bin) else element\n        if target is None:\n            return\n        target.connect(\"deep-element-added\", self._on_deep_element_added)\n        self._configure_rtp_recurse(target)\n\n    def _on_deep_element_added(self, _bin, _sub_bin, element) -> None:\n        self._configure_rtp_element(element)\n\n    def _configure_rtp_recurse(self, bin_) -> None:\n        if not isinstance(bin_, Gst.Bin):\n            return\n        it = bin_.iterate_recurse()\n        while True:\n            res, el = it.next()\n            if res == Gst.IteratorResult.OK:\n                self._configure_rtp_element(el)\n            elif res == Gst.IteratorResult.RESYNC:\n                it.resync()\n            else:\n                break\n\n    def _configure_rtp_element(self, element) -> None:\n        factory = element.get_factory()\n        name = factory.get_name() if factory is not None else \"\"\n        if name == \"rtpbin\":\n            self._set_if_present(element, \"ntp-sync\", True)\n            self._set_if_present(element, \"add-reference-timestamp-meta\", True)\n            self._set_if_present(element, \"buffer-mode\", 0)  # buffer-mode=none\n            self._set_if_present(element, \"latency\", 0)\n            self._set_if_present(element, \"do-retransmission\", False)\n            self._set_if_present(element, \"drop-on-latency\", True)\n        elif name == \"rtpjitterbuffer\":\n            self._set_if_present(element, \"add-reference-timestamp-meta\", True)\n            self._set_if_present(element, \"mode\", 0)  # mode=none\n            self._set_if_present(element, \"latency\", 0)\n            self._set_if_present(element, \"do-retransmission\", False)\n            self._set_if_present(element, \"drop-on-latency\", True)\n            self._set_if_present(element, \"max-dropout-time\", 0)\n            self._set_if_present(element, \"max-misorder-time\", 0)\n        elif name == \"rtph264depay\":\n            self._set_if_present(element, \"wait-for-keyframe\", True)\n\n    @staticmethod\n    def _set_if_present(element, prop: str, value) -> None:\n        if element.find_property(prop) is not None:\n            try:\n                element.set_property(prop, value)\n            except (TypeError, GLib.Error):\n                pass\n\n    def _on_decoded_frame(self, _pad, info, client_id: str):\n        buf = info.get_buffer()\n        if buf is None:\n            return Gst.PadProbeReturn.OK\n        now_ns = time.time_ns()\n        FRAMES_PROCESSED.inc()\n        ctx = self._get_context(client_id)\n        with GLOBAL_LOCK:\n            ctx.decoded_count = getattr(ctx, \"decoded_count\", 0) + 1\n            ctx.bytes_in = getattr(ctx, \"bytes_in\", 0) + int(buf.get_size() or 0)\n            ctx.last_frame_time = time.monotonic()\n        t_capture_ns = self._read_reference_ns(buf)\n        if t_capture_ns is None:\n            FRAMES_WITHOUT_TS.inc()\n            return Gst.PadProbeReturn.OK\n\n        raw_net_delay = (now_ns - t_capture_ns) / 1e9\n        \n        # Compensate for host clock skew / stream timestamp drift using a rolling sliding window:\n        with GLOBAL_LOCK:\n            if not hasattr(ctx, \"recent_raw_delays\") or ctx.recent_raw_delays is None:\n                ctx.recent_raw_delays = collections.deque(maxlen=30)\n            ctx.recent_raw_delays.append(raw_net_delay)\n            rolling_min = min(ctx.recent_raw_delays)\n            \n            # Subtract rolling baseline and add estimated 5ms 5G baseline network transit.\n            if abs(rolling_min) > 0.020:\n                net_delay = max(0.003, (raw_net_delay - rolling_min) + 0.005)\n            else:\n                net_delay = max(0.003, raw_net_delay)\n\n            net_ms = round(net_delay * 1000.0, 2)\n            ctx.net_samples.append(net_delay)\n            ctx.net_delay_ms = net_ms\n            ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)\n\n        c_name = normalize_client_name(client_id)\n        NET_DELAY.observe(net_delay)\n        CLIENT_NET_DELAY_MS.labels(client=c_name).set(net_ms)\n        return Gst.PadProbeReturn.OK\n\n    def _on_sample(self, appsink, client_id: str):\n        sample = appsink.emit(\"pull-sample\")\n        if sample is None:\n            return Gst.FlowReturn.OK\n\n        buf = sample.get_buffer()\n        caps = sample.get_caps()\n        struct = caps.get_structure(0)\n        width = struct.get_value(\"width\")\n        height = struct.get_value(\"height\")\n\n        ctx = self._get_context(client_id)\n        with GLOBAL_LOCK:\n            ctx.analyzed_count += 1\n            ctx.yolo_seq += 1\n            seq = ctx.yolo_seq\n\n        t_capture_ns = self._read_reference_ns(buf)\n\n        annotated_frame = None\n        detected_labels = []\n        detections_count = 0\n        yolo_delay = 0.0\n        frame = None\n        \n        is_infer_frame = (seq % FRAME_SKIP == 0)\n        if YOLO_ENABLED and (is_infer_frame or ctx.latest_jpeg is None):\n            frame = self._extract_frame(buf, width, height)\n\n        if YOLO_PROCESS_PER_CLIENT and self._model is None:\n            if frame is not None and is_infer_frame:\n                self._submit_yolo(client_id, seq, frame, t_capture_ns)\n            elif frame is not None:\n                annotated_frame = frame\n        elif self._model is not None:\n            if frame is not None and is_infer_frame:\n                t0 = time.monotonic()\n                results = self._model.predict(frame, device=self._device, verbose=False)\n                yolo_delay = time.monotonic() - t0\n                YOLO_DELAY.observe(yolo_delay)\n                with GLOBAL_LOCK:\n                    ctx.yolo_samples.append(yolo_delay)\n                    ctx.yolo_delay_ms = round(yolo_delay * 1000.0, 2)\n                    ctx.e2e_delay_ms = round(ctx.net_delay_ms + ctx.yolo_delay_ms, 2)\n                if results:\n                    annotated_frame = results[0].plot()\n                    if results[0].boxes is not None:\n                        detections_count = len(results[0].boxes)\n                        names = results[0].names or {}\n                        for b in results[0].boxes:\n                            cls_id = int(b.cls[0].item()) if b.cls is not None else 0\n                            detected_labels.append(names.get(cls_id, f\"obj-{cls_id}\"))\n            elif frame is not None:\n                annotated_frame = frame\n\n        # JPEG encode frame for MJPEG HTTP viewing (worker already encodes when\n        # process-per-client; parent encodes skip-frames and in-process path).\n        if annotated_frame is not None:\n            jpeg_bytes = self._encode_jpeg(annotated_frame)\n            with GLOBAL_LOCK:\n                ctx.latest_jpeg = jpeg_bytes\n                ctx.detections_count = detections_count\n                ctx.detected_objects = detected_labels\n            _mtx().push_bgr(client_id, annotated_frame)\n\n        return Gst.FlowReturn.OK\n\n    @staticmethod\n    def _encode_jpeg(frame_arr) -> Optional[bytes]:\n        try:\n            import cv2\n\n            ok, buf = cv2.imencode(\".jpg\", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])\n            return buf.tobytes() if ok else None\n        except Exception:\n            return None\n\n    _NTP_REF_CAPS = Gst.Caps.from_string(\"timestamp/x-ntp\")\n\n    @classmethod\n    def _read_reference_ns(cls, buf: Gst.Buffer) -> Optional[int]:\n        meta = None\n        try:\n            meta = buf.get_reference_timestamp_meta(cls._NTP_REF_CAPS)\n            if meta is None:\n                meta = buf.get_reference_timestamp_meta(None)\n        except (TypeError, AttributeError):\n            meta = None\n        if meta is None or meta.timestamp == Gst.CLOCK_TIME_NONE:\n            return None\n        return metrics.normalize_reference_ns(int(meta.timestamp))\n\n    @staticmethod\n    def _extract_frame(buf: Gst.Buffer, width: int, height: int):\n        import numpy as np\n\n        ok, mapinfo = buf.map(Gst.MapFlags.READ)\n        if not ok:\n            return None\n        try:\n            arr = np.frombuffer(mapinfo.data, dtype=np.uint8)\n            expected = width * height * 3\n            if arr.size < expected:\n                return None\n            return arr[:expected].reshape((height, width, 3)).copy()\n        finally:\n            buf.unmap(mapinfo)\n\n    def _report_loop(self) -> None:\n        while not self._stop:\n            time.sleep(LOG_INTERVAL_S)\n            now = time.monotonic()\n            with GLOBAL_LOCK:\n                total_ingress_fps = 0.0\n                total_egress_fps = 0.0\n                active_latencies = []\n                active_tput = 0.0\n                for cid, ctx in list(self._stream_contexts.items()):\n                    delta = ctx.decoded_count - ctx.last_decoded_count\n                    delta_analyzed = ctx.analyzed_count - ctx.last_analyzed_count\n                    delta_bytes = getattr(ctx, \"bytes_in\", 0) - getattr(ctx, \"last_bytes_in\", 0)\n                    elapsed = now - ctx.last_report\n                    fps = delta / elapsed if elapsed > 0 else 0.0\n                \
+    \    egress_fps = delta_analyzed / elapsed if elapsed > 0 else 0.0\n                    tput_mbps = (delta_bytes * 8.0) / (elapsed * 1e6) if elapsed > 0 else 0.0\n                    ctx.fps = fps\n                    ctx.egress_fps = egress_fps\n                    ctx.throughput_mbps = tput_mbps\n                    ctx.last_decoded_count = ctx.decoded_count\n                    ctx.last_analyzed_count = ctx.analyzed_count\n                    ctx.last_bytes_in = getattr(ctx, \"bytes_in\", 0)\n                    ctx.last_report = now\n                    total_ingress_fps += fps\n                    total_egress_fps += egress_fps\n                    is_active = (now - ctx.last_frame_time) < 5.0\n                    c_name = normalize_client_name(cid)\n                    if is_active:\n                        CLIENT_INGRESS_FPS.labels(client=c_name).set(round(fps, 2))\n                        CLIENT_EGRESS_FPS.labels(client=c_name).set(round(egress_fps, 2))\n                        CLIENT_E2E_DELAY_MS.labels(client=c_name).set(ctx.e2e_delay_ms)\n                        APP_UE_LATENCY_MS.labels(ue_id=c_name).set(ctx.e2e_delay_ms or ctx.net_delay_ms)\n                        APP_UE_THROUGHPUT_MBPS.labels(ue_id=c_name).set(round(tput_mbps, 3))\n                        active_latencies.append(ctx.e2e_delay_ms or ctx.net_delay_ms)\n                        active_tput += tput_mbps\n                    else:\n                        for g in (CLIENT_NET_DELAY_MS, CLIENT_YOLO_DELAY_MS, CLIENT_E2E_DELAY_MS, CLIENT_INGRESS_FPS, CLIENT_EGRESS_FPS):\n                            try:\n                                g.remove(c_name)\n                            except Exception:\n                                pass\n                        for g in (APP_UE_LATENCY_MS, APP_UE_THROUGHPUT_MBPS):\n                            try:\n                                g.remove(c_name)\n                            except Exception:\n                                pass\n                    if cid == \"slicea\" or cid == \"ue1\" or len(self._stream_contexts) == 1:\n                        FPS_GAUGE.set(fps)\n                    ctx.net_samples = []\n                    ctx.yolo_samples = []\n                    ctx.e2e_samples = []\n                INGRESS_FPS_GAUGE.set(total_ingress_fps)\n                EGRESS_FPS_GAUGE.set(total_egress_fps)\n                APP_LATENCY_MS.set(\n                    (sum(active_latencies) / len(active_latencies)) if active_latencies else 0.0\n                )\n                APP_THROUGHPUT_MBPS.set(round(active_tput, 3))\n                rx = _dataplane_rx_bytes()\n                now_m = time.monotonic()\n                if rx is not None and self._last_dp_rx is not None and self._last_dp_t is not None:\n                    dt = max(0.5, now_m - self._last_dp_t)\n                    bps = max(0.0, (rx - self._last_dp_rx) / dt)\n                    APPLICATION_THROUGHPUT_BPS.labels(origin=\"server\").set(bps)\n                if rx is not None:\n                    self._last_dp_rx = rx\n                    self._last_dp_t = now_m\n                offset = metrics.get_chrony_offset_seconds(CHRONYC_HOST)\n                if offset is None:\n                    offset = _kernel_clock_offset_seconds()\n                if offset is not None:\n                    CLOCK_OFFSET.set(abs(offset))\n                    APPLICATION_CLOCK_OFFSET_MS.labels(origin=\"server\").set(\n                        round(abs(offset) * 1000.0, 3)\n                    )\n            self._reap_idle_workers()\n\n    def run(self) -> None:\n        metrics.start_metrics_server(METRICS_PORT, METRICS_ADDR)\n        metrics.start_chrony_offset_updater(CLOCK_OFFSET, host=CHRONYC_HOST)\n        self._load_model()\n        threading.Thread(target=self._report_loop, daemon=True).start()\n        if YOLO_PROCESS_PER_CLIENT and YOLO_ENABLED:\n            threading.Thread(target=self._collect_loop, daemon=True, name=\"yolo-collect\").start()\n\n        def _run_api() -> None:\n            import uvicorn\n            from edge import api as api_mod\n\n            config = uvicorn.Config(\n                api_mod.app, host=\"0.0.0.0\", port=HTTP_PORT, log_level=\"warning\"\n            )\n            server = uvicorn.Server(config)\n            server.install_signal_handlers = False\n            server.run()\n\n        threading.Thread(target=_run_api, daemon=True, name=\"fastapi\").start()\n        metrics.log_json(\"info\", \"http_api_on_fastapi\", port=HTTP_PORT)\n\n        self.server = GstRtspServer.RTSPServer()\n        self.server.set_address(BIND_ADDRESS)\n        self.server.set_service(str(RTSP_PORT))\n\n        # Register canonical mount points and multi-UE / multi-camera mount points\n        mount_list = [\n            (f\"/{STREAM_PATH}\", \"slicea_cam1\"),\n            (\"/slicea\", \"slicea_cam1\"),\n            (f\"/{STREAM_PATH}_cam1\", \"slicea_cam1\"),\n            (\"/slicea_cam1\", \"slicea_cam1\"),\n            (\"/slicea_1\", \"slicea_cam1\"),\n        ]\n        for cam in range(2, 9):\n            mount_list.extend([\n                (f\"/{STREAM_PATH}_cam{cam}\", f\"slicea_cam{cam}\"),\n                (f\"/slicea_cam{cam}\", f\"slicea_cam{cam}\"),\n                (f\"/slicea_{cam}\", f\"slicea_cam{cam}\"),\n            ])\n        for sid in range(1, 9):\n            mount_list.extend([\n                (f\"/cctv/ue{sid}\", f\"ue{sid}\"),\n                (f\"/ue{sid}\", f\"ue{sid}\"),\n                (f\"/slice{sid}\", f\"ue{sid}\"),\n            ])\n            for cam in range(2, 9):\n                mount_list.extend([\n                    (f\"/cctv/ue{sid}_cam{cam}\", f\"ue{sid}_cam{cam}\"),\n                    (f\"/ue{sid}_cam{cam}\", f\"ue{sid}_cam{cam}\"),\n                    (f\"/slice{sid}_cam{cam}\", f\"ue{sid}_cam{cam}\"),\n                    (f\"/slice{sid}_{cam}\", f\"ue{sid}_cam{cam}\"),\n                ])\n\n        mounts = self.server.get_mount_points()\n\n        for path, cid in mount_list:\n            factory = GstRtspServer.RTSPMediaFactory()\n            factory.set_transport_mode(GstRtspServer.RTSPTransportMode.RECORD)\n            factory.set_launch(self._build_launch())\n            factory.set_shared(True)\n            factory.set_latency(RTSP_LATENCY_MS)\n            # Create closure with fixed cid\n            factory.connect(\"media-configure\", (lambda c: lambda f, m: self._on_media_configure(f, m, c))(cid))\n            mounts.add_factory(path, factory)\n\n        self.server.attach(None)\n\n        metrics.log_json(\n            \"info\",\n            \"cctv_server_ready\",\n            rtsp_port=RTSP_PORT,\n            http_port=HTTP_PORT,\n            yolo_enabled=YOLO_ENABLED,\n            yolo_model=YOLO_MODEL,\n            yolo_process_per_client=YOLO_PROCESS_PER_CLIENT,\n        )\n        self.loop = GLib.MainLoop()\n        try:\n            self.loop.run()\n        except KeyboardInterrupt:\n            self._stop = True\n        for cid in list(self._workers):\n            self._stop_worker(cid)\n        _mtx().stop_all()\n\n\ndef main() -> None:\n    CCTVServer().run()\n\n\nif __name__ == \"__main__\":\n    main()\n"
+  yolo_worker.py: |
+    """Per-client YOLO process (no GStreamer). Spawned by the CCTV analyzer.
+
+    Each CCTV camera gets its own process + model so inference can run in
+    parallel across CPU cores (avoids the GIL and a single shared YOLO).
+    """
+
+    from __future__ import annotations
+
+    import os
+    import time
+    from typing import Any, Optional, Sequence
+
+
+    def _limit_threads(n: int) -> None:
+        n = max(1, int(n))
+        os.environ["OMP_NUM_THREADS"] = str(n)
+        os.environ["MKL_NUM_THREADS"] = str(n)
+        os.environ["OPENBLAS_NUM_THREADS"] = str(n)
+        os.environ["NUMEXPR_NUM_THREADS"] = str(n)
+        os.environ["ULTRALYTICS_OFFLINE"] = "1"
+
+
+    def _pin_cpus(cpu_set: Optional[Sequence[int]]) -> None:
+        if not cpu_set:
+            return
+        try:
+            os.sched_setaffinity(0, set(int(c) for c in cpu_set))
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+    def _encode_jpeg(frame_arr: Any) -> Optional[bytes]:
+        try:
+            import cv2
+
+            ok, buf = cv2.imencode(".jpg", frame_arr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            return buf.tobytes() if ok else None
+        except Exception:
+            return None
+
+
+    def run(
+        in_q: Any,
+        out_q: Any,
+        client_id: str,
+        model_name: str,
+        device: Optional[str],
+        threads: int,
+        cpu_set: Optional[Sequence[int]] = None,
+    ) -> None:
+        _limit_threads(threads)
+        _pin_cpus(cpu_set)
+        try:
+            import torch
+
+            torch.set_num_threads(max(1, int(threads)))
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
+        except Exception:
+            torch = None  # type: ignore[assignment]
+
+        from ultralytics import YOLO
+
+        model = YOLO(model_name)
+        resolved = device
+        if resolved:
+            try:
+                model.to(resolved)
+            except Exception:
+                resolved = None
+        if resolved is None and torch is not None:
+            resolved = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+        while True:
+            item = in_q.get()
+            if item is None:
+                break
+            if isinstance(item, (tuple, list)) and len(item) >= 3:
+                seq, frame, t_capture_ns = item[0], item[1], item[2]
+            else:
+                seq, frame = item
+                t_capture_ns = None
+            labels = []
+            count = 0
+            annotated = frame
+            t0 = time.monotonic()
+            try:
+                results = model.predict(
+                    frame,
+                    device=resolved,
+                    verbose=False,
+                    workers=0,
+                )
+                delay = time.monotonic() - t0
+                if results:
+                    annotated = results[0].plot()
+                    if results[0].boxes is not None:
+                        count = len(results[0].boxes)
+                        names = results[0].names or {}
+                        for b in results[0].boxes:
+                            cls_id = int(b.cls[0].item()) if b.cls is not None else 0
+                            labels.append(names.get(cls_id, f"obj-{cls_id}"))
+            except Exception as exc:
+                delay = time.monotonic() - t0
+                try:
+                    out_q.put((seq, None, [], 0, delay, t_capture_ns, str(exc)))
+                except Exception:
+                    pass
+                continue
+            jpeg = _encode_jpeg(annotated)
+            try:
+                # Drop if parent is behind: keep the newest result only.
+                while True:
+                    try:
+                        out_q.get_nowait()
+                    except Exception:
+                        break
+                out_q.put((seq, jpeg, labels, count, delay, t_capture_ns, None))
+            except Exception:
+                pass
+  state.py: |
+    """Shared CCTV backend state (analyzer process + FastAPI)."""
+
+    from __future__ import annotations
+
+    import collections
+    import re
+    import threading
+    import time
+    from typing import Any, Dict, List, Optional
+
+    GLOBAL_LOCK = threading.Lock()
+    CLIENT_STREAMS: Dict[str, "ClientStreamContext"] = {}
+
+
+    def normalize_canonical_client_id(client_id: str) -> str:
+        """Normalize and unify all client IDs to slicea_camX format (e.g. slicea_cam1, slicea_cam2, slicea_cam3, slicea_cam4)."""
+        s = str(client_id).lower().strip()
+        m = re.search(r"cam[_-]?(\d+)", s)
+        if m:
+            return f"slicea_cam{m.group(1)}"
+        if s in ("slicea", "default", "cam"):
+            return "slicea_cam1"
+        m = re.search(r"(\d+)", s)
+        if m:
+            return f"slicea_cam{m.group(1)}"
+        clean = re.sub(r"[^a-zA-Z0-9]+", "_", s).strip("_")
+        return f"slicea_{clean}" if clean else "slicea_cam1"
+
+
+    def format_client_name(client_id: str) -> str:
+        """Format a consistent camera display name across all 4 slices/clients.
+
+        Examples:
+          'slicea' or 'slicea_cam1' -> 'Camera 1'
+          'slicea_cam2'             -> 'Camera 2'
+          'slicea_cam3'             -> 'Camera 3'
+          'slicea_cam4'             -> 'Camera 4'
+        """
+        s = str(client_id).lower().strip()
+        m = re.search(r"cam[_-]?(\d+)", s)
+        if m:
+            return f"Camera {m.group(1)}"
+        if s in ("slicea", "default", "cam", "slicea_cam1", "slicea_1"):
+            return "Camera 1"
+        m = re.search(r"(\d+)", s)
+        if m:
+            return f"Camera {m.group(1)}"
+        clean = re.sub(r"[^a-zA-Z0-9]+", " ", s).strip().title()
+        return f"Camera {clean}" if not clean.lower().startswith("camera") else clean
+
+
+    def mtx_path_for(client_id: str) -> str:
+        cid = normalize_canonical_client_id(client_id)
+        return f"cam_{cid}"
+
+
+    class ClientStreamContext:
+        """Tracks state and latest frames for a single client stream."""
+
+        def __init__(self, client_id: str):
+            self.client_id = normalize_canonical_client_id(client_id)
+            self.name = format_client_name(client_id)
+            self.decoded_count = 0
+            self.analyzed_count = 0
+            self.yolo_seq = 0
+            self.last_decoded_count = 0
+            self.last_analyzed_count = 0
+            self.last_report = time.monotonic()
+            self.fps = 0.0
+            self.egress_fps = 0.0
+            self.net_delay_ms = 0.0
+            self.yolo_delay_ms = 0.0
+            self.e2e_delay_ms = 0.0
+            self.min_net_delay_s: Optional[float] = None
+            self.recent_raw_delays = collections.deque(maxlen=30)
+            self.detected_objects: List[str] = []
+            self.detections_count = 0
+            self.latest_jpeg: Optional[bytes] = None
+            self.last_frame_time = time.monotonic()
+            self.bytes_in = 0
+            self.last_bytes_in = 0
+            self.throughput_mbps = 0.0
+            self.net_samples: list[float] = []
+            self.yolo_samples: list[float] = []
+            self.e2e_samples: list[float] = []
+            self.mtx_path = mtx_path_for(client_id)
+            self.mtx_publishing = False
+
+
+    def snapshot_clients(*, stale_s: float = 5.0) -> List[Dict[str, Any]]:
+        now = time.monotonic()
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        with GLOBAL_LOCK:
+            def _sort_key(ctx: ClientStreamContext) -> int:
+                m = re.search(r"(\d+)", ctx.client_id)
+                return int(m.group(1)) if m else (1 if "slicea" in ctx.client_id else 99)
+
+            for ctx in sorted(CLIENT_STREAMS.values(), key=_sort_key):
+                if ctx.client_id in seen:
+                    continue
+                seen.add(ctx.client_id)
+                is_active = (now - ctx.last_frame_time) < stale_s
+                net_ms = round(ctx.net_delay_ms, 1)
+                yolo_ms = round(ctx.yolo_delay_ms, 1)
+                e2e_ms = round(ctx.e2e_delay_ms, 1)
+                if e2e_ms < (net_ms + yolo_ms) and yolo_ms > 0:
+                    e2e_ms = round(net_ms + yolo_ms, 1)
+                out.append(
+                    {
+                        "id": ctx.client_id,
+                        "name": ctx.name,
+                        "active": is_active,
+                        "fps": round(ctx.fps, 1),
+                        "net_delay_ms": net_ms,
+                        "yolo_delay_ms": yolo_ms,
+                        "e2e_delay_ms": e2e_ms,
+                        "detections_count": ctx.detections_count,
+                        "detected_objects": list(ctx.detected_objects or []),
+                        "has_frame": ctx.latest_jpeg is not None,
+                        "mtx_path": ctx.mtx_path,
+                        "mtx_publishing": bool(ctx.mtx_publishing),
+                        "publish_path": f"rtsp://127.0.0.1:8555/{ctx.mtx_path}",
+                        "hls_path": f"/live/{ctx.mtx_path}/index.m3u8",
+                        "whep_path": f"/whep/{ctx.mtx_path}",
+                        "mjpeg_path": f"/video/{ctx.client_id}",
+                        "snapshot_path": f"/snapshot/{ctx.client_id}",
+                    }
+                )
+        return out
+  api.py: |
+    """CCTV FastAPI control plane (Swagger at /docs). Serves the console SPA."""
+
+    from __future__ import annotations
+
+    import os
+    import time
+    from pathlib import Path
+    from typing import Any, Dict, List, Optional
+
+    import httpx
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import Response, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
+    from pydantic import BaseModel, Field
+
+    try:
+        from edge.state import (
+            CLIENT_STREAMS,
+            GLOBAL_LOCK,
+            format_client_name,
+            mtx_path_for,
+            normalize_canonical_client_id,
+            snapshot_clients,
+        )
+    except ImportError:
+        from state import (
+            CLIENT_STREAMS,
+            GLOBAL_LOCK,
+            format_client_name,
+            mtx_path_for,
+            normalize_canonical_client_id,
+            snapshot_clients,
+        )
+
+    FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR", "/app/frontend/dist"))
+    HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
+    RTSP_PORT = int(os.environ.get("RTSP_PORT", "8554"))
+    STREAM_PATH = os.environ.get("STREAM_PATH", "slicea")
+    YOLO_ENABLED = os.environ.get("YOLO_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    YOLO_PROCESS_PER_CLIENT = os.environ.get("YOLO_PROCESS_PER_CLIENT", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    YOLO_MODEL = os.environ.get("YOLO_MODEL", "yolov8n.pt")
+    YOLO_DEVICE = os.environ.get("YOLO_DEVICE", "cpu")
+    MTX_API = os.environ.get("MTX_API_URL", "http://127.0.0.1:9997")
+    MTX_HLS = os.environ.get("MTX_HLS_URL", "http://127.0.0.1:8888")
+    MTX_WHEP = os.environ.get("MTX_WHEP_URL", "http://127.0.0.1:8889")
+
+    app = FastAPI(
+        title="CCTV Analyzer API",
+        description=(
+            "NeuroRAN CCTV backend. UE cameras publish RTSP RECORD into the analyzer; "
+            "annotated video is published to MediaMTX. The console **subscribes** via "
+            "HLS (`/live/{path}/index.m3u8`) or WHEP (`/whep/{path}`). "
+            "See [MediaMTX](https://github.com/bluenviron/mediamtx)."
+        ),
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+    class ClientOut(BaseModel):
+        id: str
+        name: str
+        active: bool
+        fps: float
+        net_delay_ms: float
+        yolo_delay_ms: float
+        e2e_delay_ms: float
+        detections_count: int
+        detected_objects: List[str]
+        has_frame: bool
+        mtx_path: str
+        mtx_publishing: bool
+        publish_path: str
+        hls_path: str
+        whep_path: str
+        mjpeg_path: str
+        snapshot_path: str
+
+
+    class ConnectedClientItem(BaseModel):
+        id: str
+        name: str
+        active: bool
+        fps: float
+        has_frame: bool
+        mtx_publishing: bool
+
+
+    class ConnectedClientsOut(BaseModel):
+        ok: bool = True
+        count: int
+        active_count: int
+        client_ids: List[str]
+        clients: List[ConnectedClientItem]
+
+
+    class StatusOut(BaseModel):
+        app: str = "cctv"
+        yolo_enabled: bool
+        yolo_process_per_client: bool
+        yolo_model: str
+        yolo_device: str
+        rtsp_port: int
+        http_port: int
+        stream_path: str
+        frontend: bool
+        mediamtx: Dict[str, Any] = Field(default_factory=dict)
+        clients: List[ClientOut]
+
+
+    class HealthOut(BaseModel):
+        ok: bool
+        analyzer_clients: int
+        mediamtx: bool
+        frontend: bool
+
+
+    def _mtx_paths() -> Dict[str, Any]:
+        try:
+            r = httpx.get(f"{MTX_API.rstrip('/')}/v3/paths/list", timeout=1.5)
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:
+            return {"error": str(exc), "items": []}
+
+
+    @app.get("/api/v1/health", response_model=HealthOut, tags=["Health"])
+    def health() -> HealthOut:
+        mtx = _mtx_paths()
+        return HealthOut(
+            ok=True,
+            analyzer_clients=len(snapshot_clients()),
+            mediamtx="error" not in mtx,
+            frontend=FRONTEND_DIR.is_dir(),
+        )
+
+
+    @app.get(
+        "/api/v1/connected",
+        response_model=ConnectedClientsOut,
+        tags=["Status"],
+        summary="Get connected clients (primary backend status)",
+    )
+    @app.get("/api/connected", response_model=ConnectedClientsOut, tags=["Status"], include_in_schema=False)
+    @app.get("/api/v1/clients/connected", response_model=ConnectedClientsOut, tags=["Status"], include_in_schema=False)
+    def get_connected_clients() -> ConnectedClientsOut:
+        """Fast, lightweight endpoint returning connected clients and basic stream presence without publishing data."""
+        items = []
+        client_ids = []
+        active_cnt = 0
+        for c in snapshot_clients():
+            is_act = bool(c.get("active", False))
+            if is_act:
+                active_cnt += 1
+            client_ids.append(c["id"])
+            items.append(
+                ConnectedClientItem(
+                    id=c["id"],
+                    name=c.get("name", c["id"]),
+                    active=is_act,
+                    fps=float(c.get("fps", 0.0)),
+                    has_frame=bool(c.get("has_frame", False)),
+                    mtx_publishing=bool(c.get("mtx_publishing", False)),
+                )
+            )
+        return ConnectedClientsOut(
+            ok=True,
+            count=len(items),
+            active_count=active_cnt,
+            client_ids=client_ids,
+            clients=items,
+        )
+
+
+    @app.get("/api/v1/status", response_model=StatusOut, tags=["Status"])
+    @app.get("/api/status", response_model=StatusOut, tags=["Status"], include_in_schema=False)
+    def status() -> StatusOut:
+        clients = [ClientOut.model_validate(c) for c in snapshot_clients()]
+        return StatusOut(
+            yolo_enabled=YOLO_ENABLED,
+            yolo_process_per_client=YOLO_PROCESS_PER_CLIENT,
+            yolo_model=YOLO_MODEL,
+            yolo_device=YOLO_DEVICE,
+            rtsp_port=RTSP_PORT,
+            http_port=HTTP_PORT,
+            stream_path=STREAM_PATH,
+            frontend=FRONTEND_DIR.is_dir(),
+            mediamtx=_mtx_paths(),
+            clients=clients,
+        )
+
+
+    @app.get("/api/v1/clients", response_model=Dict[str, List[ClientOut]], tags=["Clients"])
+    @app.get("/api/clients", response_model=Dict[str, List[ClientOut]], tags=["Clients"], include_in_schema=False)
+    def clients() -> Dict[str, List[ClientOut]]:
+        return {"clients": [ClientOut.model_validate(c) for c in snapshot_clients()]}
+
+
+    @app.api_route("/snapshot/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="JPEG snapshot")
+    def snapshot(client_id: str) -> Response:
+        norm_id = normalize_canonical_client_id(client_id)
+        jpeg = None
+        with GLOBAL_LOCK:
+            ctx = CLIENT_STREAMS.get(norm_id) or CLIENT_STREAMS.get(client_id)
+            if ctx is not None:
+                jpeg = ctx.latest_jpeg
+            elif CLIENT_STREAMS:
+                jpeg = next(iter(CLIENT_STREAMS.values())).latest_jpeg
+        if not jpeg:
+            raise HTTPException(status_code=404, detail="No frame available")
+        return Response(
+            content=jpeg,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
+
+    @app.api_route("/video/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="MJPEG fallback subscribe")
+    def mjpeg(client_id: str) -> StreamingResponse:
+        norm_id = normalize_canonical_client_id(client_id)
+
+        def gen():
+            last = None
+            try:
+                while True:
+                    jpeg = None
+                    with GLOBAL_LOCK:
+                        ctx = CLIENT_STREAMS.get(norm_id) or CLIENT_STREAMS.get(client_id)
+                        if ctx is None and CLIENT_STREAMS:
+                            ctx = next(iter(CLIENT_STREAMS.values()))
+                        if ctx is not None:
+                            jpeg = ctx.latest_jpeg
+                    if jpeg and jpeg is not last:
+                        last = jpeg
+                        yield (
+                            b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                            + str(len(jpeg)).encode()
+                            + b"\r\n\r\n"
+                            + jpeg
+                            + b"\r\n"
+                        )
+                    time.sleep(0.04)
+            except (GeneratorExit, ConnectionResetError, BrokenPipeError):
+                pass
+
+        return StreamingResponse(
+            gen(),
+            media_type="multipart/x-mixed-replace; boundary=--frame",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
+
+    @app.api_route("/live/{path:path}", methods=["GET", "HEAD"], tags=["MediaMTX"], summary="HLS subscribe (proxy)")
+    async def live_hls(path: str, request: Request) -> Response:
+        url = f"{MTX_HLS.rstrip('/')}/{path}"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.request(request.method, url, params=request.query_params)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=502, detail=f"MediaMTX HLS: {exc}") from exc
+        headers = {
+            k: v
+            for k, v in r.headers.items()
+            if k.lower() in ("content-type", "cache-control", "access-control-allow-origin")
+        }
+        headers.setdefault("Access-Control-Allow-Origin", "*")
+        return Response(content=r.content, status_code=r.status_code, headers=headers)
+
+
+    @app.api_route("/whep/{path:path}", methods=["GET", "POST", "PATCH", "OPTIONS"], tags=["MediaMTX"], summary="WHEP subscribe (proxy)")
+    async def live_whep(path: str, request: Request) -> Response:
+        url = f"{MTX_WHEP.rstrip('/')}/{path}/whep"
+        body = await request.body()
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.request(
+                    request.method,
+                    url,
+                    content=body or None,
+                    headers={
+                        k: v
+                        for k, v in request.headers.items()
+                        if k.lower() in ("content-type", "accept")
+                    },
+                )
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=502, detail=f"MediaMTX WHEP: {exc}") from exc
+        headers = {
+            k: v
+            for k, v in r.headers.items()
+            if k.lower() in ("content-type", "location", "access-control-allow-origin")
+        }
+        headers.setdefault("Access-Control-Allow-Origin", "*")
+        return Response(content=r.content, status_code=r.status_code, headers=headers)
+
+
+    if FRONTEND_DIR.is_dir():
+        assets = FRONTEND_DIR / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+        app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="spa")
+  mtx_publish.py: |
+    """Publish annotated camera frames to MediaMTX (RTSP publisher → HLS/WebRTC subscribers)."""
+
+    from __future__ import annotations
+
+    import os
+    import threading
+    import time
+    from typing import Dict, Optional
+
+    import gi
+
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst  # noqa: E402
+
+    from common import metrics  # noqa: E402
+
+    try:
+        from edge.state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for, normalize_canonical_client_id
+    except ImportError:
+        from state import GLOBAL_LOCK, CLIENT_STREAMS, mtx_path_for, normalize_canonical_client_id
+
+
+    MTX_RTSP = os.environ.get("MTX_RTSP_URL", "rtsp://127.0.0.1:8555")
+    # Lab LAN can carry 720p easily; default was 2000 kbps (blocky HLS).
+    BITRATE_KBPS = int(os.environ.get("MTX_PUBLISH_BITRATE_KBPS", "12000"))
+    X264_PRESET = os.environ.get("MTX_X264_PRESET", "veryfast")
+    X264_PROFILE = os.environ.get("MTX_X264_PROFILE", "high")
+
+
+    class _Publisher:
+        def __init__(self, client_id: str, width: int, height: int) -> None:
+            self.client_id = client_id
+            self.path = mtx_path_for(client_id)
+            self.width = int(width)
+            self.height = int(height)
+            self._lock = threading.Lock()
+            location = f"{MTX_RTSP.rstrip('/')}/{self.path}"
+            launch = (
+                "appsrc name=src is-live=true do-timestamp=true format=time "
+                f"caps=video/x-raw,format=BGR,width={self.width},height={self.height},framerate=25/1 "
+                "! videoconvert ! video/x-raw,format=I420 "
+                f"! x264enc name=enc tune=zerolatency speed-preset={X264_PRESET} key-int-max=5 "
+                f"bitrate={BITRATE_KBPS} bframes=0 sliced-threads=true "
+                f"! video/x-h264,profile={X264_PROFILE} "
+                f"! rtspclientsink name=sink protocols=tcp location={location} latency=0"
+            )
+            self.pipeline = Gst.parse_launch(launch)
+            self.appsrc = self.pipeline.get_by_name("src")
+            self.enc = self.pipeline.get_by_name("enc")
+            self.appsrc.set_property("format", Gst.Format.TIME)
+            self.appsrc.set_property("block", False)
+            self.appsrc.set_property("max-bytes", 8_000_000)
+            self._t0 = time.monotonic()
+            self._n = 0
+            self._last_key = 0.0
+            ret = self.pipeline.set_state(Gst.State.PLAYING)
+            if ret == Gst.StateChangeReturn.FAILURE:
+                raise RuntimeError(f"MediaMTX publish pipeline failed for {self.path}")
+            metrics.log_json(
+                "info",
+                "mtx_publisher_started",
+                client_id=client_id,
+                path=self.path,
+                location=location,
+                width=self.width,
+                height=self.height,
+            )
+
+        def push_bgr(self, frame) -> None:
+            import numpy as np
+
+            arr = np.ascontiguousarray(frame)
+            if arr.ndim != 3:
+                return
+            h, w = int(arr.shape[0]), int(arr.shape[1])
+            if w != self.width or h != self.height:
+                return
+            buf = Gst.Buffer.new_wrapped(arr.tobytes())
+            pts = int((time.monotonic() - self._t0) * 1e9)
+            buf.pts = pts
+            buf.dts = pts
+            buf.duration = int(1e9 / 25)
+            now = time.monotonic()
+            force_key = now - self._last_key >= 1.0
+            with self._lock:
+                if force_key and self.enc is not None:
+                    self._last_key = now
+                    try:
+                        st = Gst.Structure.new_empty("GstForceKeyUnit")
+                        st.set_value("all-headers", True)
+                        self.enc.send_event(
+                            Gst.Event.new_custom(Gst.EventType.CUSTOM_UPSTREAM, st)
+                        )
+                    except Exception:
+                        pass
+                ret = self.appsrc.emit("push-buffer", buf)
+            if ret != Gst.FlowReturn.OK:
+                metrics.log_json(
+                    "warn",
+                    "mtx_publisher_push_failed",
+                    client_id=self.client_id,
+                    path=self.path,
+                    flow=str(ret),
+                )
+
+        push_frame = push_bgr
+
+        def stop(self) -> None:
+            try:
+                self.appsrc.emit("end-of-stream")
+            except Exception:
+                pass
+            self.pipeline.set_state(Gst.State.NULL)
+            metrics.log_json("info", "mtx_publisher_stopped", client_id=self.client_id, path=self.path)
+
+
+    class Hub:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._pubs: Dict[str, _Publisher] = {}
+
+        def push_bgr(self, client_id: str, frame) -> None:
+            if frame is None:
+                return
+            h, w = int(frame.shape[0]), int(frame.shape[1])
+            with self._lock:
+                pub = self._pubs.get(client_id)
+                if pub is None or pub.width != w or pub.height != h:
+                    if pub is not None:
+                        pub.stop()
+                    try:
+                        pub = _Publisher(client_id, w, h)
+                    except Exception as exc:
+                        metrics.log_json("warn", "mtx_publisher_start_failed", client_id=client_id, error=str(exc))
+                        return
+                    self._pubs[client_id] = pub
+                    with GLOBAL_LOCK:
+                        ctx = CLIENT_STREAMS.get(normalize_canonical_client_id(client_id)) or CLIENT_STREAMS.get(client_id)
+                        if ctx is not None:
+                            ctx.mtx_publishing = True
+                            ctx.mtx_path = pub.path
+                pub.push_bgr(frame)
+
+        push_frame = push_bgr
+
+        def push_jpeg(self, client_id: str, jpeg: Optional[bytes]) -> None:
+            if not jpeg:
+                return
+            try:
+                import cv2
+                import numpy as np
+
+                arr = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if arr is None:
+                    return
+            except Exception:
+                return
+            self.push_bgr(client_id, arr)
+
+        def stop(self, client_id: str) -> None:
+            with self._lock:
+                pub = self._pubs.pop(client_id, None)
+            if pub is not None:
+                pub.stop()
+            with GLOBAL_LOCK:
+                ctx = CLIENT_STREAMS.get(client_id)
+                if ctx is not None:
+                    ctx.mtx_publishing = False
+
+        def stop_all(self) -> None:
+            with self._lock:
+                pubs = list(self._pubs.items())
+                self._pubs.clear()
+            for cid, pub in pubs:
+                pub.stop()
+                with GLOBAL_LOCK:
+                    ctx = CLIENT_STREAMS.get(cid)
+                    if ctx is not None:
+                        ctx.mtx_publishing = False
+
+
+    HUB = Hub()
+  mediamtx.yml: |
+    # MediaMTX — annotated CCTV pub/sub (backend publishes, dashboard subscribes).
+    # UE ingest stays on gst-rtsp-server :8554 (timestamp-preserving RECORD).
+    # https://github.com/bluenviron/mediamtx
+
+    logLevel: info
+    logDestinations: [stdout]
+
+    api: yes
+    apiAddress: :9997
+
+    metrics: no
+    playback: no
+    rtmp: no
+    srt: no
+
+    rtsp: yes
+    rtspAddress: :8555
+    protocols: [tcp]
+
+    hls: yes
+    hlsAddress: :8888
+    hlsAllowOrigin: "*"
+    hlsAlwaysRemux: yes
+    hlsVariant: fmp4
+    hlsSegmentCount: 7
+    hlsSegmentDuration: 1s
+    hlsPartDuration: 200ms
+
+    webrtc: yes
+    webrtcAddress: :8889
+    webrtcAllowOrigin: "*"
+    webrtcLocalUDPAddress: :8189
+    webrtcICEServers2: []
+
+    pathDefaults:
+      source: publisher
+      overridePublisher: yes
+
+    paths:
+      all_others:
+  entrypoint.sh: |
+    #!/usr/bin/env bash
+    # Start MediaMTX (pub/sub), FastAPI+dashboard, then the GStreamer/YOLO analyzer.
+    set -euo pipefail
+
+    OTA_IFACE="${OTA_IFACE:-}"
+    METRICS_IFACE="${METRICS_IFACE:-}"
+    IFACE_TIMEOUT="${IFACE_TIMEOUT:-60}"
+    CHRONY_MAX_OFFSET_MS="${CHRONY_MAX_OFFSET_MS:-5}"
+    CHRONYC_HOST="${CHRONYC_HOST:-}"
+    HTTP_PORT="${HTTP_PORT:-8080}"
+    MTX_CONF="${MTX_CONF:-/app/edge/mediamtx.yml}"
+
+    log() {
+      printf '{"ts":%s,"level":"%s","event":"entrypoint","msg":"%s"}\n' \
+        "$(date +%s)" "$1" "$2"
+    }
+
+    wait_for_iface() {
+      local iface="$1" elapsed=0
+      [ -z "$iface" ] && return 0
+      while ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; do
+        if [ "$elapsed" -ge "$IFACE_TIMEOUT" ]; then
+          log warn "interface ${iface} has no IPv4 after ${IFACE_TIMEOUT}s; continuing"
+          return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+      done
+      log info "interface ${iface} ready"
+    }
+
+    check_chrony() {
+      local args=(tracking)
+      [ -n "$CHRONYC_HOST" ] && args=(-h "$CHRONYC_HOST" tracking)
+      if ! command -v chronyc >/dev/null 2>&1; then
+        log warn "chronyc not installed; clock offset unchecked"
+        return 0
+      fi
+      local offset
+      offset="$(chronyc "${args[@]}" 2>/dev/null | awk '/Last offset/ {print $4}' || true)"
+      if [ -z "$offset" ]; then
+        log warn "chrony not reachable; ensure host is NTP-synced over ens0"
+        return 0
+      fi
+      local abs_ms
+      abs_ms="$(awk -v o="$offset" 'BEGIN{o=(o<0?-o:o); printf "%.3f", o*1000}')"
+      if awk -v a="$abs_ms" -v m="$CHRONY_MAX_OFFSET_MS" 'BEGIN{exit !(a>m)}'; then
+        log warn "clock offset ${abs_ms}ms exceeds ${CHRONY_MAX_OFFSET_MS}ms; e2e accuracy degraded"
+      else
+        log info "clock offset ${abs_ms}ms within budget"
+      fi
+    }
+
+    log info "entrypoint start (analyzer + mediamtx + api)"
+    wait_for_iface "$OTA_IFACE"
+    wait_for_iface "$METRICS_IFACE"
+    check_chrony
+
+    if ip link show dev net1 >/dev/null 2>&1; then
+      NET1_IP=$(ip -4 -o addr show dev net1 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+      if [ -n "${NET1_IP}" ] && command -v arping >/dev/null 2>&1; then
+        log info "announcing static MAC on net1 (${NET1_IP})"
+        arping -c 3 -U -I net1 "${NET1_IP}" >/dev/null 2>&1 || true
+      fi
+    fi
+
+    if [ -n "${MULTUS_IP:-}" ]; then
+      export MTX_WEBRTCICEHOSTNAT1TO1IPS="${MULTUS_IP}"
+    fi
+
+    START_MEDIAMTX="${START_MEDIAMTX:-true}"
+    MTX_RTSP_URL="${MTX_RTSP_URL:-rtsp://127.0.0.1:8555}"
+
+    if [ "${START_MEDIAMTX}" = "true" ] && [[ "${MTX_RTSP_URL}" == *"127.0.0.1"* || "${MTX_RTSP_URL}" == *"localhost"* ]]; then
+      log info "starting local MediaMTX"
+      mediamtx "${MTX_CONF}" &
+      MTX_PID=$!
+
+      for _ in $(seq 1 40); do
+        if curl -fsS http://127.0.0.1:9997/v3/config/global/get >/dev/null 2>&1; then
+          log info "MediaMTX API ready"
+          break
+        fi
+        sleep 0.25
+      done
+
+      cleanup() {
+        kill "${MTX_PID}" 2>/dev/null || true
+      }
+      trap cleanup EXIT
+    else
+      log info "using external MediaMTX at ${MTX_RTSP_URL}"
+    fi
+
+    log info "starting GStreamer CCTV server + FastAPI"
+    exec python3 -m edge.cctv
+  __init__.py: |
+    # CCTV edge package (analyzer, FastAPI, MediaMTX publisher).

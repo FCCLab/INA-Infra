@@ -1,0 +1,2 @@
+tag,scheme,start_iso,stop_iso,start_epoch,stop_epoch,duration_s,sample_count
+exp1-a,Scheme A (Proposed PL),2026-09-02T16:03:44.616336+00:00,2026-09-02T16:04:00.638471+00:00,1788365024.616,1788365040.639,16.022,81

@@ -1,0 +1,1350 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-ott-code
+  namespace: exp1-d
+  labels:
+    app.kubernetes.io/name: application-ott
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '3'
+    ina.lab/app-type: ott
+    ina.lab/role: server
+data:
+  main.py: |
+    """Main server launcher for OTT Video Streaming & Orchestration."""
+    from __future__ import annotations
+
+    import logging
+    import os
+    import signal
+    import sys
+    import threading
+    import time
+
+    import uvicorn
+    from prometheus_client import start_http_server
+
+    from common import metrics
+    from server.api import app as fastapi_app
+    import server.api as api_module
+    from server.ott import OttEngine
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='{"ts": %(created)f, "level": "%(levelname)s", "module": "%(name)s", "msg": "%(message)s"}',
+    )
+    logger = logging.getLogger("ott.main")
+
+
+    def main():
+        http_port = int(os.environ.get("HTTP_PORT", "8080"))
+        metrics_port = int(os.environ.get("METRICS_PORT", "9103"))
+        mtx_rtsp = os.environ.get("MTX_RTSP_URL", "rtsp://127.0.0.1:8555")
+
+        logger.info(f"Starting OTT Video Streaming Server (HTTP :{http_port}, Metrics :{metrics_port})")
+
+        # 1. Start Prometheus Exporter
+        try:
+            start_http_server(metrics_port)
+            logger.info(f"Prometheus metrics listening on :{metrics_port}/metrics")
+        except Exception as e:
+            logger.warning(f"Could not start Prometheus HTTP server on :{metrics_port}: {e}")
+
+        # 2. Start Multi-Channel Video Engine
+        engine = OttEngine(mtx_rtsp_base=mtx_rtsp)
+        api_module.OTT_ENGINE = engine
+        engine.start()
+
+        # 4. Start FastAPI server
+        config = uvicorn.Config(
+            fastapi_app,
+            host="0.0.0.0",
+            port=http_port,
+            log_level="info",
+            loop="asyncio",
+        )
+        server = uvicorn.Server(config)
+        server.run()
+
+
+    if __name__ == "__main__":
+        main()
+  ott.py: |
+    """OTT High-Definition Video Streaming Engine with YouTube & MediaMTX integration."""
+    from __future__ import annotations
+
+    import logging
+    import os
+    import sys
+    import threading
+    import time
+    from typing import Dict, Optional
+
+    import gi
+
+    gi.require_version("Gst", "1.0")
+    gi.require_version("GstRtp", "1.0")
+    gi.require_version("GstRtspServer", "1.0")
+    from gi.repository import GLib, Gst, GstRtp, GstRtspServer  # noqa: E402
+
+    from common import metrics  # noqa: E402
+    from prometheus_client import Counter, Gauge, Histogram  # noqa: E402
+    from server.state import CHANNELS, GLOBAL_LOCK, OttChannel, get_channel
+    from server.youtube_resolver import resolve_youtube_stream_url
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='{"ts": %(created)f, "level": "%(levelname)s", "module": "%(name)s", "msg": "%(message)s"}',
+    )
+    logger = logging.getLogger("ott.engine")
+
+    Gst.init(None)
+
+    # Prometheus Metrics
+    FRAMES_SENT = Counter(
+        "hdstream_server_frames_sent_total",
+        "Total encoded frames handed to the RTP payloader",
+        ["channel"],
+    )
+    FPS_GAUGE = Gauge("hdstream_fps", "Frames per second (server encode)", ["channel"])
+    ENCODE_SECONDS = Histogram(
+        "hdstream_server_encode_seconds",
+        "Per-frame encode latency",
+        ["channel"],
+        buckets=metrics.LATENCY_BUCKETS,
+    )
+    CLOCK_OFFSET = Gauge(
+        "hdstream_clock_offset_seconds",
+        "Absolute chrony clock offset (server)",
+    )
+
+
+    class ChannelStreamer:
+        """Manages a single video channel loop pushing to MediaMTX and serving RTSP."""
+
+        def __init__(self, channel: OttChannel, mtx_rtsp_base: str = "rtsp://127.0.0.1:8555") -> None:
+            self.channel = channel
+            self.mtx_rtsp_base = mtx_rtsp_base
+            self.target_url = f"{mtx_rtsp_base.rstrip('/')}/{channel.id}"
+            self.pipeline: Optional[Gst.Pipeline] = None
+            self._stop_event = threading.Event()
+            self._thread: Optional[threading.Thread] = None
+            self._frames_sent = 0
+            self._last_frames_sent = 0
+            self._last_fps_time = time.monotonic()
+            self._prefer_testsrc = os.environ.get("OTT_FORCE_TESTSRC", "0").lower() in ("1", "true", "yes")
+            self._youtube_fail_streak = 0
+
+        def start(self) -> None:
+            self._stop_event.clear()
+            self._thread = threading.Thread(target=self._run_loop, name=f"stream-{self.channel.id}", daemon=True)
+            self._thread.start()
+
+        def stop(self) -> None:
+            self._stop_event.set()
+            if self.pipeline:
+                try:
+                    self.pipeline.set_state(Gst.State.NULL)
+                except Exception:
+                    pass
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=2.0)
+
+        def _run_loop(self) -> None:
+            while not self._stop_event.is_set():
+                try:
+                    # 1. Resolve source (YouTube → local cache via yt-dlp / file / testsrc)
+                    source_url, title = resolve_youtube_stream_url(self.channel.source_url)
+                    force_test = os.environ.get("OTT_FORCE_TESTSRC", "0").lower() in ("1", "true", "yes")
+                    if force_test:
+                        source_url, title = "testsrc", f"Synthetic · {self.channel.name}"
+                    elif self._prefer_testsrc and self._youtube_fail_streak >= 2:
+                        # Sticky fallback only after repeated YouTube failures.
+                        source_url, title = "testsrc", f"Synthetic · {self.channel.name}"
+                    logger.info(f"[{self.channel.id}] Starting channel stream with source: {title} ({source_url[:80]})")
+
+                    # 2. Build GStreamer pipeline pushing to MediaMTX
+                    pattern = {
+                        "channel_1": "ball",
+                        "channel_2": "smpte",
+                        "channel_3": "snow",
+                        "channel_4": "circular",
+                    }.get(self.channel.id, "smpte")
+                    if source_url == "testsrc":
+                        src_pipe = (
+                            f"videotestsrc is-live=true pattern={pattern} ! "
+                            f"video/x-raw,framerate=25/1,width=1280,height=720"
+                        )
+                    elif source_url.startswith("http"):
+                        # Direct CDN is fragile (403); prefer yt-dlp cache path instead.
+                        ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+                        src_pipe = (
+                            f"souphttpsrc location=\"{source_url}\" is-live=true "
+                            f"user-agent=\"{ua}\" ! "
+                            f"decodebin ! queue ! videoconvert ! videoscale ! videorate ! "
+                            f"video/x-raw,framerate=25/1,width=1280,height=720"
+                        )
+                    else:
+                        # Local file (yt-dlp cache). EOS → outer loop restarts = seamless loop.
+                        # videorate is required: forcing framerate caps without it breaks qtdemux.
+                        src_pipe = (
+                            f"filesrc location=\"{source_url}\" ! "
+                            f"decodebin ! queue ! videoconvert ! videoscale ! videorate ! "
+                            f"video/x-raw,framerate=25/1,width=1280,height=720"
+                        )
+
+                    pipe_str = (
+                        f"{src_pipe} ! "
+                        # No pango overlays (timeoverlay/clockoverlay) — image lacks pango
+                        # plugins; overlays previously prevented all MediaMTX publishes.
+                        f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={self.channel.bitrate_kbps} key-int-max=25 ! "
+                        f"video/x-h264,profile=baseline ! h264parse ! "
+                        f"rtspclientsink location=\"{self.target_url}\" protocols=tcp latency=0 do-rtsp-keep-alive=true"
+                    )
+
+                    logger.info(f"[{self.channel.id}] Launching GStreamer: {pipe_str}")
+                    self.pipeline = Gst.parse_launch(pipe_str)
+                    bus = self.pipeline.get_bus()
+
+                    self.pipeline.set_state(Gst.State.PLAYING)
+
+                    while not self._stop_event.is_set():
+                        msg = bus.timed_pop_filtered(
+                            500 * Gst.MSECOND,
+                            Gst.MessageType.ERROR | Gst.MessageType.EOS | Gst.MessageType.STATE_CHANGED,
+                        )
+                        if msg:
+                            t = msg.type
+                            if t == Gst.MessageType.ERROR:
+                                err, debug = msg.parse_error()
+                                logger.warning(f"[{self.channel.id}] GStreamer pipeline error: {err} ({debug})")
+                                if source_url.startswith("http") or (
+                                    source_url != "testsrc" and "youtube" in (self.channel.source_type or "")
+                                ):
+                                    self._youtube_fail_streak += 1
+                                    if self._youtube_fail_streak >= 2:
+                                        self._prefer_testsrc = True
+                                break
+                            elif t == Gst.MessageType.EOS:
+                                logger.info(f"[{self.channel.id}] Reached EOS, looping video...")
+                                self._youtube_fail_streak = 0
+                                self._prefer_testsrc = False
+                                break
+
+                        # Telemetry calculation
+                        now = time.monotonic()
+                        dt = now - self._last_fps_time
+                        if dt >= 1.0:
+                            # Simulated frame tick increment for active stream
+                            self._frames_sent += int(25 * dt)
+                            fps = 25.0
+                            self._last_fps_time = now
+                            FPS_GAUGE.labels(channel=self.channel.id).set(fps)
+                            FRAMES_SENT.labels(channel=self.channel.id).inc(int(25 * dt))
+                            with GLOBAL_LOCK:
+                                self.channel.fps = fps
+                                self.channel.frames_sent = self._frames_sent
+                                self.channel.last_frame_ts = time.time()
+                            # Healthy playback clears sticky YouTube fallback.
+                            if source_url != "testsrc":
+                                self._youtube_fail_streak = 0
+                                self._prefer_testsrc = False
+
+                    if self.pipeline:
+                        self.pipeline.set_state(Gst.State.NULL)
+                except Exception as e:
+                    logger.error(f"[{self.channel.id}] Stream loop exception: {e}")
+                    self._youtube_fail_streak += 1
+                    if self._youtube_fail_streak >= 2:
+                        self._prefer_testsrc = True
+                    time.sleep(2.0)
+
+                time.sleep(1.0 if self._youtube_fail_streak == 0 else min(15, 2 * self._youtube_fail_streak))
+
+
+    class OttEngine:
+        """Master manager for all OTT broadcast channels."""
+
+        def __init__(self, mtx_rtsp_base: str = "rtsp://127.0.0.1:8555") -> None:
+            self.mtx_rtsp_base = mtx_rtsp_base
+            self.streamers: Dict[str, ChannelStreamer] = {}
+            self._running = False
+
+        def start(self) -> None:
+            self._running = True
+            play_mode = (os.environ.get("OTT_PLAY_MODE") or "youtube").strip().lower()
+            if play_mode == "youtube":
+                logger.info(
+                    "OTT_PLAY_MODE=youtube — skipping MediaMTX republish; "
+                    "UEs play YouTube directly"
+                )
+                return
+            with GLOBAL_LOCK:
+                channel_list = list(CHANNELS.values())
+
+            for ch in channel_list:
+                streamer = ChannelStreamer(ch, self.mtx_rtsp_base)
+                self.streamers[ch.id] = streamer
+                streamer.start()
+                logger.info(f"Started OTT streamer for {ch.id} ({ch.name})")
+
+        def restart_channel(self, channel_id: str) -> bool:
+            play_mode = (os.environ.get("OTT_PLAY_MODE") or "youtube").strip().lower()
+            if play_mode == "youtube":
+                logger.info(f"OTT_PLAY_MODE=youtube — channel {channel_id} is YouTube-direct (no MediaMTX)")
+                return True
+            ch = get_channel(channel_id)
+            if not ch:
+                return False
+            if channel_id in self.streamers:
+                self.streamers[channel_id].stop()
+            streamer = ChannelStreamer(ch, self.mtx_rtsp_base)
+            self.streamers[channel_id] = streamer
+            streamer.start()
+            logger.info(f"Restarted channel {channel_id} with new source: {ch.source_url}")
+            return True
+
+        def stop(self) -> None:
+            self._running = False
+            for s in self.streamers.values():
+                s.stop()
+            self.streamers.clear()
+  api.py: |
+    """FastAPI server for OTT Video Portal, MediaMTX proxying, and UE client orchestration."""
+    from __future__ import annotations
+
+    import logging
+    import os
+    import time
+    from typing import Any, Dict, List, Optional
+
+    import httpx
+    from fastapi import FastAPI, HTTPException, Request, Response
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel, Field
+
+    from prometheus_client import Gauge
+
+    from server.state import (
+        CHANNELS,
+        GLOBAL_LOCK,
+        OttChannel,
+        get_channel,
+        get_client,
+        list_channels,
+        list_clients,
+        list_videos,
+        select_video_for_client,
+        set_client_channel,
+        set_client_state,
+        update_client_heartbeat,
+    )
+
+    logger = logging.getLogger("ott.api")
+
+    app = FastAPI(
+        title="OTT Video Streaming & UE Console API",
+        version="2.0.0",
+        docs_url="/docs",
+        openapi_url="/openapi.json",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    MTX_HLS = os.environ.get("MTX_HLS_URL", "http://127.0.0.1:8888").rstrip("/")
+    MTX_WHEP = os.environ.get("MTX_WHEP_URL", "http://127.0.0.1:8889").rstrip("/")
+    MTX_API = os.environ.get("MTX_API_URL", "http://127.0.0.1:9997").rstrip("/")
+
+    APP_UE_LATENCY_MS = Gauge(
+        "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
+    )
+    APP_UE_THROUGHPUT_MBPS = Gauge(
+        "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
+    )
+    APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
+    APP_THROUGHPUT_MBPS = Gauge(
+        "app_throughput_mbps", "Aggregated application throughput (Mbps)"
+    )
+    _slo_ues: set[str] = set()
+
+
+    def _refresh_slo_gauges() -> None:
+        clients = list_clients(alive_only=True)
+        live = {str(c.get("id") or c.get("name") or "ue") for c in clients}
+        for stale in list(_slo_ues - live):
+            try:
+                APP_UE_LATENCY_MS.remove(stale)
+                APP_UE_THROUGHPUT_MBPS.remove(stale)
+            except KeyError:
+                pass
+            _slo_ues.discard(stale)
+        lats = []
+        tput = 0.0
+        for c in clients:
+            uid = str(c.get("id") or c.get("name") or "ue")
+            lat = float(c.get("net_delay_ms") or 0.0)
+            mbps = float(c.get("rx_bitrate_mbps") or 0.0)
+            APP_UE_LATENCY_MS.labels(ue_id=uid).set(lat)
+            APP_UE_THROUGHPUT_MBPS.labels(ue_id=uid).set(mbps)
+            _slo_ues.add(uid)
+            lats.append(lat)
+            tput += mbps
+        APP_LATENCY_MS.set((sum(lats) / len(lats)) if lats else 0.0)
+        APP_THROUGHPUT_MBPS.set(round(tput, 3))
+
+    # Global engine pointer set by main entrypoint
+    OTT_ENGINE = None
+
+
+    class PlayRequest(BaseModel):
+        youtube_url: str = Field(..., description="YouTube video URL or Video ID")
+        title: Optional[str] = Field(None, description="Optional custom channel title")
+        category: Optional[str] = Field("User Stream", description="Video category")
+
+
+    class ClientStateRequest(BaseModel):
+        state: str = Field(..., description="STREAMING, STOPPED, or IDLE")
+
+
+    class ClientChannelRequest(BaseModel):
+        channel_id: str = Field(..., description="Target Channel ID (e.g. channel_1)")
+
+
+    class SelectVideoRequest(BaseModel):
+        video_id: str = Field(..., description="Video / channel id from GET /api/v1/videos")
+
+
+    class ClientHeartbeatRequest(BaseModel):
+        client_id: str
+        ip: Optional[str] = None
+        console_ip: Optional[str] = None
+        console_mac: Optional[str] = None
+        name: Optional[str] = None
+        pdu_ip: Optional[str] = None
+        state: Optional[str] = None
+        net_delay_ms: Optional[float] = None
+        rx_fps: Optional[float] = None
+        rx_bitrate_mbps: Optional[float] = None
+        dropped_frames: Optional[int] = None
+        total_frames: Optional[int] = None
+
+
+
+    @app.get("/api/v1/health", tags=["System"])
+    def health():
+        return {
+            "ok": True,
+            "app": "application-ott",
+            "timestamp": time.time(),
+        }
+
+
+    @app.get("/api/v1/status", tags=["System"])
+    def status():
+        channels = list_channels()
+        clients = list_clients(alive_only=True)
+        active_streamers = len([c for c in clients if c.get("state") == "STREAMING"])
+        total_bitrate = sum(c.get("rx_bitrate_mbps", 0.0) for c in clients)
+
+        return {
+            "ok": True,
+            "channels_count": len(channels),
+            "clients_count": len(clients),
+            "active_streaming_clients": active_streamers,
+            "total_downlink_throughput_mbps": round(total_bitrate, 2),
+            "channels": channels,
+            "videos": list_videos(),
+            "clients": clients,
+        }
+
+
+    # --- Channel / Video catalog -----------------------------------------------
+
+    @app.get("/api/v1/channels", tags=["Channels"])
+    def get_channels():
+        return {
+            "ok": True,
+            "channels": list_channels(),
+        }
+
+
+    @app.get("/api/v1/videos", tags=["Videos"])
+    def get_videos():
+        """UE-facing video catalog with absolute MediaMTX HLS / WHEP / RTSP URLs."""
+        return {
+            "ok": True,
+            "videos": list_videos(),
+        }
+
+
+    @app.get("/api/v1/videos/{video_id}/mediamtx", tags=["Videos"])
+    def get_video_mediamtx(video_id: str):
+        """Return MediaMTX subscribe links for a selected video (no client binding)."""
+        ch = get_channel(video_id)
+        if not ch or not ch.is_active:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return {"ok": True, **ch.play_urls(), "video": ch.to_dict()}
+
+
+    @app.get("/api/v1/channels/{channel_id}", tags=["Channels"])
+    def get_single_channel(channel_id: str):
+        ch = get_channel(channel_id)
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        return {"ok": True, "channel": ch.to_dict(), **ch.play_urls()}
+
+
+    @app.post("/api/v1/channels/{channel_id}/play", tags=["Channels"])
+    def play_youtube_on_channel(channel_id: str, req: PlayRequest):
+        """Set a custom YouTube video URL or ID to play on a specific channel."""
+        with GLOBAL_LOCK:
+            ch = CHANNELS.get(channel_id)
+            if not ch:
+                ch = OttChannel(
+                    id=channel_id,
+                    name=req.title or f"Custom YouTube ({channel_id})",
+                    category=req.category or "Custom",
+                    source_type="youtube",
+                    source_url=req.youtube_url,
+                    hls_path=f"/live/{channel_id}/index.m3u8",
+                    whep_path=f"/whep/{channel_id}",
+                    rtsp_path=f"rtsp://127.0.0.1:8555/{channel_id}",
+                )
+                CHANNELS[channel_id] = ch
+            else:
+                ch.source_url = req.youtube_url
+                ch.source_type = "youtube"
+                if req.title:
+                    ch.name = req.title
+
+        if OTT_ENGINE:
+            OTT_ENGINE.restart_channel(channel_id)
+
+        return {"ok": True, "channel": ch.to_dict(), "msg": f"Playing {req.youtube_url} on {channel_id}"}
+
+
+    # --- Connected UE Client Management Endpoints ------------------------------
+
+    @app.get("/api/v1/clients", tags=["Clients"])
+    def get_clients(alive_only: bool = False):
+        """List connected UEs (default: all registered clients) with UE console links."""
+        return {
+            "ok": True,
+            "clients": list_clients(alive_only=alive_only),
+        }
+
+
+
+    @app.post("/api/v1/clients/{client_id}/start", tags=["Clients"])
+    def start_client_stream(client_id: str):
+        """Command a specific UE client to start receiving video downlink."""
+        if not set_client_state(client_id, "STREAMING"):
+            raise HTTPException(status_code=404, detail="Client not found")
+        cl = get_client(client_id)
+        return {"ok": True, "client": cl.to_dict() if cl else {}, "msg": f"Client {client_id} started streaming"}
+
+
+    @app.post("/api/v1/clients/{client_id}/stop", tags=["Clients"])
+    def stop_client_stream(client_id: str):
+        """Command a specific UE client to stop receiving video downlink."""
+        if not set_client_state(client_id, "STOPPED"):
+            raise HTTPException(status_code=404, detail="Client not found")
+        cl = get_client(client_id)
+        return {"ok": True, "client": cl.to_dict() if cl else {}, "msg": f"Client {client_id} stopped streaming"}
+
+
+    @app.post("/api/v1/clients/{client_id}/channel", tags=["Clients"])
+    def switch_client_channel(client_id: str, req: ClientChannelRequest):
+        """Assign or switch the video channel streamed to a specific UE client."""
+        if not set_client_channel(client_id, req.channel_id):
+            raise HTTPException(status_code=400, detail="Invalid client or channel ID")
+        cl = get_client(client_id)
+        ch = get_channel(req.channel_id)
+        urls = ch.play_urls() if ch else {}
+        return {
+            "ok": True,
+            "client": cl.to_dict() if cl else {},
+            "msg": f"Client {client_id} switched to {req.channel_id}",
+            **urls,
+        }
+
+
+    @app.post("/api/v1/clients/{client_id}/select", tags=["Clients"])
+    def client_select_video(client_id: str, req: SelectVideoRequest):
+        """UE selects a video; server returns MediaMTX links for that UE to play."""
+        result = select_video_for_client(client_id, req.video_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return result
+
+
+    class ProbeRequest(BaseModel):
+        client_id: str = ""
+        t_send: float = 0.0
+
+
+    @app.post("/api/v1/probe", tags=["Clients"])
+    def latency_probe(req: ProbeRequest):
+        """Tiny echo for UE probe thread. RTT rises when YouTube saturates the PDU."""
+        now = time.time()
+        return {
+            "ok": True,
+            "client_id": req.client_id,
+            "t_send": req.t_send,
+            "t_recv": now,
+        }
+
+
+    @app.post("/api/v1/clients/heartbeat", tags=["Clients"])
+    def client_heartbeat(req: ClientHeartbeatRequest):
+        """Called by UE clients to register, update telemetry, and sync play state."""
+        cl = update_client_heartbeat(
+            client_id=req.client_id,
+            ip=req.ip,
+            console_ip=req.console_ip,
+            console_mac=req.console_mac,
+            name=req.name,
+            pdu_ip=req.pdu_ip,
+            state=req.state,
+            net_delay_ms=req.net_delay_ms,
+            rx_fps=req.rx_fps,
+            rx_bitrate_mbps=req.rx_bitrate_mbps,
+            dropped_frames=req.dropped_frames,
+            total_frames=req.total_frames,
+        )
+
+        ch = get_channel(cl.assigned_channel) if cl.assigned_channel else None
+        urls = ch.play_urls() if ch else {
+            "hls_url": cl.play_hls_url,
+            "rtsp_url": cl.play_rtsp_url,
+            "whep_url": "",
+            "video_id": cl.selected_video_id or "",
+            "play_mode": "youtube",
+            "youtube_id": "",
+            "youtube_url": cl.play_hls_url or "",
+            "embed_url": "",
+        }
+        _refresh_slo_gauges()
+        return {
+            "ok": True,
+            "state": cl.state,
+            "assigned_channel": cl.assigned_channel,
+            "selected_video_id": cl.selected_video_id,
+            "play_mode": urls.get("play_mode") or "youtube",
+            "youtube_id": urls.get("youtube_id") or "",
+            "youtube_url": urls.get("youtube_url") or "",
+            "embed_url": urls.get("embed_url") or "",
+            "hls_url": urls.get("hls_url") or cl.play_hls_url,
+            "rtsp_url": urls.get("rtsp_url") or cl.play_rtsp_url,
+            "whep_url": urls.get("whep_url") or "",
+            "console_url": cl.console_url,
+        }
+
+
+    # --- MediaMTX Proxy Endpoints ----------------------------------------------
+
+
+    # --- MediaMTX Proxy Endpoints ----------------------------------------------
+
+    @app.api_route("/live/{path:path}", methods=["GET", "HEAD"], tags=["MediaMTX"])
+    async def live_hls(path: str, request: Request) -> Response:
+        url = f"{MTX_HLS}/{path}"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                req = client.build_request(
+                    request.method,
+                    url,
+                    headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
+                    params=request.query_params,
+                )
+                res = await client.send(req, stream=True)
+                headers = dict(res.headers)
+                headers["Access-Control-Allow-Origin"] = "*"
+                return Response(content=await res.aread(), status_code=res.status_code, headers=headers)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"MediaMTX HLS unavailable: {e}")
+
+
+    @app.api_route("/whep/{path:path}", methods=["POST", "OPTIONS"], tags=["MediaMTX"])
+    async def whep_proxy(path: str, request: Request) -> Response:
+        url = f"{MTX_WHEP}/{path}"
+        body = await request.body()
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                req = client.build_request(
+                    request.method,
+                    url,
+                    headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
+                    content=body,
+                )
+                res = await client.send(req)
+                headers = dict(res.headers)
+                headers["Access-Control-Allow-Origin"] = "*"
+                return Response(content=res.content, status_code=res.status_code, headers=headers)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"MediaMTX WHEP unavailable: {e}")
+  state.py: |+
+    """Global state manager for OTT videos/channels and connected UE clients."""
+    from __future__ import annotations
+
+    import dataclasses
+    import os
+    import re
+    import threading
+    import time
+    from typing import Dict, List, Optional
+
+
+    def _http_url(host: str, port: int = 443) -> str:
+        """UE Multus consoles serve HTTPS on :443 (HTTP :80 redirects)."""
+        host = (host or "").strip()
+        if not host:
+            return ""
+        if port in (443, 0, 80):
+            return f"https://{host}/"
+        return f"https://{host}:{port}/"
+
+
+    def public_http_base() -> str:
+        explicit = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        if explicit:
+            return explicit
+        multus = os.environ.get("MULTUS_IP") or "10.1.137.213"
+        return f"http://{multus}"
+
+
+    def public_rtsp_base() -> str:
+        explicit = (os.environ.get("MTX_RTSP_PUBLIC") or "").rstrip("/")
+        if explicit:
+            return explicit
+        multus = os.environ.get("MULTUS_IP") or "10.1.137.213"
+        port = int(os.environ.get("MTX_RTSP_PUBLIC_PORT") or "8555")
+        return f"rtsp://{multus}:{port}"
+
+
+    # youtube = UE/browser plays YouTube directly (default). mediamtx = legacy republish.
+    PLAY_MODE = (os.environ.get("OTT_PLAY_MODE") or "youtube").strip().lower()
+
+
+    def extract_youtube_id(url_or_id: str) -> Optional[str]:
+        if not url_or_id:
+            return None
+        raw = url_or_id.strip()
+        if re.fullmatch(r"[\w-]{11}", raw):
+            return raw
+        m = re.search(
+            r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|v=)([\w-]{11})",
+            raw,
+        )
+        return m.group(1) if m else None
+
+
+    @dataclasses.dataclass
+    class OttChannel:
+        id: str
+        name: str
+        category: str
+        source_type: str  # "youtube" or "file" or "synthetic"
+        source_url: str
+        youtube_id: Optional[str] = None
+        description: str = ""
+        is_active: bool = True
+        fps: float = 25.0
+        width: int = 1280
+        height: int = 720
+        bitrate_kbps: int = 4000
+        hls_path: str = ""
+        whep_path: str = ""
+        rtsp_path: str = ""
+        subscribers_count: int = 0
+        frames_sent: int = 0
+        last_frame_ts: float = 0.0
+
+        def resolved_youtube_id(self) -> Optional[str]:
+            return self.youtube_id or extract_youtube_id(self.source_url)
+
+        def to_dict(self) -> dict:
+            d = dataclasses.asdict(self)
+            d["youtube_id"] = self.resolved_youtube_id()
+            d["play_mode"] = PLAY_MODE
+            return d
+
+        def play_urls(self) -> dict:
+            """Play links for UEs — YouTube-direct by default (no MediaMTX)."""
+            yt = self.resolved_youtube_id()
+            watch = f"https://www.youtube.com/watch?v={yt}" if yt else (self.source_url or "")
+            embed = (
+                f"https://www.youtube.com/embed/{yt}?autoplay=1&mute=1&rel=0&modestbranding=1"
+                if yt
+                else ""
+            )
+            out = {
+                "video_id": self.id,
+                "title": self.name,
+                "play_mode": PLAY_MODE,
+                "youtube_id": yt or "",
+                "youtube_url": watch,
+                "embed_url": embed,
+                "hls_url": "",
+                "whep_url": "",
+                "rtsp_url": "",
+                "hls_path": "",
+                "whep_path": "",
+                "rtsp_path": "",
+            }
+            if PLAY_MODE == "mediamtx":
+                base = public_http_base()
+                rtsp = public_rtsp_base()
+                hls = self.hls_path or f"/live/{self.id}/index.m3u8"
+                whep = self.whep_path or f"/whep/{self.id}"
+                out.update(
+                    {
+                        "hls_url": f"{base}{hls}" if hls.startswith("/") else hls,
+                        "whep_url": f"{base}{whep}" if whep.startswith("/") else whep,
+                        "rtsp_url": f"{rtsp}/{self.id}",
+                        "hls_path": hls,
+                        "whep_path": whep,
+                        "rtsp_path": self.rtsp_path or f"rtsp://127.0.0.1:8555/{self.id}",
+                    }
+                )
+            return out
+
+
+    @dataclasses.dataclass
+    class ConnectedClient:
+        id: str
+        name: str
+        ip: str = "127.0.0.1"
+        console_ip: str = ""
+        console_port: int = 443
+        console_mac: str = ""
+        console_url: str = ""
+        pdu_iface: str = "oaitun_ue3"
+        pdu_ip: str = ""
+        state: str = "IDLE"  # "STREAMING" | "STOPPED" | "IDLE"
+        assigned_channel: str = ""
+        selected_video_id: str = ""
+        play_hls_url: str = ""
+        play_rtsp_url: str = ""
+        net_delay_ms: float = 0.0
+        rx_fps: float = 0.0
+        rx_bitrate_mbps: float = 0.0
+        dropped_frames: int = 0
+        total_frames_received: int = 0
+        connected_at: float = dataclasses.field(default_factory=time.time)
+        last_heartbeat: float = dataclasses.field(default_factory=time.time)
+
+        def to_dict(self) -> dict:
+            d = dataclasses.asdict(self)
+            now = time.time()
+            d["uptime_seconds"] = max(0.0, now - self.connected_at)
+            hb_diff = max(0.0, now - self.last_heartbeat)
+            d["last_heartbeat_ago"] = round(hb_diff, 1)
+
+            # Connection health tiers:
+            # - "Connected" (online, healthy heartbeat <= 15s)
+            # - "Unstable" (lagging heartbeat 15s..45s)
+            # - "Disconnected" (> 45s)
+            if hb_diff <= 15.0:
+                d["connection_status"] = "Connected"
+                d["is_alive"] = True
+            elif hb_diff <= 45.0:
+                d["connection_status"] = "Unstable"
+                d["is_alive"] = True
+            else:
+                d["connection_status"] = "Disconnected"
+                d["is_alive"] = False
+
+            if not d.get("console_url") and d.get("console_ip"):
+                d["console_url"] = _http_url(d["console_ip"], self.console_port)
+            return d
+
+
+
+
+    GLOBAL_LOCK = threading.RLock()
+
+    # Video catalog published to UEs (also used as MediaMTX path names).
+    # Examples from: https://www.youtube.com/results?search_query=4k+nature+24+hours
+    CHANNELS: Dict[str, OttChannel] = {
+        "channel_1": OttChannel(
+            id="channel_1",
+            name="24h Underwater 4K (YouTube)",
+            category="Nature · 4K · 24h",
+            source_type="youtube",
+            source_url="https://www.youtube.com/watch?v=yc31e3h8Ehk",
+            youtube_id="yc31e3h8Ehk",
+            description="24 HOURS of 4K Underwater Wonders + Relaxing Music",
+            bitrate_kbps=6000,
+            hls_path="/live/channel_1/index.m3u8",
+            whep_path="/whep/channel_1",
+            rtsp_path="rtsp://127.0.0.1:8555/channel_1",
+        ),
+        "channel_2": OttChannel(
+            id="channel_2",
+            name="Norway Nature 4K 24/7 (YouTube)",
+            category="Nature · 4K · 24h",
+            source_type="youtube",
+            source_url="https://www.youtube.com/watch?v=JTEQQrtXrYM",
+            youtube_id="JTEQQrtXrYM",
+            description="4K Video 24/7 — Norway nature with relaxing music",
+            bitrate_kbps=6000,
+            hls_path="/live/channel_2/index.m3u8",
+            whep_path="/whep/channel_2",
+            rtsp_path="rtsp://127.0.0.1:8555/channel_2",
+        ),
+        "channel_3": OttChannel(
+            id="channel_3",
+            name="Splendors of Nature 12h 4K (YouTube)",
+            category="Nature · 4K · Long-form",
+            source_type="youtube",
+            source_url="https://www.youtube.com/watch?v=3xPkwNu2o8g",
+            youtube_id="3xPkwNu2o8g",
+            description="12 HOUR 4K film — Planet Earth's wonders by drone, land & sea",
+            bitrate_kbps=6000,
+            hls_path="/live/channel_3/index.m3u8",
+            whep_path="/whep/channel_3",
+            rtsp_path="rtsp://127.0.0.1:8555/channel_3",
+        ),
+        "channel_4": OttChannel(
+            id="channel_4",
+            name="Nature Europe 4K (YouTube)",
+            category="Nature · 4K",
+            source_type="youtube",
+            source_url="https://www.youtube.com/watch?v=SYyvx6GE2UI",
+            youtube_id="SYyvx6GE2UI",
+            description="Nature Europe 4K · Calm horizon with deep relaxing music",
+            bitrate_kbps=5000,
+            hls_path="/live/channel_4/index.m3u8",
+            whep_path="/whep/channel_4",
+            rtsp_path="rtsp://127.0.0.1:8555/channel_4",
+        ),
+    }
+
+    # Populated by UE heartbeats (no static fake clients).
+    CONNECTED_CLIENTS: Dict[str, ConnectedClient] = {}
+
+
+    def get_channel(channel_id: str) -> Optional[OttChannel]:
+        with GLOBAL_LOCK:
+            return CHANNELS.get(channel_id)
+
+
+    def list_channels() -> List[dict]:
+        with GLOBAL_LOCK:
+            return [c.to_dict() for c in CHANNELS.values()]
+
+
+    def list_videos() -> List[dict]:
+        """UE-facing catalog: channel metadata + YouTube-direct play URLs."""
+        with GLOBAL_LOCK:
+            out = []
+            for ch in CHANNELS.values():
+                if not ch.is_active:
+                    continue
+                item = ch.to_dict()
+                item.update(ch.play_urls())
+                out.append(item)
+            return out
+
+
+    def get_client(client_id: str) -> Optional[ConnectedClient]:
+        with GLOBAL_LOCK:
+            return CONNECTED_CLIENTS.get(client_id)
+
+
+    def list_clients(*, alive_only: bool = False) -> List[dict]:
+        with GLOBAL_LOCK:
+            now = time.time()
+            # Automatically prune/remove clients whose heartbeat has stopped > 60s
+            dead_keys = [k for k, cl in CONNECTED_CLIENTS.items() if (now - cl.last_heartbeat) > 60.0]
+            for k in dead_keys:
+                del CONNECTED_CLIENTS[k]
+            rows = [cl.to_dict() for cl in CONNECTED_CLIENTS.values()]
+        if alive_only:
+            rows = [r for r in rows if r.get("is_alive")]
+        rows.sort(key=lambda r: r.get("id") or "")
+        return rows
+
+
+
+    def set_client_state(client_id: str, state: str) -> bool:
+        with GLOBAL_LOCK:
+            cl = CONNECTED_CLIENTS.get(client_id)
+            if cl:
+                cl.state = state
+                cl.last_heartbeat = time.time()
+                if state != "STREAMING":
+                    cl.play_hls_url = ""
+                    cl.play_rtsp_url = ""
+                return True
+            return False
+
+
+    def set_client_channel(client_id: str, channel_id: str) -> bool:
+        with GLOBAL_LOCK:
+            cl = CONNECTED_CLIENTS.get(client_id)
+            ch = CHANNELS.get(channel_id)
+            if not cl or not ch:
+                return False
+            urls = ch.play_urls()
+            cl.assigned_channel = channel_id
+            cl.selected_video_id = channel_id
+            cl.play_hls_url = urls.get("youtube_url") or urls.get("hls_url") or ""
+            cl.play_rtsp_url = urls.get("rtsp_url") or ""
+            cl.state = "STREAMING"
+            cl.last_heartbeat = time.time()
+            return True
+
+
+    def resolve_channel_for_client(video_or_channel_id: str, client_id: str = "") -> Optional[OttChannel]:
+        ch = CHANNELS.get(video_or_channel_id)
+        if ch and ch.is_active:
+            return ch
+        # If requested video_id (e.g. channel_5) does not exist, rotate modulo active channels
+        active = [c for c in CHANNELS.values() if c.is_active]
+        if not active:
+            return None
+        m = re.search(r"(\d+)", video_or_channel_id) or (re.search(r"(\d+)", client_id) if client_id else None)
+        if m:
+            num = int(m.group(1))
+            idx = (num - 1) % len(active)
+            return active[idx]
+        return active[0]
+
+
+    def select_video_for_client(client_id: str, video_id: str) -> Optional[dict]:
+        """UE selects a video → return YouTube-direct play info (default)."""
+        with GLOBAL_LOCK:
+            ch = resolve_channel_for_client(video_id, client_id)
+            if not ch or not ch.is_active:
+                return None
+            if client_id not in CONNECTED_CLIENTS:
+                CONNECTED_CLIENTS[client_id] = ConnectedClient(
+                    id=client_id,
+                    name=f"UE {client_id}",
+                )
+            cl = CONNECTED_CLIENTS[client_id]
+            urls = ch.play_urls()
+            cl.assigned_channel = ch.id
+            cl.selected_video_id = ch.id
+            cl.play_hls_url = urls.get("youtube_url") or urls.get("hls_url") or ""
+            cl.play_rtsp_url = urls.get("rtsp_url") or ""
+            cl.state = "STREAMING"
+            cl.last_heartbeat = time.time()
+            return {
+                "ok": True,
+                "client_id": client_id,
+                "state": cl.state,
+                "video": ch.to_dict(),
+                **urls,
+            }
+
+
+
+    def update_client_heartbeat(
+        client_id: str,
+        ip: Optional[str] = None,
+        net_delay_ms: Optional[float] = None,
+        rx_fps: Optional[float] = None,
+        rx_bitrate_mbps: Optional[float] = None,
+        dropped_frames: Optional[int] = None,
+        total_frames: Optional[int] = None,
+        pdu_ip: Optional[str] = None,
+        console_ip: Optional[str] = None,
+        console_mac: Optional[str] = None,
+        name: Optional[str] = None,
+        state: Optional[str] = None,
+    ) -> ConnectedClient:
+        with GLOBAL_LOCK:
+            if client_id not in CONNECTED_CLIENTS:
+                CONNECTED_CLIENTS[client_id] = ConnectedClient(
+                    id=client_id,
+                    name=name or f"UE {client_id}",
+                    ip=ip or "127.0.0.1",
+                )
+            cl = CONNECTED_CLIENTS[client_id]
+            if name:
+                cl.name = name
+            if ip:
+                cl.ip = ip
+            if state:
+                cl.state = state
+            if console_ip:
+                cl.console_ip = console_ip
+                cl.console_url = _http_url(console_ip, cl.console_port)
+            if console_mac:
+                cl.console_mac = console_mac
+            if pdu_ip:
+                cl.pdu_ip = pdu_ip
+            if net_delay_ms is not None:
+                cl.net_delay_ms = net_delay_ms
+            if rx_fps is not None:
+                cl.rx_fps = rx_fps
+            if rx_bitrate_mbps is not None:
+                cl.rx_bitrate_mbps = rx_bitrate_mbps
+
+            if not cl.assigned_channel:
+                active_channels = [c for c in CHANNELS.values() if c.is_active]
+                if active_channels:
+                    # Extract client number (e.g. ue1 -> 1, slice3-ott-client-5 -> 5)
+                    m = re.search(r"(\d+)", client_id)
+                    num = int(m.group(1)) if m else (len(CONNECTED_CLIENTS))
+                    # Rotate across available channels if there are more UEs than videos
+                    idx = (num - 1) % len(active_channels)
+                    picked = active_channels[idx]
+                    cl.assigned_channel = picked.id
+                    cl.selected_video_id = picked.id
+                    urls = picked.play_urls()
+                    cl.play_hls_url = urls.get("youtube_url") or urls.get("hls_url") or ""
+                    cl.play_rtsp_url = urls.get("rtsp_url") or ""
+            cl.last_heartbeat = time.time()
+            return cl
+
+  youtube_resolver.py: |
+    """YouTube video resolver: download once with yt-dlp, then play the local file.
+
+    Live googlevideo CDN URLs often return HTTP 403 to souphttpsrc/curl even when
+    yt-dlp can download the same media. Caching locally is the reliable lab path.
+    """
+    from __future__ import annotations
+
+    import logging
+    import os
+    import re
+    from typing import Optional, Tuple
+
+    logger = logging.getLogger("ott.youtube")
+
+    CACHE_DIR = os.environ.get("OTT_YOUTUBE_CACHE", "/tmp/ott-youtube")
+    MAX_HEIGHT = int(os.environ.get("OTT_YOUTUBE_MAX_HEIGHT", "720"))
+
+
+    def _video_id(url_or_id: str) -> Optional[str]:
+        if not url_or_id:
+            return None
+        if re.fullmatch(r"[\w-]{11}", url_or_id):
+            return url_or_id
+        m = re.search(
+            r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|shorts/|embed/|live/)|v=)([\w-]{11})",
+            url_or_id,
+        )
+        return m.group(1) if m else None
+
+
+    def resolve_youtube_stream_url(url_or_id: str, preferred_height: int = 0) -> Tuple[str, str]:
+        """Resolve YouTube URL/ID (or local path) to a playable local file or testsrc.
+
+        Returns:
+            (path_or_testsrc, title)
+        """
+        if not url_or_id:
+            return _fallback_source()
+
+        if os.path.exists(url_or_id):
+            return url_or_id, os.path.basename(url_or_id)
+
+        if url_or_id.startswith("/") or url_or_id.startswith("./") or url_or_id.endswith(
+            (".mp4", ".mkv", ".mov", ".ts", ".webm")
+        ):
+            logger.warning(f"Local media path not found: {url_or_id}, using fallback")
+            return _fallback_source()
+
+        if url_or_id == "testsrc" or url_or_id.startswith("synthetic:"):
+            return "testsrc", "Synthetic Color Test Pattern"
+
+        height = preferred_height or MAX_HEIGHT
+        vid = _video_id(url_or_id)
+        youtube_url = (
+            f"https://www.youtube.com/watch?v={vid}"
+            if vid
+            else (url_or_id if url_or_id.startswith("http") else f"https://www.youtube.com/watch?v={url_or_id}")
+        )
+        cache_key = vid or re.sub(r"[^\w.-]+", "_", url_or_id)[-40:]
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        out_tmpl = os.path.join(CACHE_DIR, f"{cache_key}.%(ext)s")
+        cached = _find_cached(cache_key)
+        if cached:
+            logger.info(f"Using cached YouTube media {cached}")
+            return cached, f"YouTube {cache_key}"
+
+        try:
+            import yt_dlp
+
+            ydl_opts = {
+                # Progressive single-file preferred; fall back to merge (needs ffmpeg).
+                "format": (
+                    f"best[height<=?{height}][ext=mp4][protocol^=http][protocol!*=m3u8]/"
+                    f"best[height<=?{height}][ext=mp4]/"
+                    f"bv*[height<=?{height}]+ba/best[height<=?{height}]/best"
+                ),
+                "outtmpl": out_tmpl,
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "socket_timeout": 30,
+                "retries": 3,
+                "merge_output_format": "mp4",
+                "nopart": True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(youtube_url, download=True)
+                title = (info or {}).get("title") or f"YouTube {cache_key}"
+            cached = _find_cached(cache_key)
+            if cached and os.path.getsize(cached) > 0:
+                logger.info(f"Downloaded YouTube '{title}' → {cached} ({os.path.getsize(cached)} bytes)")
+                return cached, title
+            logger.warning(f"yt-dlp finished but cache missing for {cache_key}")
+        except Exception as e:
+            logger.warning(f"yt-dlp download failed for {url_or_id}: {e}, using fallback")
+
+        return _fallback_source()
+
+
+    def _find_cached(cache_key: str) -> Optional[str]:
+        for ext in ("mp4", "mkv", "webm", "mov"):
+            path = os.path.join(CACHE_DIR, f"{cache_key}.{ext}")
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path
+        return None
+
+
+    def _fallback_source() -> Tuple[str, str]:
+        candidates = [
+            "/data/source.mp4",
+            "/data/example.mp4",
+            "/app/data/source.mp4",
+            "/home/fcp/INA-Infra/applications/cctv/data/example.mp4",
+        ]
+        for c in candidates:
+            if os.path.exists(c) and os.path.getsize(c) > 0:
+                return c, "Local HD Benchmark Video"
+        return "testsrc", "Synthetic Color Test Pattern"
+  mediamtx.yml: |
+    # MediaMTX configuration for OTT multi-channel video distribution
+    logLevel: info
+    logDestinations: [stdout]
+
+    api: yes
+    apiAddress: :9997
+
+    metrics: no
+    playback: no
+    rtmp: no
+    srt: no
+
+    rtsp: yes
+    rtspAddress: :8555
+    protocols: [tcp]
+
+    hls: yes
+    hlsAddress: :8888
+    hlsAllowOrigin: "*"
+    hlsAlwaysRemux: yes
+    hlsVariant: fmp4
+    hlsSegmentCount: 3
+    hlsSegmentDuration: 1s
+    hlsPartDuration: 200ms
+
+    webrtc: yes
+    webrtcAddress: :8889
+    webrtcAllowOrigin: "*"
+    webrtcLocalUDPAddress: :8189
+    webrtcICEServers2: []
+
+    pathDefaults:
+      source: publisher
+      overridePublisher: yes
+
+    paths:
+      all_others:
+  entrypoint.sh: |
+    #!/usr/bin/env bash
+    # OTT Video Streaming Server entrypoint
+    set -euo pipefail
+
+    OTA_IFACE="${OTA_IFACE:-net1}"
+    METRICS_IFACE="${METRICS_IFACE:-}"
+    IFACE_TIMEOUT="${IFACE_TIMEOUT:-10}"
+    CHRONY_MAX_OFFSET_MS="${CHRONY_MAX_OFFSET_MS:-5}"
+    CHRONYC_HOST="${CHRONYC_HOST:-}"
+    MTX_CONF="${MTX_CONF:-/app/server/mediamtx.yml}"
+
+    log() {
+      printf '{"ts":%s,"level":"%s","event":"entrypoint","msg":"%s"}\n' \
+        "$(date +%s)" "$1" "$2"
+    }
+
+    wait_for_iface() {
+      local iface="$1" elapsed=0
+      [ -z "$iface" ] && return 0
+      while ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; do
+        if [ "$elapsed" -ge "$IFACE_TIMEOUT" ]; then
+          log warn "interface ${iface} has no IPv4 after ${IFACE_TIMEOUT}s; continuing"
+          return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+      done
+      log info "interface ${iface} ready"
+    }
+
+    check_chrony() {
+      local args=(tracking)
+      [ -n "$CHRONYC_HOST" ] && args=(-h "$CHRONYC_HOST" tracking)
+      if ! command -v chronyc >/dev/null 2>&1; then
+        log warn "chronyc not installed; clock offset unchecked"
+        return 0
+      fi
+      local offset
+      offset="$(chronyc "${args[@]}" 2>/dev/null | awk '/Last offset/ {print $4}' || true)"
+      if [ -z "$offset" ]; then
+        log warn "chrony not reachable; ensure host is NTP-synced"
+        return 0
+      fi
+      local abs_ms
+      abs_ms="$(awk -v o="$offset" 'BEGIN{o=(o<0?-o:o); printf "%.3f", o*1000}')"
+      if awk -v a="$abs_ms" -v m="$CHRONY_MAX_OFFSET_MS" 'BEGIN{exit !(a>m)}'; then
+        log warn "clock offset ${abs_ms}ms exceeds ${CHRONY_MAX_OFFSET_MS}ms; delay accuracy degraded"
+      else
+        log info "clock offset ${abs_ms}ms within budget"
+      fi
+    }
+
+    log info "entrypoint start (ott-server + mediamtx + api)"
+    wait_for_iface "$OTA_IFACE"
+    wait_for_iface "$METRICS_IFACE"
+    check_chrony
+
+    # Announce static MAC via gratuitous ARP if net1 exists
+    if ip link show dev net1 >/dev/null 2>&1; then
+      NET1_IP=$(ip -4 -o addr show dev net1 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
+      if [ -n "${NET1_IP}" ] && command -v arping >/dev/null 2>&1; then
+        log info "announcing static MAC on net1 (${NET1_IP})"
+        arping -c 3 -U -I net1 "${NET1_IP}" >/dev/null 2>&1 || true
+      fi
+    fi
+
+    if [ -n "${MULTUS_IP:-}" ]; then
+      export MTX_WEBRTCICEHOSTNAT1TO1IPS="${MULTUS_IP}"
+    fi
+
+    START_MEDIAMTX="${START_MEDIAMTX:-false}"
+    MTX_RTSP_URL="${MTX_RTSP_URL:-rtsp://127.0.0.1:8555}"
+
+    if [ "${START_MEDIAMTX}" = "true" ] && command -v mediamtx >/dev/null 2>&1; then
+      log info "starting embedded MediaMTX"
+      mediamtx "${MTX_CONF}" &
+      MTX_PID=$!
+      trap 'kill -TERM ${MTX_PID} 2>/dev/null || true' EXIT
+    fi
+
+    exec python3 -m server.main
+  __init__.py: |
+    # OTT Server package

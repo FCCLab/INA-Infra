@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: application-iot-dashboard
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/name: application-iot
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '4'
+    ina.lab/app-type: iot
+    ina.lab/role: server
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  resourceNames:
+  - application-iot
+  verbs:
+  - get
+  - patch

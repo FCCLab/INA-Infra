@@ -1136,8 +1136,7 @@ html, body { height: 100%; overflow: hidden; }
           </div>
           <div class="row" style="margin-top:10px;">
             ${ctrlBtn}
-            <a class="ue-dash-btn" href="${dash}" target="_blank" rel="noreferrer">Open UE dashboard</a>
-            ${u.console_url ? `<a class="ext-link" href="${u.console_url}" target="_blank" rel="noreferrer">Multus ${u.console_ip}</a>` : ""}
+            <a class="ue-dash-btn" href="${u.console_url || (u.console_ip ? `http://${u.console_ip}/` : `http://10.1.137.200/`)}" target="_blank" rel="noreferrer">Open UE Console (${u.console_ip || "10.1.137.200"})</a>
           </div>
         </div>`;
       }).join("");

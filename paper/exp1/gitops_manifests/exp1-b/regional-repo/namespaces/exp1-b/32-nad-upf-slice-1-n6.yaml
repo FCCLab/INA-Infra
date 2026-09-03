@@ -1,0 +1,17 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: upf-slice-1-n6
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/role: upf_n6
+    ina-infra.nephio.lab/multus-master: "enp7s0"
+
+    ina-infra.nephio.lab/slice: "1"
+
+spec:
+
+  # Bare macvlan: no address. UPF init runs dhclient on this iface (Glass 10.1.137).
+  config: '{"cniVersion": "0.3.1", "name": "upf-slice-1-n6", "plugins": [{"type": "macvlan", "capabilities": {"ips": true}, "master": "enp7s0", "mode": "bridge", "ipam": {}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}, "sysctl": {"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}]}'
+

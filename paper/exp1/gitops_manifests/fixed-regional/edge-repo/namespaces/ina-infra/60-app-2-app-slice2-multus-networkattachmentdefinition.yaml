@@ -1,0 +1,12 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: app-slice2-multus
+  namespace: ina-infra
+  labels:
+    app.kubernetes.io/name: app-slice2-multus
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/role: app
+    ina.lab/slice: '2'
+spec:
+  config: '{"cniVersion": "0.3.1", "name": "app-slice2-multus", "plugins": [{"type": "macvlan", "capabilities": {"ips": true, "mac": true}, "master": "ens12f0", "mode": "bridge", "ipam": {"type": "static", "addresses": [{"address": "10.1.137.212/24", "gateway": "10.1.137.1"}]}}, {"type": "tuning", "capabilities": {"mac": true}, "ipam": {}, "sysctl": {"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}]}'

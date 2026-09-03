@@ -1,0 +1,44 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: application-physical-ai-dashboard
+  namespace: exp1-d
+  labels:
+    app.kubernetes.io/name: application-physical-ai
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '2'
+    ina.lab/app-type: physical_ai
+    ina.lab/role: server
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - create
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  resourceNames:
+  - ina-hf-token
+  verbs:
+  - get
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  verbs:
+  - get
+  - list

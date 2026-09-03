@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: exp1-d
+  labels:
+    app: mysql
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      serviceAccountName: default
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      initContainers:
+      - name: remove-lost-found
+        image: busybox:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 10m
+            memory: 10Mi
+        command: ["rm", "-fr", "/var/lib/mysql/lost+found"]
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+      containers:
+      - name: mysql
+        image: docker.io/mysql:5.7
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql
+              key: mysql-root-password
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql
+              key: mysql-password
+        - name: MYSQL_USER
+          value: test
+        - name: MYSQL_DATABASE
+          value: oai_db
+        ports:
+        - name: mysql
+          containerPort: 3306
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"]
+          initialDelaySeconds: 50
+          periodSeconds: 15
+          timeoutSeconds: 10
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"]
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        - name: migrations
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: migrations
+        configMap:
+          name: mysql-initialization
+      - name: data
+        persistentVolumeClaim:
+          claimName: mysql

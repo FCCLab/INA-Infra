@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: application-physical-ai
+  namespace: exp1-d
+  labels: &id001
+    app.kubernetes.io/name: application-physical-ai
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '2'
+    ina.lab/app-type: physical_ai
+    ina.lab/role: server
+spec:
+  type: ClusterIP
+  selector: *id001
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  - name: dashboard
+    port: 80
+    targetPort: 80
+  - name: metrics
+    port: 8002
+    targetPort: 8002

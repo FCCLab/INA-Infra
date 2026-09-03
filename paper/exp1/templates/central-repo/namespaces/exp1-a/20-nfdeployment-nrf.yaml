@@ -1,0 +1,21 @@
+apiVersion: workload.nephio.org/v1alpha1
+kind: NFDeployment
+metadata:
+  name: nrf-core
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: dedicated-core
+spec:
+  provider: nrf.openairinterface.org
+  # Multus Nnrf for cross-site UPFs (SBI still binds eth0 for in-cluster ClusterIP;
+  # nrf controller utils proxy Multus:80 → eth0:80).
+  interfaces:
+  - name: nnrf
+    ipv4:
+      address: 10.1.140.11/24
+      gateway: 10.1.140.1
+  networkInstances:
+  - name: vpc-sbi
+    interfaces:
+    - nnrf

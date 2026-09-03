@@ -1,0 +1,5 @@
+scheme,slice_id,slice_name,app_type,placed_tier,sample_count,sla_threshold_ms,mean_latency_ms,std_jitter_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,p99_9_latency_ms,min_latency_ms,max_latency_ms,sla_satisfaction_pct,compute_cost,gpu_cost,transport_cost,total_slice_opex
+Scheme A (Proposed PL),1,CCTV Video Analytics,cctv,regional,20,20.0,146.29,16.65,147.6,173.89,179.37,180.6,116.25,180.74,0.0,6.48,1.5,2.0,9.98
+Scheme A (Proposed PL),2,Physical-AI Teleoperation,physical_ai,edge,22,10.0,76.54,7.93,75.37,89.44,91.23,91.65,61.55,91.7,0.0,14.4,5.0,0.0,19.4
+Scheme A (Proposed PL),3,OTT 4K Video Streaming,ott,central,21,50.0,130.1,30.67,119.74,163.13,233.84,249.75,105.16,251.52,0.0,2.4,0.0,3.0,5.4
+Scheme A (Proposed PL),4,IoT Telemetry Ingestion,iot,central,18,100.0,229.66,19.52,227.79,263.3,282.64,286.99,193.59,287.48,0.0,1.2,0.0,0.5,1.7

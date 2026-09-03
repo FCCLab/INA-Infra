@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-slice-4-ips
+  namespace: exp1-d
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    ina-infra.nephio.lab/slice: "4"
+data:
+  slice_id: "4"
+  n: "4"
+  upf_n3: "10.1.140.24"
+  upf_n4: "10.1.140.44"
+  upf_n6: "dhcp:10.1.137.0/24"
+  cuup_e1: "10.1.140.84"
+  cuup_f1u: "10.1.140.104"
+  cuup_n3: "10.1.140.124"
+  ue_rf: "10.1.140.144"
+  dnn_cidr: "10.140.4.0/24"
+  site_cu: "Central"
+  site_upf: "Central"
+  site_app: "Central"
+  cluster_cu: "central"
+  cluster_upf: "central"
+  peers: |
+    CU-UP E1 -> CU-CP E1 10.1.140.202
+    CU-UP N3 -> UPF N3 10.1.140.24
+    UPF N4 -> SMF N4 10.1.140.12
+    UPF N6 -> DHCP on Multus (Glass 10.1.137.0/24, gw 10.1.137.1)
+    UE RF -> DU RF 10.1.140.204:4043

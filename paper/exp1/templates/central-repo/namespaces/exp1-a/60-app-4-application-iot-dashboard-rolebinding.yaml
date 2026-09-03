@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: application-iot-dashboard
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: application-iot
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '4'
+    ina.lab/app-type: iot
+    ina.lab/role: server
+subjects:
+- kind: ServiceAccount
+  name: application-iot
+  namespace: exp1-a
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: application-iot-dashboard

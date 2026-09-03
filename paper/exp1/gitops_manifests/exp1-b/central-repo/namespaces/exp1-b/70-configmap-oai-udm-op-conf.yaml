@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-udm-op-conf
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  udm.yaml: "ports: \n  - name: 'http'\n    port: 80\n    protocol: TCP\nnfInterfaces:\n\
+    \  sbi: 'eth0'\ncompute:\n  req:\n    cpu: '100m'\n    memory: '256Mi'\n  limits:\n\
+    \    cpu: '100m'\n    memory: '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-udm:v2.2.1'\n\
+    fqdn:\n  nrf: 'oai-nrf'\n  udr: oai-udr\n"

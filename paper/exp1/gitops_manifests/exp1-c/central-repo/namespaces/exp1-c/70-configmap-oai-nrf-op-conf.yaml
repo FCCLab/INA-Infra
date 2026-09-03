@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-nrf-op-conf
+  namespace: exp1-c
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  nrf.yaml: "nad:\n  parent: 'enp7s0'\n  create: False\nnfInterfaces:\n  sbi: 'eth0'\n\
+    ports:\n  - name: 'http'\n    port: 80\n    protocol: TCP\ncompute:\n  req:\n\
+    \    cpu: '100m'\n    memory: '256Mi'\n  limits:\n    cpu: '100m'\n    memory:\
+    \ '256Mi'\nlogLevel: info\nimage: 'docker.io/oaisoftwarealliance/oai-nrf:v2.2.1'\n"

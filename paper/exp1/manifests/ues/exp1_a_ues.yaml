@@ -1,0 +1,780 @@
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue1-sim-rf
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oai-ue-1-sa
+  namespace: exp1-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-1-configmap
+  namespace: exp1-a
+data:
+  ue.conf: |
+    uicc0 = {
+      imsi = "001010000000101";
+      key = "fec86ba6eb707ed08905757b1bb44b8f";
+      opc = "C42449363BBAD02B66D16BC975D77CC1";
+      dnn = "oai1";
+      nssai_sst = 1;
+      nssai_sd = 0x000001;
+    }
+    thread-pool = "-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1"
+    rfsimulator = {
+      serveraddr = "10.1.140.204";
+    }
+    log_config = {
+      global_log_options = "level,nocolor,time";
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-ue-slice-1-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-1
+    slice: "1"
+spec:
+  selector:
+    app.kubernetes.io/name: oai-ue-1
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: backend
+    port: 8090
+    targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ue-slice-1-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-1
+    app.kubernetes.io/part-of: exp1-a
+    slice: "1"
+    ina.lab/role: ue-client
+    ina.lab/slice: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ue-1
+  template:
+    metadata:
+      labels:
+        app: oai-ue-1
+        app.kubernetes.io/name: oai-ue-1
+        slice: "1"
+        ina.lab/role: ue-client
+        ina.lab/slice: "1"
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue1-sim-rf", "interface": "rf", "ips": ["10.1.140.141/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-ue-1-sa
+      terminationGracePeriodSeconds: 2
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      containers:
+      - name: ue
+        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+        - name: TZ
+          value: Europe/Paris
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
+          subPath: ue.conf
+      - name: app-client
+        image: 10.1.132.30:5000/cctv-ue-console:nws-v0.1-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: SLICE_ID
+          value: "1"
+        - name: CLIENT_INDEX
+          value: "1"
+        - name: UE_NAME
+          value: "oai-ue-1"
+
+        - name: CONSOLE_ROLE
+          value: "backend"
+        - name: RTSP_TARGET_HOST
+          value: "10.1.137.211"
+        - name: TARGET_SERVER_IP
+          value: "10.1.137.211"
+        - name: RTSP_PORT
+          value: "8554"
+        - name: HTTP_PORT
+          value: "80"
+        - name: PDU_IFACE
+          value: "oaitun_ue1"
+        - name: PDU_ROUTE_HOSTS
+          value: "10.1.137.211"
+        - name: PDU_WAIT_TIMEOUT
+          value: "300"
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+      - name: traffic-tester
+        image: docker.io/nicolaka/netshoot:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - sleep
+        - infinity
+        env:
+        - name: SERVER_URL
+          value: "http://10.1.137.211:80"
+        - name: SLICE_ID
+          value: "1"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-ue-1-configmap
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: chromium-config
+        emptyDir: {}
+
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue2-sim-rf
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oai-ue-2-sa
+  namespace: exp1-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-2-configmap
+  namespace: exp1-a
+data:
+  ue.conf: |
+    uicc0 = {
+      imsi = "001010000000102";
+      key = "fec86ba6eb707ed08905757b1bb44b8f";
+      opc = "C42449363BBAD02B66D16BC975D77CC1";
+      dnn = "oai2";
+      nssai_sst = 1;
+      nssai_sd = 0x000002;
+    }
+    thread-pool = "-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1"
+    rfsimulator = {
+      serveraddr = "10.1.140.204";
+    }
+    log_config = {
+      global_log_options = "level,nocolor,time";
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-ue-slice-2-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-2
+    slice: "2"
+spec:
+  selector:
+    app.kubernetes.io/name: oai-ue-2
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: backend
+    port: 8090
+    targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ue-slice-2-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-2
+    app.kubernetes.io/part-of: exp1-a
+    slice: "2"
+    ina.lab/role: ue-client
+    ina.lab/slice: "2"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ue-2
+  template:
+    metadata:
+      labels:
+        app: oai-ue-2
+        app.kubernetes.io/name: oai-ue-2
+        slice: "2"
+        ina.lab/role: ue-client
+        ina.lab/slice: "2"
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue2-sim-rf", "interface": "rf", "ips": ["10.1.140.142/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-ue-2-sa
+      terminationGracePeriodSeconds: 2
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      containers:
+      - name: ue
+        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+        - name: TZ
+          value: Europe/Paris
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
+          subPath: ue.conf
+      - name: app-client
+        image: 10.1.132.30:5000/cosmo3-ue-console:nws-v0.18-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: SLICE_ID
+          value: "2"
+        - name: CLIENT_INDEX
+          value: "1"
+        - name: UE_NAME
+          value: "oai-ue-2"
+
+        - name: CONSOLE_ROLE
+          value: "backend"
+        - name: SERVER_URL
+          value: "http://10.1.137.212:80"
+        - name: TARGET_SERVER_IP
+          value: "10.1.137.212"
+        - name: PDU_IFACE
+          value: "oaitun_ue1"
+        - name: PDU_ROUTE_HOSTS
+          value: "10.1.137.212"
+        - name: PDU_WAIT_TIMEOUT
+          value: "300"
+        - name: SEND_INTERVAL_S
+          value: "2"
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+      - name: traffic-tester
+        image: docker.io/nicolaka/netshoot:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - sleep
+        - infinity
+        env:
+        - name: SERVER_URL
+          value: "http://10.1.137.212:80"
+        - name: SLICE_ID
+          value: "2"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: app-frontend
+        image: 10.1.132.30:5000/cosmo3-ue-console:nws-v0.18-amd64
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CONSOLE_ROLE
+          value: "frontend"
+        - name: FRONTEND_PORT
+          value: "80"
+        - name: BACKEND_URL
+          value: "http://127.0.0.1:8090"
+        - name: UE_NAME
+          value: "oai-ue-2"
+        ports:
+        - name: console
+          containerPort: 80
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-ue-2-configmap
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: chromium-config
+        emptyDir: {}
+
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue3-sim-rf
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oai-ue-3-sa
+  namespace: exp1-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-3-configmap
+  namespace: exp1-a
+data:
+  ue.conf: |
+    uicc0 = {
+      imsi = "001010000000103";
+      key = "fec86ba6eb707ed08905757b1bb44b8f";
+      opc = "C42449363BBAD02B66D16BC975D77CC1";
+      dnn = "oai3";
+      nssai_sst = 1;
+      nssai_sd = 0x000003;
+    }
+    thread-pool = "-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1"
+    rfsimulator = {
+      serveraddr = "10.1.140.204";
+    }
+    log_config = {
+      global_log_options = "level,nocolor,time";
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-ue-slice-3-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-3
+    slice: "3"
+spec:
+  selector:
+    app.kubernetes.io/name: oai-ue-3
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: backend
+    port: 8090
+    targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ue-slice-3-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-3
+    app.kubernetes.io/part-of: exp1-a
+    slice: "3"
+    ina.lab/role: ue-client
+    ina.lab/slice: "3"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ue-3
+  template:
+    metadata:
+      labels:
+        app: oai-ue-3
+        app.kubernetes.io/name: oai-ue-3
+        slice: "3"
+        ina.lab/role: ue-client
+        ina.lab/slice: "3"
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue3-sim-rf", "interface": "rf", "ips": ["10.1.140.143/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-ue-3-sa
+      terminationGracePeriodSeconds: 2
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      containers:
+      - name: ue
+        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+        - name: TZ
+          value: Europe/Paris
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
+          subPath: ue.conf
+      - name: app-client
+        image: 10.1.132.30:5000/ott-ue-console:nws-v0.33-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: SLICE_ID
+          value: "3"
+        - name: CLIENT_INDEX
+          value: "1"
+        - name: UE_NAME
+          value: "oai-ue-3"
+
+        - name: CONSOLE_ROLE
+          value: "backend"
+        - name: TARGET_SERVER_IP
+          value: "10.1.137.213"
+        - name: SERVER_URL
+          value: "http://10.1.137.213:80"
+        - name: PDU_IFACE
+          value: "oaitun_ue1"
+        - name: PDU_ROUTE_HOSTS
+          value: "10.1.137.213"
+        - name: PDU_WAIT_TIMEOUT
+          value: "300"
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+      - name: traffic-tester
+        image: docker.io/nicolaka/netshoot:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - sleep
+        - infinity
+        env:
+        - name: SERVER_URL
+          value: "http://10.1.137.213:80"
+        - name: SLICE_ID
+          value: "3"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      - name: chromium
+        image: 10.1.132.30:5000/linuxserver-chromium:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          seccompProfile:
+            type: Unconfined
+        env:
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: TZ
+          value: "UTC"
+        - name: TITLE
+          value: "OTT UE oai-ue-3"
+        - name: DISABLE_IPV6
+          value: "true"
+        - name: PIXELFLUX_WAYLAND
+          value: "false"
+        - name: CHROME_CLI
+          value: "--proxy-server=socks5://127.0.0.1:1080 --remote-debugging-port=9222 --remote-allow-origins=* --no-first-run --no-default-browser-check --disable-features=TranslateUI --autoplay-policy=no-user-gesture-required --disable-gpu https://www.youtube.com"
+        - name: CUSTOM_PORT
+          value: "3000"
+        - name: CUSTOM_HTTPS_PORT
+          value: "3001"
+        - name: SUBFOLDER
+          value: "/chrome/"
+        ports:
+        - name: chrome-http
+          containerPort: 3000
+        - name: cdp
+          containerPort: 9222
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: chromium-config
+          mountPath: /config
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-ue-3-configmap
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: chromium-config
+        emptyDir: {}
+
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue4-sim-rf
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oai-ue-4-sa
+  namespace: exp1-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-ue-4-configmap
+  namespace: exp1-a
+data:
+  ue.conf: |
+    uicc0 = {
+      imsi = "001010000000104";
+      key = "fec86ba6eb707ed08905757b1bb44b8f";
+      opc = "C42449363BBAD02B66D16BC975D77CC1";
+      dnn = "oai4";
+      nssai_sst = 1;
+      nssai_sd = 0x000004;
+    }
+    thread-pool = "-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1"
+    rfsimulator = {
+      serveraddr = "10.1.140.204";
+    }
+    log_config = {
+      global_log_options = "level,nocolor,time";
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-ue-slice-4-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-4
+    slice: "4"
+spec:
+  selector:
+    app.kubernetes.io/name: oai-ue-4
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: backend
+    port: 8090
+    targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-ue-slice-4-client-1
+  namespace: exp1-a
+  labels:
+    app.kubernetes.io/name: oai-ue-4
+    app.kubernetes.io/part-of: exp1-a
+    slice: "4"
+    ina.lab/role: ue-client
+    ina.lab/slice: "4"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oai-ue-4
+  template:
+    metadata:
+      labels:
+        app: oai-ue-4
+        app.kubernetes.io/name: oai-ue-4
+        slice: "4"
+        ina.lab/role: ue-client
+        ina.lab/slice: "4"
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue4-sim-rf", "interface": "rf", "ips": ["10.1.140.144/24"], "gateways": ["10.1.140.3"]}]'
+    spec:
+      serviceAccountName: oai-ue-4-sa
+      terminationGracePeriodSeconds: 2
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/hostname: usrp
+      containers:
+      - name: ue
+        image: 10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        env:
+        - name: USE_ADDITIONAL_OPTIONS
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+        - name: TZ
+          value: Europe/Paris
+        volumeMounts:
+        - name: configuration
+          mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
+          subPath: ue.conf
+      - name: app-client
+        image: 10.1.132.30:5000/iot-ue-console:nws-v0.10-amd64
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: SLICE_ID
+          value: "4"
+        - name: CLIENT_INDEX
+          value: "1"
+        - name: UE_NAME
+          value: "oai-ue-4"
+
+        - name: CONSOLE_ROLE
+          value: "backend"
+        - name: BROKER_HOST
+          value: "10.1.137.214"
+        - name: TARGET_SERVER_IP
+          value: "10.1.137.214"
+        - name: BROKER_PORT
+          value: "1883"
+        - name: PDU_IFACE
+          value: "oaitun_ue1"
+        - name: PDU_ROUTE_HOSTS
+          value: "10.1.137.214"
+        - name: PDU_WAIT_TIMEOUT
+          value: "300"
+        - name: LATENCY_PROBE_PERIOD_S
+          value: "1.0"
+        
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+      - name: traffic-tester
+        image: docker.io/nicolaka/netshoot:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - sleep
+        - infinity
+        env:
+        - name: SERVER_URL
+          value: "http://10.1.137.214:80"
+        - name: SLICE_ID
+          value: "4"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: configuration
+        configMap:
+          name: oai-ue-4-configmap
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: chromium-config
+        emptyDir: {}

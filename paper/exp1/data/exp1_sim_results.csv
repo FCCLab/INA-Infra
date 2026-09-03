@@ -1,0 +1,33 @@
+scheme,sla_target_pct,sla_satisfaction_pct,total_opex,avg_e2e_delay_ms
+Full Algorithm (Proposed PL),95.0,100.0,68.35,19.29
+Fixed Edge,95.0,100.0,79.0,4.62
+Fixed Regional,95.0,75.0,58.0,13.92
+Fixed Central,95.0,50.0,48.7,34.42
+Full Algorithm (Proposed PL),96.0,100.0,69.0,16.73
+Fixed Edge,96.0,100.0,79.0,4.62
+Fixed Regional,96.0,75.0,58.0,13.92
+Fixed Central,96.0,50.0,48.7,34.42
+Full Algorithm (Proposed PL),97.0,100.0,69.0,16.73
+Fixed Edge,97.0,100.0,79.0,4.62
+Fixed Regional,97.0,75.0,58.0,13.92
+Fixed Central,97.0,50.0,48.7,34.42
+Full Algorithm (Proposed PL),98.0,100.0,69.0,16.73
+Fixed Edge,98.0,100.0,79.0,4.62
+Fixed Regional,98.0,75.0,58.0,13.92
+Fixed Central,98.0,50.0,48.7,34.42
+Full Algorithm (Proposed PL),99.0,100.0,69.0,16.73
+Fixed Edge,99.0,100.0,79.0,4.62
+Fixed Regional,99.0,75.0,58.0,13.92
+Fixed Central,99.0,50.0,48.7,34.42
+Full Algorithm (Proposed PL),99.5,100.0,69.0,16.73
+Fixed Edge,99.5,100.0,79.0,4.62
+Fixed Regional,99.5,75.0,58.0,13.92
+Fixed Central,99.5,50.0,48.7,34.42
+Full Algorithm (Proposed PL),99.9,100.0,69.0,16.73
+Fixed Edge,99.9,100.0,79.0,4.62
+Fixed Regional,99.9,75.0,58.0,13.92
+Fixed Central,99.9,50.0,48.7,34.42
+Full Algorithm (Proposed PL),99.99,100.0,69.0,16.73
+Fixed Edge,99.99,100.0,79.0,4.62
+Fixed Regional,99.99,75.0,58.0,13.92
+Fixed Central,99.99,50.0,48.7,34.42

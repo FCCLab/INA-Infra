@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: application-physical-ai-dashboard
+  namespace: exp1-d
+  labels:
+    app.kubernetes.io/name: application-physical-ai
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '2'
+    ina.lab/app-type: physical_ai
+    ina.lab/role: server
+subjects:
+- kind: ServiceAccount
+  name: application-physical-ai
+  namespace: exp1-d
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: application-physical-ai-dashboard

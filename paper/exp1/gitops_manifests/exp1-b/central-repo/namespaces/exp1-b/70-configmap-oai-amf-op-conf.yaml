@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oai-amf-op-conf
+  namespace: exp1-b
+  labels:
+    app.kubernetes.io/part-of: ina-infra
+    app.kubernetes.io/component: oai-controller
+data:
+  amf.yaml: "nad: \n  parent: 'enp7s0'\n  create: False\n# these ports are here for\
+    \ creating the kube-svc should be same for the nf\nnfInterfaces:\n  n2: 'n2'\n\
+    \  sbi: 'eth0'\nports:\n  - name: 'n2'\n    port: 38412\n    protocol: SCTP\n\
+    \  - name: 'http'\n    port: 80\n    protocol: TCP\ncompute:\n  req:\n    cpu:\
+    \ '100m'\n    memory: '512Mi'\n  limits:\n    cpu: '100m'\n    memory: '512Mi'\n\
+    logLevel: debug\nimage: 'docker.io/oaisoftwarealliance/oai-amf:v2.2.1'\nfqdn:\n\
+    \  smf: 'oai-smf'\n  ausf: 'oai-ausf'\n  nrf: 'oai-nrf'\n  udm: 'oai-udm'\n"

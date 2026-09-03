@@ -1,0 +1,243 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: application-physical-ai
+  namespace: exp1-d
+  labels: &id001
+    app.kubernetes.io/name: application-physical-ai
+    app.kubernetes.io/part-of: ina-infra
+    ina.lab/slice: '2'
+    ina.lab/app-type: physical_ai
+    ina.lab/role: server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: *id001
+  template:
+    metadata:
+      labels: *id001
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "app-slice2-multus", "interface": "net1", "ips": ["10.1.137.212/24"], "gateways": ["10.1.137.1"], "mac": "02:0a:89:a0:00:12"}]'
+    spec:
+      initContainers:
+      - name: multus-default-route
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+        command:
+        - bash
+        - -c
+        - "set -euo pipefail\nIFACE=\"net1\"\nIP=\"10.1.137.212\"\nGW=\"10.1.137.1\"\nfor _ in $(seq 1 40); do\n  ip link show \"$IFACE\" >/dev/null 2>&1 && break\n  sleep 1\ndone\nip link show \"$IFACE\"\n# On-link site subnet in main + table 137. Table 137 must include the /24 or\n# replies to UPF N6 (SNAT 10.1.137.x) go via the site GW and TCP times out.\nip route replace 10.1.137.0/24 dev \"$IFACE\" || true\nip route replace 10.1.137.0/24 dev \"$IFACE\" table 137 || true\nip route replace 10.140.0.0/16 via 10.1.137.192 dev \"$IFACE\" || true\nip route replace 10.140.0.0/16 via 10.1.137.192 dev \"$IFACE\" table 137 || true\nip route replace default via \"$GW\" dev \"$IFACE\" table 137 || true\nip rule del from \"$IP\"/32 table 137 2>/dev/null || true\nip rule add from \"$IP\"/32 table 137 priority 100\nip route show\nip route show table 137\nip rule show\niptables -t nat -C PREROUTING -i net1 -p tcp --dport 8000 -j REDIRECT --to-port 18080 2>/dev/null || iptables -t nat -A PREROUTING -i net1 -p tcp --dport 8000 -j REDIRECT --to-port 18080 || true\niptables -t nat -L PREROUTING -n || true\n"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+      serviceAccountName: application-physical-ai
+      automountServiceAccountToken: true
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        ina-infra.nephio.lab/multus-master: ens12f0
+        kubernetes.io/hostname: gpu-a40
+      runtimeClassName: nvidia
+      volumes:
+      - name: hf-token-vol
+        secret:
+          secretName: ina-hf-token
+          optional: true
+      - name: dashboard-code
+        configMap:
+          name: physical-ai-dashboard-code
+          defaultMode: 420
+      - name: dashboard-static
+        emptyDir: {}
+      containers:
+      - name: application-backend
+        image: 10.1.132.30:5000/cosmo3-vllm:nws-v0.7-amd64
+        imagePullPolicy: Always
+        command:
+        - /bin/bash
+        - -c
+        - "TOKEN_FILE=/var/run/secrets/hf-token/token\necho \"[vllm-wrapper] Waiting for HF token at ${TOKEN_FILE}...\"\nwhile true; do\n  if [ -f \"${TOKEN_FILE}\" ] && [ -s \"${TOKEN_FILE}\" ]; then\n    echo \"[vllm-wrapper] Token found, starting vLLM.\"\n    break\n  fi\n  echo \"[vllm-wrapper] Token not ready, retrying in 10s. Enter via console at :80\"\n  sleep 10\ndone\nexport HF_TOKEN=$(cat \"${TOKEN_FILE}\")\nexport HUGGING_FACE_HUB_TOKEN=\"${HF_TOKEN}\"\nexec /app/entrypoint-vllm.sh\n"
+        env:
+        - name: MULTUS_IP
+          value: 10.1.137.212
+        - name: MULTUS_SUBNET
+          value: 10.1.137.0/24
+        - name: MULTUS_GATEWAY
+          value: 10.1.137.1
+        - name: INFLUXDB_URL
+          value: http://10.1.137.104:8086
+        - name: INFLUXDB_TOKEN
+          value: ina-infra-influxdb-token
+        - name: INFLUXDB_ORG
+          value: ina-infra
+        - name: INFLUXDB_BUCKET
+          value: default
+        - name: INFLUXDB_MEASUREMENT
+          value: application_metrics
+        - name: INFLUX_URL
+          value: http://10.1.137.104:8086
+        - name: INFLUX_TOKEN
+          value: ina-infra-influxdb-token
+        - name: INFLUX_ORG
+          value: ina-infra
+        - name: INFLUX_BUCKET
+          value: default
+        - name: INFLUX_MEASUREMENT
+          value: application_metrics
+        - name: SLICE_ID
+          value: '2'
+        - name: PROFILE_NAME
+          value: ina-infra
+        - name: APP_TYPE
+          value: physical_ai
+        - name: TARGET_CLUSTER
+          value: edge
+        - name: APP_NAME
+          value: application-physical-ai
+        - name: MODEL_NAME
+          value: nvidia/Cosmos3-Nano
+        - name: MODEL
+          value: nvidia/Cosmos3-Nano
+        - name: PORT
+          value: '8000'
+        - name: HOST_PORT
+          value: '8000'
+        - name: MAX_MODEL_LEN
+          value: '4096'
+        - name: GPU_MEMORY_UTILIZATION
+          value: '0.75'
+        - name: METRICS_PORT
+          value: '8002'
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ina-hf-token
+              key: token
+              optional: true
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ina-hf-token
+              key: token
+              optional: true
+        volumeMounts:
+        - name: hf-token-vol
+          mountPath: /var/run/secrets/hf-token
+          readOnly: true
+        ports:
+        - name: http
+          containerPort: 8000
+        - name: metrics
+          containerPort: 8002
+        resources:
+          requests:
+            cpu: '2'
+            memory: 8Gi
+            nvidia.com/gpu: '1'
+          limits:
+            cpu: '16'
+            memory: 32Gi
+            nvidia.com/gpu: '1'
+      - name: application-console
+        image: 10.1.132.30:5000/cosmo3-dashboard:nws-v0.11-amd64
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - app:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '80'
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MODEL_NAME
+          value: nvidia/Cosmos3-Nano
+        - name: VLLM_URL
+          value: http://127.0.0.1:8000
+        - name: LATENCY_PROXY_PORT
+          value: '18080'
+        - name: HF_SECRET_NAME
+          value: ina-hf-token
+        - name: HF_DEPLOY_NAME
+          value: application-physical-ai
+        - name: DASHBOARD_STATIC
+          value: /app/static
+        - name: SLICE_ID
+          value: '2'
+        - name: DASHBOARD_PORT
+          value: '80'
+        - name: UE_CONSOLE_PORT
+          value: '80'
+        volumeMounts:
+        - name: dashboard-code
+          mountPath: /app/app.py
+          subPath: app.py
+        - name: dashboard-code
+          mountPath: /app/static/index.html
+          subPath: index.html
+        ports:
+        - name: dashboard
+          containerPort: 80
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      - name: metrics-exporter
+        image: docker.io/nicolaka/netshoot
+        imagePullPolicy: Always
+        command:
+        - python3
+        - -c
+        - "import os, time, re, urllib.request, math, subprocess\nport = os.environ.get('METRICS_PORT', '9102')\nurl = os.environ.get('INFLUXDB_URL', 'http://influxdb.influxdb.svc:8086').rstrip('/')\ntok = os.environ.get('INFLUXDB_TOKEN', 'ina-infra-influxdb-token')\norg = os.environ.get('INFLUXDB_ORG', 'ina-infra')\nbuc = os.environ.get('INFLUXDB_BUCKET', 'default')\nmeas = os.environ.get('INFLUXDB_MEASUREMENT', 'application_metrics')\nsid = os.environ.get('SLICE_ID', '1')\nprof = os.environ.get('PROFILE_NAME', 'ina-infra')\ntyp = os.environ.get('APP_TYPE', 'unknown')\nname = os.environ.get('APP_NAME', 'app')\nclu = os.environ.get('TARGET_CLUSTER', 'edge')\nw_url = f'{url}/api/v2/write?org={org}&bucket={buc}&precision=ns'\nheaders = {'Authorization': f'Token {tok}', 'Content-Type': 'text/plain; charset=utf-8'}\nlast_ue_lat = {}\ndef _parse_offset_to_ms(text):\n  m = re.search(r'Offset:\\s*([+-]?[0-9.]+)\\s*(ns|us|µs|ms|s)\\b', text or '')\n  if not m: return None\n  v, u = float(m.group(1)), m.group(2)\n  mul = {'ns': 1e-6, 'us': 1e-3, 'µs': 1e-3, 'ms': 1.0, 's': 1000.0}[u]\n  return round(abs(v) * mul, 3)\ndef ntp_offset_ms():\n  try:\n    p = subprocess.run(['chronyc','tracking'], capture_output=True, text=True, timeout=2)\n    if p.returncode == 0:\n      for line in p.stdout.splitlines():\n        if line.strip().startswith('Last offset'):\n          sec = float(line.split(':',1)[1].strip().split()[0])\n          return round(abs(sec)*1000.0, 3)\n  except Exception:\n    pass\n  try:\n    p = subprocess.run(['nsenter','-t','1','-m','--','timedatectl','timesync-status'], capture_output=True, text=True, timeout=3)\n    ms = _parse_offset_to_ms(p.stdout)\n    if ms is not None: return ms\n  except Exception:\n    pass\n  try:\n    import ctypes, ctypes.util\n    class T(ctypes.Structure):\n      _fields_=[('modes',ctypes.c_uint),('offset',ctypes.c_long),('freq',ctypes.c_long),('maxerror',ctypes.c_long),('esterror',ctypes.c_long),('status',ctypes.c_int),('constant',ctypes.c_long),('precision',ctypes.c_long),('tolerance',ctypes.c_long),('time_tv_sec',ctypes.c_long),('time_tv_usec',ctypes.c_long),('tick',ctypes.c_long),('ppsfreq',ctypes.c_long),('jitter',ctypes.c_long),('shift',ctypes.c_int),('stabil',ctypes.c_long),('jitcnt',ctypes.c_long),('calcnt',ctypes.c_long),('errcnt',ctypes.c_long),('stbcnt',ctypes.c_long),('tai',ctypes.c_int),('_pad',ctypes.c_int*11)]\n    libc=ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)\n    tx=T()\n    if libc.adjtimex(ctypes.byref(tx))<0: return None\n    sec = (tx.offset/1e9) if (tx.status & 0x2000) else (tx.offset/1e6)\n    return round(abs(sec)*1000.0, 3)\n  except Exception:\n    return None\nprint(f'[metrics-exporter] Started pushing metrics for {name} to InfluxDB ({w_url})', flush=True)\nwhile True:\n  try:\n    fields = {}\n    is_client = ('client' in name)\n    koff = ntp_offset_ms()\n    if koff is not None:\n      if is_client:\n        fields['clock_offset_ue'] = koff\n      else:\n        fields['clock_offset_server'] = koff\n    per_client = {}\n    extra_url = os.environ.get('APP_METRICS_URL', '').strip()\n    scrape_urls = [extra_url] if extra_url else [f'http://127.0.0.1:{port}/metrics']\n    try:\n      txt = ''\n      for su in scrape_urls:\n        try:\n          req = urllib.request.Request(su)\n          with urllib.request.urlopen(req, timeout=3) as resp:\n            txt += resp.read().decode('utf-8', errors='replace') + '\\n'\n        except Exception as se:\n          print(f'[metrics-exporter] scrape {su}: {se}', flush=True)\n      for line in txt.splitlines():\n        line = line.strip()\n        if not line or line.startswith('#'): continue\n        m = re.match(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\\{([^}]*)\\})?\\s+([+-]?(?:[0-9]*[.])?[0-9]+(?:[eE][+-]?[0-9]+)?)$', line)\n        if m:\n          k, lbls, v_str = m.groups()\n          try:\n            v = float(v_str)\n            if math.isnan(v) or math.isinf(v): continue\n            if k in ('app_ue_rtt_ms', 'rtt_ms', 'throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client'):\n              continue\n            ue_id = None\n            if lbls:\n              um = re.search(r'(?:ue_id|client)=\"([^\"]+)\"', lbls)\n              if um: ue_id = um.group(1)\n            if ue_id:\n              slot = per_client.setdefault(ue_id, {})\n              if k in ('app_ue_latency_ms', 'cctv_client_e2e_delay_ms'):\n                if v != 0 and last_ue_lat.get(ue_id) != v:\n                  last_ue_lat[ue_id] = v\n                  slot['latency_ms'] = v\n              elif k == 'cctv_client_net_delay_ms':\n                slot['net_delay_ms'] = v\n                if 'latency_ms' not in slot and v != 0 and last_ue_lat.get(ue_id) != v:\n                  last_ue_lat[ue_id] = v\n                  slot['latency_ms'] = v\n              elif k in ('app_ue_throughput_mbps', 'app_ue_throughput_dl_mbps'):\n                slot['app_throughput_mbps'] = v\n              elif k == 'app_ue_throughput_ul_mbps':\n                slot['app_throughput_ul_mbps'] = v\n              short_k = k.replace('cctv_client_', '').replace('cctv_', '')\n              if short_k == 'ingress_fps': short_k = 'application_ingress_fps'\n              if short_k == 'egress_fps': short_k = 'application_egress_fps'\n              slot[short_k] = v\n            if k == 'app_latency_ms':\n              continue\n            if k == 'app_throughput_mbps':\n              fields['app_throughput_mbps'] = v\n            if lbls:\n              lbl_clean = re.sub(r'[^a-zA-Z0-9_]', '_', lbls)\n              k = f'{k}_{lbl_clean}'\n            k_clean = re.sub(r'[^a-zA-Z0-9_]', '_', k)\n            if k_clean in ('app_ue_rtt_ms', 'rtt_ms', 'throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client'):\n              pass\n            else:\n              fields[k_clean] = v\n          except Exception:\n            pass\n      if fields.get('cctv_ue_clock_offset_seconds'):\n        fields['clock_offset_ue'] = round(fields['cctv_ue_clock_offset_seconds'] * 1000.0, 3)\n      if fields.get('cctv_clock_offset_seconds'):\n        fields['clock_offset_server'] = round(fields['cctv_clock_offset_seconds'] * 1000.0, 3)\n      for fk in list(fields):\n        if fk.startswith('application_clock_offset_ms') and float(fields[fk]):\n          fields['clock_offset_server'] = float(fields[fk])\n        if fk.startswith('application_throughput_bytes_per_sec') and 'throughput_server' not in fields:\n          fields['throughput_server'] = round(float(fields[fk]) * 8.0 / 1e6, 3)\n          if not is_client:\n            fields.setdefault('throughput_mbps', fields['throughput_server'])\n      if fields.get('latency_ms') == 0:\n        fields.pop('latency_ms', None)\n      if is_client:\n        for skip in ('throughput_ul_mbps', 'throughput_dl_mbps', 'throughput_mbps', 'throughput_client', 'app_ue_rtt_ms', 'rtt_ms'):\n          fields.pop(skip, None)\n      if is_client:\n        slot = per_client.setdefault(name, {})\n        for fk in ('latency_ms', 'app_ue_latency_ms'):\n          if fk in fields and fk not in slot:\n            slot[fk] = fields[fk]\n      if (not is_client) and typ == 'cctv':\n        keep = ('throughput_server', 'clock_offset_server', 'throughput_mbps', 'latency_ms', 'app_throughput_mbps', 'app_latency_ms')\n        fields = {k: v for k, v in fields.items() if k in keep or k.startswith('app_')}\n    except Exception as e:\n      print(f'[metrics-exporter] scrape error: {e}', flush=True)\n    lines_to_send = []\n    now_ns = time.time_ns()\n    orig = 'client' if is_client else 'server'\n    if fields:\n      ue_tag = f',ue_id={name}' if is_client else ''\n      tags = f'profile_name={prof},slice_id={sid},app_type={typ},app_name={name},cluster={clu},origin={orig}{ue_tag}'\n      f_str = ','.join(f'{k}={v}' for k, v in sorted(fields.items()) if not k.startswith('_') and isinstance(v, (int, float)))\n      if f_str:\n        lines_to_send.append(f'{meas},{tags} {f_str} {now_ns}')\n    for cl_name, cl_flds in per_client.items():\n      cl_orig = 'client' if is_client else 'server'\n      cl_tags = f'profile_name={prof},slice_id={sid},app_type={typ},app_name={cl_name},ue_id={cl_name},cluster={clu},origin={cl_orig}'\n      cl_f_str = ','.join(f'{k}={v}' for k, v in sorted(cl_flds.items()) if not k.startswith('_') and isinstance(v, (int, float)))\n      if cl_f_str:\n        lines_to_send.append(f'{meas},{cl_tags} {cl_f_str} {now_ns}')\n    if lines_to_send:\n      data = '\\n'.join(lines_to_send) + '\\n'\n      w_req = urllib.request.Request(w_url, data=data.encode('utf-8'), headers=headers, method='POST')\n      with urllib.request.urlopen(w_req, timeout=4) as w_resp:\n        pass\n  except Exception as e:\n    print(f'[metrics-exporter] loop error: {e}', flush=True)\n  time.sleep(1)\n"
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+        env:
+        - name: METRICS_PORT
+          value: '8002'
+        - name: INFLUXDB_URL
+          value: http://influxdb.influxdb.svc:8086
+        - name: INFLUXDB_TOKEN
+          value: ina-infra-influxdb-token
+        - name: INFLUXDB_ORG
+          value: ina-infra
+        - name: INFLUXDB_BUCKET
+          value: default
+        - name: INFLUXDB_MEASUREMENT
+          value: application_metrics
+        - name: SLICE_ID
+          value: '2'
+        - name: PROFILE_NAME
+          value: ina-infra
+        - name: APP_TYPE
+          value: physical_ai
+        - name: APP_NAME
+          value: application-physical-ai
+        - name: TARGET_CLUSTER
+          value: edge
+        - name: APP_METRICS_URL
+          value: http://127.0.0.1:80/metrics
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
