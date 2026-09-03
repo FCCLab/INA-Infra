@@ -135,24 +135,24 @@
     ) != \"Running\":\n            continue\n        ip = (pod.get(\"status\") or\
     \ {}).get(\"podIP\")\n        if ip:\n            return str(ip)\n    return None\n\
     \n\ndef _ue_upstreams(idx: int) -> list[str]:\n    \"\"\"Query UE console via\
-    \ Multus IP and cluster service.\"\"\"\n    ip = _console_ip(idx)\n    svc = f\"\
+    \ cluster service and Multus IP.\"\"\"\n    ip = _console_ip(idx)\n    svc = f\"\
     oai-ue-slice-{SLICE_ID}-client-{idx}\"\n    ns = _ns()\n    return [\n       \
-    \ f\"{ip}:80\",\n        f\"{ip}:8090\",\n        f\"{svc}:8090\",\n        f\"\
-    {svc}:80\",\n        f\"{svc}.{ns}.svc.cluster.local:8090\",\n        f\"{svc}.{ns}.svc.cluster.local:80\"\
-    ,\n    ]\n\n\ndef _ue_http_idx(\n    idx: int,\n    path: str,\n    method: str\
-    \ = \"GET\",\n    body: Optional[dict] = None,\n    timeout: int = 8,\n) -> tuple[int,\
-    \ Any]:\n    data = json.dumps(body).encode() if body is not None else None\n\
-    \    headers = {\"Content-Type\": \"application/json\"} if body is not None else\
-    \ {}\n    last_err = \"unreachable\"\n    path = path if path.startswith(\"/\"\
-    ) else f\"/{path}\"\n    for host in _ue_upstreams(idx):\n        url = f\"http://{host}{path}\"\
-    \n        req = urllib.request.Request(url, data=data, headers=headers, method=method)\n\
-    \        try:\n            with urllib.request.urlopen(req, timeout=timeout) as\
-    \ resp:\n                raw = resp.read().decode() or \"{}\"\n              \
-    \  try:\n                    return resp.status, json.loads(raw)\n           \
-    \     except json.JSONDecodeError:\n                    return resp.status, {\"\
-    raw\": raw[:400]}\n        except urllib.error.HTTPError as exc:\n           \
-    \ raw = exc.read().decode(errors=\"replace\")\n            try:\n            \
-    \    parsed = json.loads(raw) if raw else {}\n            except json.JSONDecodeError:\n\
+    \ f\"{svc}.{ns}.svc.cluster.local:8090\",\n        f\"{svc}:8090\",\n        f\"\
+    {svc}.{ns}.svc.cluster.local:80\",\n        f\"{svc}:80\",\n        f\"{ip}:8090\"\
+    ,\n        f\"{ip}:80\",\n    ]\n\n\ndef _ue_http_idx(\n    idx: int,\n    path:\
+    \ str,\n    method: str = \"GET\",\n    body: Optional[dict] = None,\n    timeout:\
+    \ int = 8,\n) -> tuple[int, Any]:\n    data = json.dumps(body).encode() if body\
+    \ is not None else None\n    headers = {\"Content-Type\": \"application/json\"\
+    } if body is not None else {}\n    last_err = \"unreachable\"\n    path = path\
+    \ if path.startswith(\"/\") else f\"/{path}\"\n    for host in _ue_upstreams(idx):\n\
+    \        url = f\"http://{host}{path}\"\n        req = urllib.request.Request(url,\
+    \ data=data, headers=headers, method=method)\n        try:\n            with urllib.request.urlopen(req,\
+    \ timeout=timeout) as resp:\n                raw = resp.read().decode() or \"\
+    {}\"\n                try:\n                    return resp.status, json.loads(raw)\n\
+    \                except json.JSONDecodeError:\n                    return resp.status,\
+    \ {\"raw\": raw[:400]}\n        except urllib.error.HTTPError as exc:\n      \
+    \      raw = exc.read().decode(errors=\"replace\")\n            try:\n       \
+    \         parsed = json.loads(raw) if raw else {}\n            except json.JSONDecodeError:\n\
     \                parsed = {\"message\": raw[:400]}\n            return exc.code,\
     \ parsed\n        except urllib.error.URLError as exc:\n            last_err =\
     \ f\"{host}: {exc.reason}\"\n            continue\n    return 503, {\"detail\"\
@@ -168,32 +168,32 @@
     \    ues = []\n    for dep in (body or {}).get(\"items\") or []:\n        meta\
     \ = dep.get(\"metadata\") or {}\n        name = meta.get(\"name\") or \"\"\n \
     \       idx = _ue_idx_from_name(name)\n        if idx is None:\n            continue\n\
-    \        labels = meta.get(\"labels\") or {}\n        spec = (dep.get(\"spec\"\
-    ) or {}).get(\"template\") or {}\n        spec_labels = (spec.get(\"metadata\"\
-    ) or {}).get(\"labels\") or {}\n        ip = labels.get(\"ina.lab/console-ip\"\
-    ) or spec_labels.get(\"ina.lab/console-ip\") or _console_ip(idx)\n        raw_mac\
-    \ = labels.get(\"ina.lab/console-mac\") or spec_labels.get(\"ina.lab/console-mac\"\
-    ) or \"\"\n        mac = raw_mac.replace(\"-\", \":\") if raw_mac else _console_mac(idx)\n\
     \        st = (dep.get(\"status\") or {})\n        ready = int(st.get(\"readyReplicas\"\
     ) or 0)\n        desired = int(st.get(\"replicas\") or 1)\n        pod = pods_by_app.get(name)\
     \ or {}\n        phase = (pod.get(\"status\") or {}).get(\"phase\") or \"\"\n\
     \        containers = (pod.get(\"status\") or {}).get(\"containerStatuses\") or\
     \ []\n        sidecar = {c.get(\"name\"): bool(c.get(\"ready\")) for c in containers\
-    \ if isinstance(c, dict)}\n        live = None\n        sc, live = _ue_http_idx(idx,\
-    \ \"/api/status\", timeout=3)\n        if sc != 200:\n            live = {\"ok\"\
-    : False, \"http_status\": sc, **(live if isinstance(live, dict) else {})}\n  \
-    \      multus_url = _http_url(ip) if ip else f\"http://{_console_ip(idx)}:80\"\
-    \n        ues.append(\n            {\n                \"name\": name,\n      \
-    \          \"client_index\": idx,\n                \"ready\": ready,\n       \
-    \         \"desired\": desired,\n                \"pod_phase\": phase,\n     \
-    \           \"sidecars\": sidecar,\n                \"console_ip\": ip,\n    \
-    \            \"console_mac\": mac,\n                \"console_url\": multus_url,\n\
-    \                \"dashboard_url\": multus_url,\n                \"connected\"\
-    : (ready >= 1) or (phase == \"Running\"),\n                \"status\": live,\n\
-    \            }\n        )\n    ues.sort(key=lambda u: int(u[\"client_index\"]))\n\
-    \    return {\"ok\": True, \"slice_id\": SLICE_ID, \"ues\": ues}\n\n\n@app.get(\"\
-    /api/ues/{idx}/exchanges\")\ndef api_ue_exchanges(idx: int, limit: int = 40) ->\
-    \ dict:\n    code, body = _ue_http_idx(idx, f\"/api/exchanges?limit={int(limit)}\"\
+    \ if isinstance(c, dict)}\n        \n        # Query UE runtime status payload\
+    \ directly\n        live = None\n        sc, live = _ue_http_idx(idx, \"/api/status\"\
+    , timeout=3)\n        live_dict = live if isinstance(live, dict) else {}\n   \
+    \     if sc != 200:\n            live = {\"ok\": False, \"http_status\": sc, **live_dict}\n\
+    \            \n        # Discover Console IP and MAC strictly from the UE client\
+    \ payload\n        ip = str(live_dict.get(\"console_ip\") or live_dict.get(\"\
+    ip\") or live_dict.get(\"multus_ip\") or \"\").strip()\n        if not ip:\n \
+    \           ip = _console_ip(idx)\n        raw_mac = str(live_dict.get(\"console_mac\"\
+    ) or live_dict.get(\"mac\") or \"\").strip()\n        mac = raw_mac.replace(\"\
+    -\", \":\") if raw_mac else _console_mac(idx)\n\n        multus_url = _http_url(ip)\
+    \ if ip else f\"http://{_console_ip(idx)}:80\"\n        ues.append(\n        \
+    \    {\n                \"name\": name,\n                \"client_index\": idx,\n\
+    \                \"ready\": ready,\n                \"desired\": desired,\n  \
+    \              \"pod_phase\": phase,\n                \"sidecars\": sidecar,\n\
+    \                \"console_ip\": ip,\n                \"console_mac\": mac,\n\
+    \                \"console_url\": multus_url,\n                \"dashboard_url\"\
+    : multus_url,\n                \"connected\": (ready >= 1) or (phase == \"Running\"\
+    ),\n                \"status\": live,\n            }\n        )\n    ues.sort(key=lambda\
+    \ u: int(u[\"client_index\"]))\n    return {\"ok\": True, \"slice_id\": SLICE_ID,\
+    \ \"ues\": ues}\n\n\n@app.get(\"/api/ues/{idx}/exchanges\")\ndef api_ue_exchanges(idx:\
+    \ int, limit: int = 40) -> dict:\n    code, body = _ue_http_idx(idx, f\"/api/exchanges?limit={int(limit)}\"\
     , timeout=8)\n    if code != 200:\n        raise HTTPException(status_code=code\
     \ if code >= 400 else 502, detail=body)\n    return body\n\n\n@app.post(\"/api/ues/{idx}/control\"\
     )\ndef api_ue_control(idx: int, body: UeControlIn) -> dict:\n    payload = {k:\

@@ -77,8 +77,6 @@ metadata:
     slice: "1"
     ina.lab/role: ue-client
     ina.lab/slice: "1"
-    ina.lab/console-ip: "10.1.137.220"
-    ina.lab/console-mac: "02-0a-40-01-00-01"
 spec:
   replicas: 1
   strategy:
@@ -94,8 +92,6 @@ spec:
         slice: "1"
         ina.lab/role: ue-client
         ina.lab/slice: "1"
-        ina.lab/console-ip: "10.1.137.220"
-        ina.lab/console-mac: "02-0a-40-01-00-01"
       annotations:
         k8s.v1.cni.cncf.io/networks: '[{"name": "ue1-sim-rf", "interface": "rf", "ips": ["10.1.140.141/24"], "gateways": ["10.1.140.3"]}, {"name": "ue1-console-multus", "interface": "net1", "ips": ["10.1.137.220/24"], "mac": "02:0a:40:01:00:01"}]'
     spec:
@@ -135,6 +131,10 @@ spec:
           value: "1"
         - name: UE_NAME
           value: "oai-ue-1"
+        - name: CONSOLE_IP
+          value: "10.1.137.220"
+        - name: CONSOLE_MAC
+          value: "02:0a:40:01:00:01"
 
         - name: CONSOLE_ROLE
           value: "backend"
@@ -272,8 +272,6 @@ metadata:
     slice: "2"
     ina.lab/role: ue-client
     ina.lab/slice: "2"
-    ina.lab/console-ip: "10.1.137.230"
-    ina.lab/console-mac: "02-0a-40-02-00-01"
 spec:
   replicas: 1
   strategy:
@@ -289,8 +287,6 @@ spec:
         slice: "2"
         ina.lab/role: ue-client
         ina.lab/slice: "2"
-        ina.lab/console-ip: "10.1.137.230"
-        ina.lab/console-mac: "02-0a-40-02-00-01"
       annotations:
         k8s.v1.cni.cncf.io/networks: '[{"name": "ue2-sim-rf", "interface": "rf", "ips": ["10.1.140.142/24"], "gateways": ["10.1.140.3"]}, {"name": "ue2-console-multus", "interface": "net1", "ips": ["10.1.137.230/24"], "mac": "02:0a:40:02:00:01"}]'
     spec:
@@ -330,6 +326,10 @@ spec:
           value: "1"
         - name: UE_NAME
           value: "oai-ue-2"
+        - name: CONSOLE_IP
+          value: "10.1.137.230"
+        - name: CONSOLE_MAC
+          value: "02:0a:40:02:00:01"
 
         - name: CONSOLE_ROLE
           value: "backend"
@@ -487,8 +487,6 @@ metadata:
     slice: "3"
     ina.lab/role: ue-client
     ina.lab/slice: "3"
-    ina.lab/console-ip: "10.1.137.240"
-    ina.lab/console-mac: "02-0a-40-03-00-01"
 spec:
   replicas: 1
   strategy:
@@ -504,8 +502,6 @@ spec:
         slice: "3"
         ina.lab/role: ue-client
         ina.lab/slice: "3"
-        ina.lab/console-ip: "10.1.137.240"
-        ina.lab/console-mac: "02-0a-40-03-00-01"
       annotations:
         k8s.v1.cni.cncf.io/networks: '[{"name": "ue3-sim-rf", "interface": "rf", "ips": ["10.1.140.143/24"], "gateways": ["10.1.140.3"]}, {"name": "ue3-console-multus", "interface": "net1", "ips": ["10.1.137.240/24"], "mac": "02:0a:40:03:00:01"}]'
     spec:
@@ -545,6 +541,10 @@ spec:
           value: "1"
         - name: UE_NAME
           value: "oai-ue-3"
+        - name: CONSOLE_IP
+          value: "10.1.137.240"
+        - name: CONSOLE_MAC
+          value: "02:0a:40:03:00:01"
 
         - name: CONSOLE_ROLE
           value: "backend"
@@ -723,8 +723,6 @@ metadata:
     slice: "4"
     ina.lab/role: ue-client
     ina.lab/slice: "4"
-    ina.lab/console-ip: "10.1.137.250"
-    ina.lab/console-mac: "02-0a-40-04-00-01"
 spec:
   replicas: 1
   strategy:
@@ -740,8 +738,6 @@ spec:
         slice: "4"
         ina.lab/role: ue-client
         ina.lab/slice: "4"
-        ina.lab/console-ip: "10.1.137.250"
-        ina.lab/console-mac: "02-0a-40-04-00-01"
       annotations:
         k8s.v1.cni.cncf.io/networks: '[{"name": "ue4-sim-rf", "interface": "rf", "ips": ["10.1.140.144/24"], "gateways": ["10.1.140.3"]}, {"name": "ue4-console-multus", "interface": "net1", "ips": ["10.1.137.250/24"], "mac": "02:0a:40:04:00:01"}]'
     spec:
@@ -781,6 +777,10 @@ spec:
           value: "1"
         - name: UE_NAME
           value: "oai-ue-4"
+        - name: CONSOLE_IP
+          value: "10.1.137.250"
+        - name: CONSOLE_MAC
+          value: "02:0a:40:04:00:01"
 
         - name: CONSOLE_ROLE
           value: "backend"

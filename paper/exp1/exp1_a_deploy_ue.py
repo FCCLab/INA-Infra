@@ -228,8 +228,6 @@ metadata:
     slice: "{s_id}"
     ina.lab/role: ue-client
     ina.lab/slice: "{s_id}"
-    ina.lab/console-ip: "{console_ip}"
-    ina.lab/console-mac: "{console_mac_label}"
 spec:
   replicas: 1
   strategy:
@@ -245,8 +243,6 @@ spec:
         slice: "{s_id}"
         ina.lab/role: ue-client
         ina.lab/slice: "{s_id}"
-        ina.lab/console-ip: "{console_ip}"
-        ina.lab/console-mac: "{console_mac_label}"
       annotations:
         k8s.v1.cni.cncf.io/networks: '[{{"name": "{rf_net_name}", "interface": "rf", "ips": ["{cfg['rf_ip']}"], "gateways": ["10.1.140.3"]}}, {{"name": "ue{s_id}-console-multus", "interface": "net1", "ips": ["{console_ip}/24"], "mac": "{console_mac}"}}]'
     spec:
@@ -283,9 +279,13 @@ spec:
         - name: SLICE_ID
           value: "{s_id}"
         - name: CLIENT_INDEX
-          value: "1"
+          value: "{idx}"
         - name: UE_NAME
           value: "{ue_name}"
+        - name: CONSOLE_IP
+          value: "{console_ip}"
+        - name: CONSOLE_MAC
+          value: "{console_mac}"
 {cfg['extra_env']}
         resources:
           requests:

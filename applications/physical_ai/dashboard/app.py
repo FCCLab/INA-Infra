@@ -322,12 +322,6 @@ def api_ues() -> dict:
         idx = _ue_idx_from_name(name)
         if idx is None:
             continue
-        labels = meta.get("labels") or {}
-        spec = (dep.get("spec") or {}).get("template") or {}
-        spec_labels = (spec.get("metadata") or {}).get("labels") or {}
-        ip = labels.get("ina.lab/console-ip") or spec_labels.get("ina.lab/console-ip") or _console_ip(idx)
-        raw_mac = labels.get("ina.lab/console-mac") or spec_labels.get("ina.lab/console-mac") or ""
-        mac = raw_mac.replace("-", ":") if raw_mac else _console_mac(idx)
         st = (dep.get("status") or {})
         ready = int(st.get("readyReplicas") or 0)
         desired = int(st.get("replicas") or 1)
@@ -335,10 +329,21 @@ def api_ues() -> dict:
         phase = (pod.get("status") or {}).get("phase") or ""
         containers = (pod.get("status") or {}).get("containerStatuses") or []
         sidecar = {c.get("name"): bool(c.get("ready")) for c in containers if isinstance(c, dict)}
+        
+        # Query UE runtime status payload directly
         live = None
         sc, live = _ue_http_idx(idx, "/api/status", timeout=3)
+        live_dict = live if isinstance(live, dict) else {}
         if sc != 200:
-            live = {"ok": False, "http_status": sc, **(live if isinstance(live, dict) else {})}
+            live = {"ok": False, "http_status": sc, **live_dict}
+            
+        # Discover Console IP and MAC strictly from the UE client payload
+        ip = str(live_dict.get("console_ip") or live_dict.get("ip") or live_dict.get("multus_ip") or "").strip()
+        if not ip:
+            ip = _console_ip(idx)
+        raw_mac = str(live_dict.get("console_mac") or live_dict.get("mac") or "").strip()
+        mac = raw_mac.replace("-", ":") if raw_mac else _console_mac(idx)
+
         multus_url = _http_url(ip) if ip else f"http://{_console_ip(idx)}:80"
         ues.append(
             {
