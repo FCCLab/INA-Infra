@@ -678,10 +678,27 @@ def api_ues() -> dict:
                     found[int(probed["client_index"])] = probed
     except Exception:
         pass
-    ues = [found[k] for k in sorted(found)]
     with _mqtt_lock:
         snap = _mqtt_stats_snapshot()
     by_idx = {u.get("client_index"): u for u in snap["ues"] if u.get("client_index") is not None}
+    for idx, u_stat in by_idx.items():
+        if idx not in found:
+            ip = _console_ip(idx)
+            mac = _console_mac(idx)
+            found[idx] = {
+                "name": f"oai-ue-slice-{SLICE_ID}-client-{idx}",
+                "client_index": idx,
+                "ready": 1,
+                "desired": 1,
+                "pod_phase": "Running",
+                "console_ip": ip,
+                "console_mac": mac,
+                "console_url": _http_url(ip),
+                "dashboard_url": f"/ue/{idx}/",
+                "connected": True,
+                "status": {"ok": True, "pdu_ready": True, "mqtt_connected": True},
+            }
+    ues = [found[k] for k in sorted(found)]
     for ue in ues:
         idx = int(ue.get("client_index") or 0)
         ue["stats"] = by_idx.get(idx) or {
