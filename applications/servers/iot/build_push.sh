@@ -15,21 +15,10 @@ docker build --platform linux/amd64 -f mosquitto/Dockerfile -t "iot-mosquitto:${
 echo "==> Building sliced-edge:${IMAGE_TAG}"
 docker build --platform linux/amd64 -f edge/Dockerfile -t "sliced-edge:${IMAGE_TAG}" -t "${REGISTRY}/sliced-edge:${IMAGE_TAG}" .
 
-if [ "${BUILD_CLIENT:-0}" = "1" ]; then
-  echo "==> Building sliced-client:${IMAGE_TAG}"
-  docker build --platform linux/amd64 -f client/Dockerfile -t "sliced-client:${IMAGE_TAG}" -t "${REGISTRY}/sliced-client:${IMAGE_TAG}" .
-fi
-
 echo "==> Pushing images to ${REGISTRY}"
 docker push "${REGISTRY}/iot-mosquitto:${MOSQ_TAG}"
 docker push "${REGISTRY}/sliced-edge:${IMAGE_TAG}"
-if [ "${BUILD_CLIENT:-0}" = "1" ]; then
-  docker push "${REGISTRY}/sliced-client:${IMAGE_TAG}"
-fi
 
 echo "Done:"
 echo "  - ${REGISTRY}/iot-mosquitto:${MOSQ_TAG}"
 echo "  - ${REGISTRY}/sliced-edge:${IMAGE_TAG}"
-if [ "${BUILD_CLIENT:-0}" = "1" ]; then
-  echo "  - ${REGISTRY}/sliced-client:${IMAGE_TAG}"
-fi

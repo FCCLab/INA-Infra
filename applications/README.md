@@ -17,12 +17,16 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 | **[`servers/common/console`](servers/common/console/)** | **Common (Slices C & D)** | • Web control console sidecar for OTT / IoT servers | • `ina-control-dashboard:nws-v0.21-amd64` | `./build-push.sh` |
 | **[`servers/common/shared`](servers/common/shared/)** | **Common** | • Shared stylesheet tokens and shell layouts | — | — |
 
-### 2. Client & Probe Workloads (`clients/`)
+### 2. Client & UE Console Workloads (`clients/`)
 
-| Directory | Role | Description |
-| :--- | :--- | :--- |
-| **[`clients/rtt_probe`](clients/rtt_probe/)** | Latency Measurement | Round-trip time (RTT) probe utility |
-| **[`clients/throughput_statistics`](clients/throughput_statistics/)** | Throughput Analysis | Periodic throughput calculation and telemetry exporter |
+| Directory | Slice Mapping | Applications & Roles | Container Images | Build Script |
+| :--- | :--- | :--- | :--- | :--- |
+| **[`clients/cctv`](clients/cctv/)** | **Slice A** (CCTV Vision Streaming) | • `client/`: Video publisher stream<br>• `ue/`: CCTV UE Console (FastAPI) | • `cctv-ue-console:nws-v0.9-amd64`<br>• `application-cctv-publisher:nws-v0.9-amd64` | `./build-push.sh` |
+| **[`clients/physical_ai`](clients/physical_ai/)** | **Slice B** (Physical AI / VLM) | • `ue/`: Cosmos3 prompt generator & UE console<br>• `Dockerfile.aiperf`: Benchmark client | • `cosmo3-ue-console:nws-v0.18-amd64`<br>• `cosmo3-aiperf:nws-v0.5-amd64` | • `./build-push-ue-console.sh`<br>• `./build-push-aiperf.sh` |
+| **[`clients/ott`](clients/ott/)** | **Slice C** (High-Bandwidth eMBB OTT) | • `ue/`: Automated Chromium 4K video client & console<br>• `client/`: Legacy RTSP player | • `ott-ue-console:nws-v0.33-amd64` | `./build-push-ue-console.sh` |
+| **[`clients/iot`](clients/iot/)** | **Slice D** (Background Best-Effort IoT) | • `ue/`: Synthetic IoT MQTT publisher & UE console<br>• `client/`: Standalone IoT client | • `iot-ue-console:nws-v0.10-amd64` | `./build-push-ue-console.sh` |
+| **[`clients/rtt_probe`](clients/rtt_probe/)** | **Common** | • Dedicated round-trip time (RTT) probe utility | • `rtt-probe:latest` | `./build_push.sh` |
+| **[`clients/throughput_statistics`](clients/throughput_statistics/)** | **Common** | • Real-time throughput statistical exporter | • `throughput-statistics:latest` | `./build_push.sh` |
 
 ---
 
@@ -30,25 +34,39 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 
 All images are pushed to the local container registry (`10.1.132.30:5000`) by default.
 
-### 1. Slice A: CCTV Vision Streaming
+### 1. Server Workloads
 ```bash
-cd /home/fcp/INA-Infra/applications/servers/cctv
-./build_push.sh
-```
+# Slice A: CCTV Analyzer & Frontend
+cd /home/fcp/INA-Infra/applications/servers/cctv && ./build_push.sh
 
-### 2. Slice B: Physical AI (Cosmos3 VLM)
-```bash
+# Slice B: Physical AI vLLM & Server Dashboard
 cd /home/fcp/INA-Infra/applications/servers/physical_ai
 ./build-push-dashboard.sh
+./build-push-vllm.sh
+
+# Slice C: OTT RTSP MediaMTX & Frontend Portal
+cd /home/fcp/INA-Infra/applications/servers/ott && ./build_push.sh
+
+# Slice D: IoT Mosquitto Broker & Backend Controller
+cd /home/fcp/INA-Infra/applications/servers/iot && ./build_push.sh
+
+# Common: OTT/IoT Control Console Sidecar
+cd /home/fcp/INA-Infra/applications/servers/common/console && ./build-push.sh
+```
+
+### 2. Client & UE Console Workloads
+```bash
+# Slice A: CCTV UE Console & Publisher
+cd /home/fcp/INA-Infra/applications/clients/cctv && ./build-push.sh
+
+# Slice B: Physical AI UE Console & AIPerf
+cd /home/fcp/INA-Infra/applications/clients/physical_ai
 ./build-push-ue-console.sh
-```
+./build-push-aiperf.sh
 
-### 3. Slice C: High-Bandwidth OTT Video Streaming
-```bash
-cd /home/fcp/INA-Infra/applications/servers/ott
-```
+# Slice C: OTT Chromium UE Console
+cd /home/fcp/INA-Infra/applications/clients/ott && ./build-push-ue-console.sh
 
-### 4. Slice D: Background IoT
-```bash
-cd /home/fcp/INA-Infra/applications/servers/iot
+# Slice D: IoT MQTT UE Console
+cd /home/fcp/INA-Infra/applications/clients/iot && ./build-push-ue-console.sh
 ```
