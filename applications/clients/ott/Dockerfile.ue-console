@@ -1,8 +1,9 @@
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONPATH=/app \
-    PYTHONUNBUFFERED=1
+    PYTHONPATH=/app/backend:/app \
+    PYTHONUNBUFFERED=1 \
+    DASHBOARD_STATIC=/app/frontend-console/static
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 \
@@ -39,8 +40,12 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 
 WORKDIR /app
 
-COPY ue/ /app/ue/
-RUN chmod +x /app/ue/entrypoint.sh \
- && ln -sfn /app/ue/static /app/static
+COPY backend/ /app/backend/
+COPY frontend-console/ /app/frontend-console/
+COPY entrypoint.sh /app/entrypoint.sh
 
-ENTRYPOINT ["/app/ue/entrypoint.sh"]
+RUN chmod +x /app/entrypoint.sh \
+ && ln -sfn /app/frontend-console/static /app/static
+
+EXPOSE 80 8090
+ENTRYPOINT ["/app/entrypoint.sh"]

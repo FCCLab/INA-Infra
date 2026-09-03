@@ -2272,7 +2272,9 @@ def patch_ue_pod_with_client(
         containers.append(client_container)
         if client_container.get("name") == "cctv-publisher":
             cm_name = f"slice{sid}-cctv-client-code"
-            pub_path = "/home/fcp/INA-Infra/applications/clients/cctv/client/publisher.py"
+            pub_path = "/home/fcp/INA-Infra/applications/clients/cctv/backend/publisher.py"
+            if not os.path.exists(pub_path):
+                pub_path = "/home/fcp/INA-Infra/applications/clients/cctv/client/publisher.py"
             if not os.path.exists(pub_path):
                 pub_path = "/home/fcp/INA-Infra/applications/servers/cctv/client/publisher.py"
             if not os.path.exists(pub_path):

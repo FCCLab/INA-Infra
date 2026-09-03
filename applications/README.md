@@ -21,10 +21,10 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 
 | Directory | Slice Mapping | Applications & Roles | Container Images | Build Script |
 | :--- | :--- | :--- | :--- | :--- |
-| **[`clients/cctv`](clients/cctv/)** | **Slice A** (CCTV Vision Streaming) | • `client/`: Video publisher stream<br>• `ue/`: CCTV UE Console (FastAPI) | • `cctv-ue-console:nws-v0.9-amd64`<br>• `application-cctv-publisher:nws-v0.9-amd64` | `./build-push.sh` |
-| **[`clients/physical_ai`](clients/physical_ai/)** | **Slice B** (Physical AI / VLM) | • `ue/`: Cosmos3 prompt generator & UE console<br>• `Dockerfile.aiperf`: Benchmark client | • `cosmo3-ue-console:nws-v0.18-amd64`<br>• `cosmo3-aiperf:nws-v0.5-amd64` | • `./build-push-ue-console.sh`<br>• `./build-push-aiperf.sh` |
-| **[`clients/ott`](clients/ott/)** | **Slice C** (High-Bandwidth eMBB OTT) | • `ue/`: Automated Chromium 4K video client & console<br>• `client/`: Legacy RTSP player | • `ott-ue-console:nws-v0.33-amd64` | `./build-push-ue-console.sh` |
-| **[`clients/iot`](clients/iot/)** | **Slice D** (Background Best-Effort IoT) | • `ue/`: Synthetic IoT MQTT publisher & UE console<br>• `client/`: Standalone IoT client | • `iot-ue-console:nws-v0.10-amd64` | `./build-push-ue-console.sh` |
+| **[`clients/cctv`](clients/cctv/)** | **Slice A** (CCTV Vision Streaming) | • `backend/`: Video publisher & stream controller<br>• `frontend-console/`: CCTV UE Console UI | • `cctv-ue-console:nws-v0.9-amd64` | `./build-push.sh` |
+| **[`clients/physical_ai`](clients/physical_ai/)** | **Slice B** (Physical AI / VLM) | • `backend/`: Cosmos3 prompt generator & AIPerf<br>• `frontend-console/`: Physical AI UE Console UI | • `cosmo3-ue-console:nws-v0.18-amd64`<br>• `cosmo3-aiperf:nws-v0.5-amd64` | • `./build-push-ue-console.sh`<br>• `./build-push-aiperf.sh` |
+| **[`clients/ott`](clients/ott/)** | **Slice C** (High-Bandwidth eMBB OTT) | • `backend/`: Chromium 4K automation & PDU proxy<br>• `frontend-console/`: OTT UE Console UI | • `ott-ue-console:nws-v0.33-amd64` | `./build-push-ue-console.sh` |
+| **[`clients/iot`](clients/iot/)** | **Slice D** (Background Best-Effort IoT) | • `backend/`: Synthetic MQTT telemetry publisher<br>• `frontend-console/`: IoT UE Console UI | • `iot-ue-console:nws-v0.10-amd64` | `./build-push-ue-console.sh` |
 | **[`clients/rtt_probe`](clients/rtt_probe/)** | **Common** | • Dedicated round-trip time (RTT) probe utility | • `rtt-probe:latest` | `./build_push.sh` |
 | **[`clients/throughput_statistics`](clients/throughput_statistics/)** | **Common** | • Real-time throughput statistical exporter | • `throughput-statistics:latest` | `./build_push.sh` |
 

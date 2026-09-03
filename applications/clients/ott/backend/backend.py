@@ -19,13 +19,18 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 try:
-    from ue.yt_proxy import extract_youtube_id
-    from ue.pdu_socks import PDU_SOCKS
-    from ue import chrome_ctl
-except ImportError:  # script executed as /app/ue/backend.py
-    from yt_proxy import extract_youtube_id  # type: ignore
-    from pdu_socks import PDU_SOCKS  # type: ignore
-    import chrome_ctl  # type: ignore
+    from backend.yt_proxy import extract_youtube_id
+    from backend.pdu_socks import PDU_SOCKS
+    from backend import chrome_ctl
+except ImportError:
+    try:
+        from ue.yt_proxy import extract_youtube_id
+        from ue.pdu_socks import PDU_SOCKS
+        from ue import chrome_ctl
+    except ImportError:
+        from yt_proxy import extract_youtube_id  # type: ignore
+        from pdu_socks import PDU_SOCKS  # type: ignore
+        import chrome_ctl  # type: ignore
 
 try:
     from prometheus_client import Gauge, start_http_server
