@@ -860,7 +860,7 @@
     \              <div class=\"ue-tok-sub\">${outSub}</div>\n            </div>\n\
     \          </div>\n          <div class=\"row\" style=\"margin-top:10px;\">\n\
     \            <a class=\"ue-dash-btn\" href=\"${u.console_url || (u.console_ip\
-    \ ? `http://${u.console_ip}/` : `http://10.1.137.200/`)}\" target=\"_blank\" rel=\"\
+    \ ? `http://${u.console_ip}/` : `http://10.1.137.230/`)}\" target=\"_blank\" rel=\"\
     noreferrer\">Open UE console</a>\n          </div>\n        </div>`;\n      }).join(\"\
     \");\n      $(\"ue-list\").querySelectorAll(\"[data-ue-ctrl]\").forEach(btn =>\
     \ {\n        btn.onclick = (ev) => {\n          ev.stopPropagation();\n      \
