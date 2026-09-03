@@ -32,7 +32,7 @@ VLLM_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000").rstrip("/")
 STATIC_DIR = Path(os.environ.get("DASHBOARD_STATIC", "/app/static"))
 SLICE_ID = int(os.environ.get("SLICE_ID", "2"))
 UE_CONSOLE_PORT = int(os.environ.get("UE_CONSOLE_PORT", "80"))
-UE_CONSOLE_IP_BASE = int(os.environ.get("UE_CONSOLE_IP_BASE", "200"))
+UE_CONSOLE_OCTET_BASE = int(os.environ.get("UE_CONSOLE_OCTET_BASE", "220"))
 # OTA hits vLLM :8000; iptables REDIRECT net1:8000 → this proxy, then loopback vLLM.
 LATENCY_PROXY_PORT = int(os.environ.get("LATENCY_PROXY_PORT", "18080"))
 # Drop last-sample latency when no new UL request arrives (exporter scrape is 1s).
@@ -62,7 +62,7 @@ class UeControlIn(BaseModel):
 
 
 def _console_ip(idx: int) -> str:
-    return f"10.1.137.{UE_CONSOLE_IP_BASE + max(int(idx), 1) - 1}"
+    return f"10.1.137.{UE_CONSOLE_OCTET_BASE + (SLICE_ID - 1) * 10 + max(int(idx), 1) - 1}"
 
 
 def _console_mac(idx: int) -> str:
@@ -253,9 +253,18 @@ def _ue_pod_ip(idx: int) -> Optional[str]:
 
 
 def _ue_upstreams(idx: int) -> list[str]:
-    """Query UE console strictly via Multus IP."""
+    """Query UE console via cluster service and Multus IP."""
     ip = _console_ip(idx)
-    return [f"{ip}:80", f"{ip}:8090", f"{ip}:{UE_CONSOLE_PORT}"]
+    svc = f"oai-ue-slice-{SLICE_ID}-client-{idx}"
+    ns = _ns()
+    return [
+        f"{svc}.{ns}.svc.cluster.local:8090",
+        f"{svc}:8090",
+        f"{svc}.{ns}.svc.cluster.local:80",
+        f"{svc}:80",
+        f"{ip}:8090",
+        f"{ip}:80",
+    ]
 
 
 def _ue_http_idx(

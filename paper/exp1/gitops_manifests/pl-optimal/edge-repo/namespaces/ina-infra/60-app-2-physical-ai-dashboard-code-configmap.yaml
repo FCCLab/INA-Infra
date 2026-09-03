@@ -1,688 +1,900 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: physical-ai-dashboard-code
-  namespace: exp1-a
-  labels:
-    app.kubernetes.io/name: application-physical-ai
-    app.kubernetes.io/part-of: ina-infra
-    ina.lab/slice: '2'
-    ina.lab/app-type: physical_ai
-    ina.lab/role: server
-data:
-  app.py: |
-    #!/usr/bin/env python3
-    """Physical AI console sidecar: HF token Secret + vLLM health/chat proxy."""
-    from __future__ import annotations
-
-    import base64
-    import json
-    import os
-    import ssl
-    import threading
-    import time
-    import urllib.error
-    import urllib.request
-    from collections import deque
-    from datetime import datetime, timezone
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from pathlib import Path
-    from typing import Any, Optional
-
-    from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import FileResponse, RedirectResponse, Response
-    from fastapi.staticfiles import StaticFiles
-    from pydantic import BaseModel, Field
-
-    NS_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-    TOKEN_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
-    CA_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-
-    SECRET_NAME = os.environ.get("HF_SECRET_NAME", "ina-hf-token")
-    SECRET_KEY = os.environ.get("HF_SECRET_KEY", "token")
-    DEPLOY_NAME = os.environ.get("HF_DEPLOY_NAME", "application-physical-ai")
-    VLLM_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000").rstrip("/")
-    STATIC_DIR = Path(os.environ.get("DASHBOARD_STATIC", "/app/static"))
-    SLICE_ID = int(os.environ.get("SLICE_ID", "2"))
-    UE_CONSOLE_PORT = int(os.environ.get("UE_CONSOLE_PORT", "80"))
-    UE_CONSOLE_IP_BASE = int(os.environ.get("UE_CONSOLE_IP_BASE", "200"))
-    # OTA hits vLLM :8000; iptables REDIRECT net1:8000 → this proxy, then loopback vLLM.
-    LATENCY_PROXY_PORT = int(os.environ.get("LATENCY_PROXY_PORT", "18080"))
-    # Drop last-sample latency when no new UL request arrives (exporter scrape is 1s).
-    LATENCY_STALE_S = float(os.environ.get("LATENCY_STALE_S", "2.5"))
-
-
-    def _http_url(host: str, port: int = UE_CONSOLE_PORT) -> str:
-        if port == 80:
-            return f"http://{host}/"
-        return f"http://{host}:{port}/"
-
-    app = FastAPI(title="Physical AI console", docs_url="/api/docs")
-
-
-    class TokenIn(BaseModel):
-        token: str = Field(..., min_length=1)
-
-
-    class ChatIn(BaseModel):
-        prompt: str = Field(..., min_length=1)
-        max_tokens: int = Field(128, ge=1, le=2048)
-
-
-    class UeControlIn(BaseModel):
-        send_enabled: Optional[bool] = None
-        include_image: Optional[bool] = None
-
-
-    def _console_ip(idx: int) -> str:
-        return f"10.1.137.{UE_CONSOLE_IP_BASE + max(int(idx), 1) - 1}"
-
-
-    def _console_mac(idx: int) -> str:
-        return f"02:0a:40:{SLICE_ID:02x}:00:{max(int(idx), 1):02x}"
-
-
-    def _ns() -> str:
-        return os.environ.get("POD_NAMESPACE") or (NS_FILE.read_text().strip() if NS_FILE.is_file() else "ina-infra")
-
-
-    def _k8s_ctx() -> tuple[str, ssl.SSLContext, dict[str, str]]:
-        host = os.environ.get("KUBERNETES_SERVICE_HOST")
-        port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
-        if not host or not TOKEN_FILE.is_file():
-            raise HTTPException(status_code=503, detail="in-cluster Kubernetes credentials not available")
-        token = TOKEN_FILE.read_text().strip()
-        ctx = ssl.create_default_context()
-        if CA_FILE.is_file():
-            ctx.load_verify_locations(str(CA_FILE))
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        return f"https://{host}:{port}", ctx, headers
-
-
-    def _k8s(method: str, path: str, body: Optional[dict] = None, extra_headers: Optional[dict] = None) -> tuple[int, Any]:
-        base, ctx, headers = _k8s_ctx()
-        hdrs = dict(headers)
-        if extra_headers:
-            hdrs.update(extra_headers)
-        data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(base + path, data=data, headers=hdrs, method=method)
-        try:
-            with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
-                raw = resp.read().decode() or "{}"
-                return resp.status, json.loads(raw)
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode(errors="replace")
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except json.JSONDecodeError:
-                parsed = {"message": raw[:400]}
-            return exc.code, parsed
-
-
-    def _vllm(method: str, path: str, body: Optional[dict] = None) -> tuple[int, Any]:
-        data = json.dumps(body).encode() if body is not None else None
-        headers = {"Content-Type": "application/json"} if body is not None else {}
-        req = urllib.request.Request(f"{VLLM_URL}{path}", data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                raw = resp.read().decode() or "{}"
-                return resp.status, json.loads(raw)
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode(errors="replace")
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except json.JSONDecodeError:
-                parsed = {"message": raw[:400]}
-            return exc.code, parsed
-        except urllib.error.URLError as exc:
-            raise HTTPException(status_code=503, detail=f"vLLM not ready: {exc.reason}") from exc
-
-
-    @app.get("/api/status")
-    def api_status() -> dict:
-        ns = _ns()
-        code, secret = _k8s("GET", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
-        configured = code == 200 and bool((secret or {}).get("data", {}).get(SECRET_KEY))
-        vllm_ok = False
-        model = None
-        vcode, vbody = 0, {}
-        try:
-            vcode, vbody = _vllm("GET", "/v1/models")
-            vllm_ok = vcode == 200
-            data = (vbody or {}).get("data") or []
-            if data:
-                model = data[0].get("id")
-        except HTTPException:
-            vllm_ok = False
-        return {
-            "ok": True,
-            "namespace": ns,
-            "secret": SECRET_NAME,
-            "configured": configured,
-            "vllm_ready": vllm_ok,
-            "model": model,
-            "vllm_url": VLLM_URL,
-        }
-
-
-    @app.put("/api/hf-token")
-    def api_save_token(body: TokenIn) -> dict:
-        token = body.token.strip()
-        if not token:
-            raise HTTPException(status_code=400, detail="token is required")
-        ns = _ns()
-        payload = {
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "metadata": {
-                "name": SECRET_NAME,
-                "namespace": ns,
-                "labels": {"ina.lab/role": "hf-token"},
-            },
-            "type": "Opaque",
-            "stringData": {SECRET_KEY: token},
-        }
-        code, _ = _k8s("GET", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
-        if code == 200:
-            code, resp = _k8s("PATCH", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}", payload, extra_headers={"Content-Type": "application/merge-patch+json"})
-        else:
-            code, resp = _k8s("POST", f"/api/v1/namespaces/{ns}/secrets", payload)
-        if code not in (200, 201):
-            raise HTTPException(status_code=400, detail=(resp or {}).get("message", f"secret apply failed ({code})"))
-        restarted = _restart_deploy(ns)
-        return {"ok": True, "configured": True, "restarted": restarted, "message": "Token saved." + (" vLLM restarting." if restarted else "")}
-
-
-    @app.delete("/api/hf-token")
-    def api_delete_token() -> dict:
-        ns = _ns()
-        _k8s("DELETE", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
-        restarted = _restart_deploy(ns)
-        return {"ok": True, "configured": False, "restarted": restarted, "message": "Token removed."}
-
-
-    def _restart_deploy(ns: str) -> bool:
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        patch = {"spec": {"template": {"metadata": {"annotations": {"ina.lab/restarted-at": stamp}}}}}
-        code, _ = _k8s(
-            "PATCH",
-            f"/apis/apps/v1/namespaces/{ns}/deployments/{DEPLOY_NAME}",
-            patch,
-            extra_headers={"Content-Type": "application/strategic-merge-patch+json"},
-        )
-        return code in (200, 201)
-
-
-    @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-    async def proxy_v1(path: str, request: Request) -> Response:
-        """Forward /v1/* requests directly to local vLLM instance."""
-        target_url = f"{VLLM_URL}/v1/{path}"
-        q = request.url.query
-        if q:
-            target_url = f"{target_url}?{q}"
-        data = None
-        if request.method not in ("GET", "HEAD"):
-            data = await request.body()
-        headers = {}
-        ctype = request.headers.get("content-type")
-        if ctype:
-            headers["Content-Type"] = ctype
-        auth = request.headers.get("authorization")
-        if auth:
-            headers["Authorization"] = auth
-        req = urllib.request.Request(target_url, data=data, headers=headers, method=request.method)
-        try:
-            with urllib.request.urlopen(req, timeout=130) as resp:
-                raw = resp.read()
-                media = resp.headers.get("Content-Type", "application/json")
-                return Response(content=raw, status_code=resp.status, media_type=media)
-        except urllib.error.HTTPError as exc:
-            raw = exc.read()
-            media = exc.headers.get("Content-Type", "application/json") if exc.headers else "application/json"
-            return Response(content=raw, status_code=exc.code, media_type=media)
-        except urllib.error.URLError as exc:
-            payload = json.dumps({"detail": f"vLLM unreachable: {exc.reason}"})
-            return Response(content=payload.encode(), status_code=503, media_type="application/json")
-
-
-    @app.post("/api/chat")
-    def api_chat(body: ChatIn) -> dict:
-        code, resp = _vllm(
-            "POST",
-            "/v1/chat/completions",
-            {
-                "model": os.environ.get("MODEL_NAME", "nvidia/Cosmos3-Nano"),
-                "messages": [{"role": "user", "content": body.prompt}],
-                "max_tokens": body.max_tokens,
-            },
-        )
-        if code != 200:
-            raise HTTPException(status_code=code if code >= 400 else 502, detail=resp)
-        choices = (resp or {}).get("choices") or []
-        text = ""
-        if choices:
-            text = ((choices[0].get("message") or {}).get("content")) or ""
-        return {"ok": True, "text": text, "raw": resp}
-
-
-    def _ue_idx_from_name(name: str) -> Optional[int]:
-        prefix = f"oai-ue-slice-{SLICE_ID}-client-"
-        if name.startswith(prefix):
-            try:
-                return int(name[len(prefix) :])
-            except ValueError:
-                pass
-        if name == f"oai-ue-{SLICE_ID}":
-            return 1
-        if name.startswith(f"oai-ue-{SLICE_ID}-"):
-            try:
-                return int(name.split("-")[-1])
-            except ValueError:
-                return 1
-        return None
-
-
-    def _ue_deploy_name(idx: int) -> str:
-        return f"oai-ue-slice-{SLICE_ID}-client-{idx}"
-
-
-    def _ue_pod_ip(idx: int) -> Optional[str]:
-        ns = _ns()
-        valid_names = {f"oai-ue-slice-{SLICE_ID}-client-{idx}", f"oai-ue-{SLICE_ID}"}
-        code, pods = _k8s("GET", f"/api/v1/namespaces/{ns}/pods")
-        if code != 200:
-            return None
-        for pod in (pods or {}).get("items") or []:
-            labels = (pod.get("metadata") or {}).get("labels") or {}
-            app = labels.get("app.kubernetes.io/name") or labels.get("app") or ""
-            slice_lbl = labels.get("slice")
-            if app not in valid_names and slice_lbl != str(SLICE_ID):
-                continue
-            if (pod.get("status") or {}).get("phase") != "Running":
-                continue
-            ip = (pod.get("status") or {}).get("podIP")
-            if ip:
-                return str(ip)
-        return None
-
-
-    def _ue_upstreams(idx: int) -> list[str]:
-        """Query UE console strictly via Multus IP."""
-        ip = _console_ip(idx)
-        return [f"{ip}:80", f"{ip}:8090", f"{ip}:{UE_CONSOLE_PORT}"]
-
-
-    def _ue_http_idx(
-        idx: int,
-        path: str,
-        method: str = "GET",
-        body: Optional[dict] = None,
-        timeout: int = 8,
-    ) -> tuple[int, Any]:
-        data = json.dumps(body).encode() if body is not None else None
-        headers = {"Content-Type": "application/json"} if body is not None else {}
-        last_err = "unreachable"
-        path = path if path.startswith("/") else f"/{path}"
-        for host in _ue_upstreams(idx):
-            url = f"http://{host}{path}"
-            req = urllib.request.Request(url, data=data, headers=headers, method=method)
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read().decode() or "{}"
-                    try:
-                        return resp.status, json.loads(raw)
-                    except json.JSONDecodeError:
-                        return resp.status, {"raw": raw[:400]}
-            except urllib.error.HTTPError as exc:
-                raw = exc.read().decode(errors="replace")
-                try:
-                    parsed = json.loads(raw) if raw else {}
-                except json.JSONDecodeError:
-                    parsed = {"message": raw[:400]}
-                return exc.code, parsed
-            except urllib.error.URLError as exc:
-                last_err = f"{host}: {exc.reason}"
-                continue
-        return 503, {"detail": last_err}
-
-
-    @app.get("/api/ues")
-    def api_ues() -> dict:
-        ns = _ns()
-        code, body = _k8s("GET", f"/apis/apps/v1/namespaces/{ns}/deployments")
-        if code not in (200, 201):
-            raise HTTPException(status_code=502, detail=(body or {}).get("message", f"list deployments failed ({code})"))
-        pcode, pods = _k8s("GET", f"/api/v1/namespaces/{ns}/pods")
-        pods_by_app: dict[str, dict] = {}
-        if pcode == 200:
-            for pod in (pods or {}).get("items") or []:
-                labels = (pod.get("metadata") or {}).get("labels") or {}
-                app = labels.get("app.kubernetes.io/name") or labels.get("app") or ""
-                if app:
-                    pods_by_app[app] = pod
-        ues = []
-        for dep in (body or {}).get("items") or []:
-            meta = dep.get("metadata") or {}
-            name = meta.get("name") or ""
-            idx = _ue_idx_from_name(name)
-            if idx is None:
-                continue
-            labels = meta.get("labels") or {}
-            spec = (dep.get("spec") or {}).get("template") or {}
-            spec_labels = (spec.get("metadata") or {}).get("labels") or {}
-            ip = labels.get("ina.lab/console-ip") or spec_labels.get("ina.lab/console-ip") or _console_ip(idx)
-            raw_mac = labels.get("ina.lab/console-mac") or spec_labels.get("ina.lab/console-mac") or ""
-            mac = raw_mac.replace("-", ":") if raw_mac else _console_mac(idx)
-            st = (dep.get("status") or {})
-            ready = int(st.get("readyReplicas") or 0)
-            desired = int(st.get("replicas") or 1)
-            pod = pods_by_app.get(name) or {}
-            phase = (pod.get("status") or {}).get("phase") or ""
-            containers = (pod.get("status") or {}).get("containerStatuses") or []
-            sidecar = {c.get("name"): bool(c.get("ready")) for c in containers if isinstance(c, dict)}
-            live = None
-            sc, live = _ue_http_idx(idx, "/api/status", timeout=3)
-            if sc != 200:
-                live = {"ok": False, "http_status": sc, **(live if isinstance(live, dict) else {})}
-            multus_url = _http_url(ip) if ip else f"http://{_console_ip(idx)}:80"
-            ues.append(
-                {
-                    "name": name,
-                    "client_index": idx,
-                    "ready": ready,
-                    "desired": desired,
-                    "pod_phase": phase,
-                    "sidecars": sidecar,
-                    "console_ip": ip,
-                    "console_mac": mac,
-                    "console_url": multus_url,
-                    "dashboard_url": multus_url,
-                    "connected": (ready >= 1) or (phase == "Running"),
-                    "status": live,
-                }
-            )
-        ues.sort(key=lambda u: int(u["client_index"]))
-        return {"ok": True, "slice_id": SLICE_ID, "ues": ues}
-
-
-    @app.get("/api/ues/{idx}/exchanges")
-    def api_ue_exchanges(idx: int, limit: int = 40) -> dict:
-        code, body = _ue_http_idx(idx, f"/api/exchanges?limit={int(limit)}", timeout=8)
-        if code != 200:
-            raise HTTPException(status_code=code if code >= 400 else 502, detail=body)
-        return body
-
-
-    @app.post("/api/ues/{idx}/control")
-    def api_ue_control(idx: int, body: UeControlIn) -> dict:
-        payload = {k: v for k, v in body.model_dump().items() if v is not None}
-        code, resp = _ue_http_idx(idx, "/api/control", method="POST", body=payload, timeout=8)
-        if code != 200:
-            raise HTTPException(status_code=code if code >= 400 else 502, detail=resp)
-        return resp
-
-
-    @app.post("/api/ues/{idx}/send-once")
-    def api_ue_send_once(idx: int) -> dict:
-        code, resp = _ue_http_idx(idx, "/api/send-once", method="POST", body={}, timeout=130)
-        if code != 200:
-            raise HTTPException(status_code=code if code >= 400 else 502, detail=resp)
-        return resp
-
-
-    _slo_lock = threading.Lock()
-    _slo = {
-        "latency_ms": None,
-        "throughput_mbps": 0.0,
-        "ues": {},  # ue_id -> {latency_ms?, throughput_mbps}
-    }
-
-    _ul_lock = threading.Lock()
-    _ul_delay_ms: dict[str, float] = {}
-    _ul_delay_at: dict[str, float] = {}
-    _ul_window: deque[tuple[float, float]] = deque(maxlen=64)
-
-
-    def _grafana_ue_id(app_name: Any, client_index: Any) -> str:
-        if isinstance(app_name, str) and app_name.strip():
-            return app_name.strip()
-        try:
-            return f"slice{SLICE_ID}-physical-ai-client-{int(client_index)}"
-        except (TypeError, ValueError):
-            return f"slice{SLICE_ID}-physical-ai-client"
-
-
-    def _record_ul_latency(ue_id: str, delay_ms: float) -> None:
-        uid = str(ue_id or _grafana_ue_id(None, None))
-        now = time.time()
-        with _ul_lock:
-            _ul_delay_ms[uid] = float(delay_ms)
-            _ul_delay_at[uid] = now
-            _ul_window.append((now, float(delay_ms)))
-
-
-    def _fresh_ul(now: Optional[float] = None) -> tuple[dict[str, float], list[float]]:
-        """Uplink delay from messages received within LATENCY_STALE_S. Omit otherwise."""
-        now = time.time() if now is None else now
-        cutoff = now - max(1.0, LATENCY_STALE_S)
-        with _ul_lock:
-            for uid in [u for u, ts in _ul_delay_at.items() if ts < cutoff]:
-                _ul_delay_ms.pop(uid, None)
-                _ul_delay_at.pop(uid, None)
-            window = [v for ts, v in _ul_window if ts >= cutoff]
-            return dict(_ul_delay_ms), window
-
-
-    def _one_way_ms(_ue_id: str, raw_s: float) -> float:
-        """Radio one-way delay: ``t_recv − t_send`` in milliseconds.
-
-        Requires NTP-aligned UE host (usrp) and server host (gpu-a40). Negative
-        values are clock skew, not reverse flight time — clamp to 0 like IoT.
-        """
-        delay_ms = float(raw_s) * 1000.0
-        if delay_ms < 0:
-            return 0.0
-        return delay_ms
-
-
-    class _LatencyProxyHandler(BaseHTTPRequestHandler):
-        """Stamp uplink one-way delay (recv − t_send) then forward to vLLM."""
-
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, fmt: str, *args: Any) -> None:
-            return
-
-        def _vllm(self, method: str, path: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes, str]:
-            hdrs = {"Content-Type": headers.get("Content-Type") or "application/json"}
-            req = urllib.request.Request(
-                f"{VLLM_URL}{path}",
-                data=body if method not in ("GET", "HEAD") else None,
-                headers=hdrs,
-                method=method,
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    raw = resp.read()
-                    ctype = resp.headers.get("Content-Type") or "application/json"
-                    return int(resp.status), raw, ctype
-            except urllib.error.HTTPError as exc:
-                raw = exc.read()
-                ctype = (exc.headers.get("Content-Type") if exc.headers else None) or "application/json"
-                return int(exc.code), raw, ctype
-            except urllib.error.URLError as exc:
-                payload = json.dumps({"error": {"message": f"vLLM not ready: {exc.reason}"}}).encode()
-                return 503, payload, "application/json"
-
-        def _reply(self, code: int, raw: bytes, ctype: str) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(raw)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def do_GET(self) -> None:  # noqa: N802
-            path = self.path or "/"
-            code, raw, ctype = self._vllm("GET", path, b"", dict(self.headers))
-            self._reply(code, raw, ctype)
-
-        def do_POST(self) -> None:  # noqa: N802
-            recv = time.time()
-            path = self.path or "/"
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except (TypeError, ValueError):
-                length = 0
-            raw_in = self.rfile.read(length) if length > 0 else b""
-            fwd = raw_in
-            t_send = None
-            app_name = self.headers.get("X-INA-App-Name")
-            client_index = self.headers.get("X-INA-Client-Index")
-            hdr_t = self.headers.get("X-INA-T-Send")
-            if hdr_t:
-                try:
-                    t_send = float(hdr_t)
-                except (TypeError, ValueError):
-                    t_send = None
-            try:
-                parsed = json.loads(raw_in) if raw_in else None
-            except (ValueError, TypeError):
-                parsed = None
-            if isinstance(parsed, dict):
-                ina = parsed.pop("ina", None)
-                if isinstance(ina, dict):
-                    if t_send is None:
-                        try:
-                            t_send = float(ina.get("t_send"))
-                        except (TypeError, ValueError):
-                            t_send = None
-                    app_name = app_name or ina.get("app_name")
-                    if client_index is None:
-                        client_index = ina.get("client_index")
-                if "t_send" in parsed and t_send is None:
-                    try:
-                        t_send = float(parsed.pop("t_send"))
-                    except (TypeError, ValueError):
-                        parsed.pop("t_send", None)
-                fwd = json.dumps(parsed, separators=(",", ":")).encode("utf-8")
-            delay_ms = None
-            if t_send is not None:
-                delay_ms = _one_way_ms(_grafana_ue_id(app_name, client_index), recv - float(t_send))
-                _record_ul_latency(_grafana_ue_id(app_name, client_index), delay_ms)
-            code, raw_out, ctype = self._vllm("POST", path, fwd, dict(self.headers))
-            if delay_ms is not None and "json" in (ctype or ""):
-                try:
-                    out = json.loads(raw_out.decode("utf-8") or "{}")
-                except (ValueError, TypeError, UnicodeDecodeError):
-                    out = None
-                if isinstance(out, dict):
-                    out["ina"] = {
-                        "t_send": t_send,
-                        "t_recv": recv,
-                        "latency_ms": round(delay_ms, 3),
-                        "app_name": _grafana_ue_id(app_name, client_index),
-                    }
-                    raw_out = json.dumps(out).encode("utf-8")
-            self._reply(code, raw_out, ctype)
-
-        def do_HEAD(self) -> None:  # noqa: N802
-            self.do_GET()
-
-
-    def _start_latency_proxy() -> None:
-        server = ThreadingHTTPServer(("0.0.0.0", LATENCY_PROXY_PORT), _LatencyProxyHandler)
-        threading.Thread(target=server.serve_forever, name="ul-latency-proxy", daemon=True).start()
-
-
-    def _slo_from_ues() -> None:
-        ues = {}
-        tput = 0.0
-        try:
-            body = api_ues()
-        except Exception:
-            body = {"ues": []}
-        for u in body.get("ues") or []:
-            idx = u.get("client_index")
-            st = u.get("status") or {}
-            uid = str(st.get("app_name") or u.get("name") or f"slice{SLICE_ID}-physical-ai-client-{idx}")
-            last = st.get("last") or {}
-            sent = last.get("sent") or {}
-            sent_b = float(sent.get("bytes") or 0.0)
-            try:
-                interval = float(st.get("interval_s") or 8)
-            except (TypeError, ValueError):
-                interval = 8.0
-            mbps = (sent_b * 8.0) / (interval * 1e6) if interval > 0 and sent_b else 0.0
-            ues[uid] = {"throughput_mbps": mbps}
-            tput += mbps
-        ul, window = _fresh_ul()
-        for uid, lat in ul.items():
-            slot = dict(ues.get(uid) or {"throughput_mbps": 0.0})
-            slot["latency_ms"] = lat
-            ues[uid] = slot
-        with _slo_lock:
-            _slo["ues"] = ues
-            _slo["latency_ms"] = (sum(window) / len(window)) if window else None
-            _slo["throughput_mbps"] = tput
-
-
-    def _slo_loop() -> None:
-        while True:
-            try:
-                _slo_from_ues()
-            except Exception:
-                pass
-            time.sleep(2)
-
-
-    @app.get("/metrics")
-    def prometheus_metrics() -> Response:
-        with _slo_lock:
-            agg_tput = _slo["throughput_mbps"]
-            ues = dict(_slo["ues"])
-        ul, _window = _fresh_ul()
-        lines = [
-            "# HELP app_throughput_mbps Aggregated application throughput (Mbps)",
-            "# TYPE app_throughput_mbps gauge",
-            f"app_throughput_mbps {agg_tput}",
-            "# HELP app_ue_throughput_mbps Per-UE application throughput (Mbps)",
-            "# TYPE app_ue_throughput_mbps gauge",
-        ]
-        if ul:
-            lines.extend(
-                [
-                    "# HELP app_ue_latency_ms Per-UE application latency (milliseconds)",
-                    "# TYPE app_ue_latency_ms gauge",
-                ]
-            )
-            for uid, lat in ul.items():
-                safe = uid.replace('"', "")
-                lines.append(f'app_ue_latency_ms{{ue_id="{safe}"}} {lat}')
-        for uid, vals in ues.items():
-            safe = uid.replace('"', "")
-            lines.append(f'app_ue_throughput_mbps{{ue_id="{safe}"}} {vals.get("throughput_mbps") or 0.0}')
-        return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
-
-
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
-
-
-    @app.on_event("startup")
-    def _start_slo_loop() -> None:
-        try:
-            _start_latency_proxy()
-        except Exception:
-            pass
-        threading.Thread(target=_slo_loop, name="slo-metrics", daemon=True).start()
-
-
-    if STATIC_DIR.is_dir():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-  index.html: "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <title>Physical AI · NeuroRAN</title>\n  <link rel=\"icon\" type=\"image/png\" href=\"/static/logos/NeuroRAN.png\" />\n  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />\n  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />\n  <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap\" rel=\"stylesheet\" />\n  <style>\n    /* NeuroRAN Visual Identity Standard — CSS Design System */\n    :root {\n      --bg0: #070b14;\n      --bg1: #0b1120;\n      --card: rgba(15, 23, 42, 0.75);\n      --card-raised: rgba(22, 34, 60, 0.85);\n      --surface: rgba(255, 255, 255, 0.035);\n      --surface-2: rgba(255, 255, 255, 0.06);\n      --surface-raised: rgba(255, 255, 255, 0.09);\n      --border: rgba(255, 255, 255, 0.08);\n      --border-2: rgba(255, 255, 255, 0.14);\n      --text: #eef2f9;\n      --text-dim: #93a0b8;\n      --text-faint: #5e6b85;\n      --accent: #16E6A0;\n      --accent2: #00C2D4;\n      --accent-glow: rgba(22, 230, 160, 0.25);\n      --accent-orange: #f5a623;\n      --bad: #ff5a6e;\n      --bad-bg: rgba(255, 90, 110, 0.12);\n      --ok: #16e6a0;\n      --ok-bg: rgba(22, 230, 160, 0.12);\n      --warn: #f5a623;\n      --warn-bg: rgba(245, 166, 35, 0.12);\n      --radius-sm: 6px;\n      --radius-md: 10px;\n      --radius-lg: 14px;\n      --shadow-tier: 0 18px 50px -22px rgba(0, 0, 0, 0.7);\n    }\n\n    * { box-sizing: border-box; margin: 0; padding: 0; }\n    html, body { min-height: 100vh; }\n\n    body {\n      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;\n      background:\n        radial-gradient(1200px 600px at 80% -10%, rgba(22, 230, 160, 0.12) 0%, transparent 60%),\n        radial-gradient(1000px 700px at 10% 110%, rgba(0, 194, 212, 0.10) 0%, transparent 55%),\n        linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);\n      color: var(--text);\n      -webkit-font-smoothing: antialiased;\n      line-height: 1.5;\n    }\n\n    .mono {\n      font-family: 'IBM Plex Mono', monospace;\n      font-variant-numeric: tabular-nums;\n    }\n\n    /* Header & Navigation */\n    header {\n      background: rgba(7, 11, 20, 0.82);\n      backdrop-filter: blur(14px);\n      -webkit-backdrop-filter: blur(14px);\n      border-bottom: 1px solid var(--border);\n      padding: 14px 28px;\n      position: sticky;\n      top: 0;\n      z-index: 50;\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      gap: 16px;\n      flex-wrap: wrap;\n    }\n\n    .brand-wrap {\n      display: flex;\n      align-items: center;\n      gap: 14px;\n    }\n\n    .brand-logo {\n      width: 32px;\n      height: 38px;\n      display: inline-block;\n      flex-shrink: 0;\n    }\n\n    .brand-text h1 {\n      font-family: 'Space Grotesk', sans-serif;\n      font-size: 17px;\n      font-weight: 700;\n      letter-spacing: -0.01em;\n      color: var(--text);\n      display: flex;\n      align-items: center;\n      gap: 8px;\n    }\n\n    .brand-text h1 .badge {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 11px;\n      font-weight: 600;\n      color: var(--accent);\n      background: rgba(22, 230, 160, 0.12);\n      border: 1px solid rgba(22, 230, 160, 0.3);\n      padding: 2px 7px;\n      border-radius: 999px;\n      letter-spacing: 0.04em;\n    }\n\n    .kicker {\n      color: var(--text-dim);\n      font-size: 11px;\n      text-transform: uppercase;\n      letter-spacing: 0.12em;\n      font-weight: 600;\n    }\n\n    .header-actions {\n      display: flex;\n      align-items: center;\n      gap: 10px;\n      flex-wrap: wrap;\n    }\n\n    .ext-link {\n      display: inline-flex;\n      align-items: center;\n      gap: 5px;\n      color: var(--text-dim);\n      text-decoration: none;\n      font-size: 12px;\n      font-weight: 500;\n      background: var(--surface);\n      border: 1px solid var(--border);\n      padding: 5px 10px;\n      border-radius: var(--radius-sm);\n      transition: all 0.15s ease;\n    }\n    .ext-link:hover {\n      color: var(--text);\n      border-color: var(--border-2);\n      background: var(--surface-2);\n    }\n    .ext-link.grafana {\n      color: var(--accent);\n      border-color: rgba(22, 230, 160, 0.25);\n      background: rgba(22, 230, 160, 0.06);\n    }\n    .ue-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n      gap: 12px;\n    }\n    .card .kpi-strip-ue { margin: 0 0 14px; }\n    .ue-card {\n      background: var(--surface);\n      border: 1px solid var(--border);\n      border-radius: var(--radius-md);\n      padding: 14px 16px;\n    }\n    .ue-tok {\n      display: grid;\n      grid-template-columns: 1fr 1fr;\n      gap: 8px;\n      margin-top: 10px;\n    }\n    .ue-tok-item {\n      background: rgba(7, 11, 20, 0.45);\n      border: 1px solid var(--border);\n      border-radius: 8px;\n      padding: 8px 10px;\n      min-width: 0;\n    }\n    .ue-tok-label {\n      font-size: 10px;\n      font-weight: 600;\n      letter-spacing: 0.08em;\n      text-transform: uppercase;\n      color: var(--text-faint);\n    }\n    .ue-tok-value {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 15px;\n      font-weight: 600;\n      margin-top: 4px;\n      color: var(--text);\n    }\n    .ue-tok-sub {\n      font-size: 11px;\n      color: var(--text-dim);\n      margin-top: 2px;\n    }\n    .ue-dash-btn {\n      display: inline-flex; align-items: center; gap: 6px;\n      background: var(--accent); color: #04140e; font-weight: 700; font-size: 13px;\n      padding: 8px 14px; border-radius: 8px; text-decoration: none !important;\n    }\n    .ue-dash-btn:hover { filter: brightness(1.08); }\n\n    .ext-link.grafana:hover {\n      border-color: var(--accent);\n      background: rgba(22, 230, 160, 0.14);\n    }\n\n    /* Container — full dash width (rail already takes 92px) */\n    main, main.dash {\n      padding: 16px 22px 32px;\n      max-width: none;\n      width: 100%;\n      margin: 0;\n      display: grid;\n      gap: 16px;\n    }\n\n    .section-label {\n      display: flex;\n      align-items: center;\n      gap: 8px;\n      margin-bottom: 2px;\n    }\n    .section-bar {\n      width: 3px;\n      height: 13px;\n      border-radius: 2px;\n      background: linear-gradient(180deg, var(--accent), var(--accent2));\n    }\n    .section-text {\n      font-size: 12px;\n      font-weight: 600;\n      letter-spacing: 0.08em;\n      text-transform: uppercase;\n      color: var(--text-dim);\n    }\n\n    /* KPI Summary Strip — 5 equal columns across the dash */\n    .kpi-strip {\n      display: grid;\n      grid-template-columns: repeat(5, minmax(0, 1fr));\n      gap: 12px;\n    }\n    @media (max-width: 1279px) {\n      .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }\n    }\n    @media (max-width: 1023px) {\n      .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }\n    }\n    @media (max-width: 480px) {\n      .kpi-strip { grid-template-columns: 1fr; }\n    }\n    .kpi-strip-status,\n    .kpi-strip-ue {\n      grid-template-columns: repeat(4, minmax(0, 1fr));\n    }\n    @media (max-width: 1023px) {\n      .kpi-strip-status,\n      .kpi-strip-ue { grid-template-columns: repeat(2, minmax(0, 1fr)); }\n    }\n\n    .kpi-card {\n      background: var(--card);\n      border: 1px solid var(--border);\n      border-radius: var(--radius-md);\n      padding: 16px 18px 18px;\n      box-shadow: 0 4px 20px -8px rgba(0, 0, 0, 0.5);\n      backdrop-filter: blur(8px);\n      transition: border-color 0.15s ease;\n      min-width: 0;\n    }\n    .kpi-card:hover {\n      border-color: var(--border-2);\n    }\n\n    .kpi-label {\n      font-size: 11px;\n      text-transform: uppercase;\n      letter-spacing: 0.08em;\n      color: var(--text-dim);\n      margin-bottom: 10px;\n      display: flex;\n      align-items: center;\n      justify-content: space-between;\n      gap: 8px;\n    }\n\n    .kpi-value {\n      font-family: 'Space Grotesk', sans-serif;\n      font-size: 22px;\n      font-weight: 700;\n      letter-spacing: -0.02em;\n      color: var(--text);\n      display: flex;\n      align-items: center;\n      gap: 8px;\n      line-height: 1.2;\n      word-break: break-word;\n    }\n    .kpi-value.mono {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 15px;\n      font-weight: 600;\n      letter-spacing: 0;\n    }\n\n    /* Standard Cards */\n    .card {\n      background: var(--card);\n      border: 1px solid var(--border);\n      border-radius: var(--radius-lg);\n      padding: 20px 24px;\n      box-shadow: var(--shadow-tier);\n      backdrop-filter: blur(12px);\n      position: relative;\n    }\n\n    .card.tier::before {\n      content: '';\n      position: absolute;\n      top: 0;\n      left: 24px;\n      right: 24px;\n      height: 1px;\n      background: linear-gradient(90deg, transparent, rgba(22, 230, 160, 0.4), transparent);\n    }\n\n    .card-header {\n      margin-bottom: 16px;\n      display: flex;\n      align-items: center;\n      justify-content: space-between;\n      gap: 12px;\n      flex-wrap: wrap;\n    }\n\n    .card-title {\n      font-family: 'Space Grotesk', sans-serif;\n      font-size: 15px;\n      font-weight: 700;\n      color: var(--text);\n      display: flex;\n      align-items: center;\n      gap: 8px;\n    }\n\n    .card-subtitle {\n      color: var(--text-dim);\n      font-size: 13px;\n      margin-top: 4px;\n      line-height: 1.4;\n    }\n\n    /* Form Controls */\n    .row {\n      display: flex;\n      gap: 10px;\n      flex-wrap: wrap;\n      align-items: center;\n    }\n\n    label {\n      display: block;\n      font-size: 12px;\n \
-    \     font-weight: 600;\n      color: var(--text-dim);\n      margin-bottom: 6px;\n      text-transform: uppercase;\n      letter-spacing: 0.06em;\n    }\n\n    input, textarea, select {\n      width: 100%;\n      background: rgba(7, 11, 20, 0.7);\n      color: var(--text);\n      border: 1px solid var(--border);\n      border-radius: var(--radius-sm);\n      padding: 9px 12px;\n      font-family: inherit;\n      font-size: 13px;\n      outline: none;\n      transition: all 0.15s ease;\n    }\n    input:focus, textarea:focus, select:focus {\n      border-color: var(--accent);\n      box-shadow: 0 0 0 2px var(--accent-glow);\n      background: rgba(7, 11, 20, 0.95);\n    }\n\n    textarea {\n      min-height: 96px;\n      resize: vertical;\n      font-family: inherit;\n      line-height: 1.5;\n    }\n\n    /* Buttons */\n    button, .btn {\n      display: inline-flex;\n      align-items: center;\n      justify-content: center;\n      gap: 6px;\n      background: linear-gradient(135deg, rgba(22, 230, 160, 0.16), rgba(0, 194, 212, 0.16));\n      color: var(--accent);\n      border: 1px solid rgba(22, 230, 160, 0.35);\n      border-radius: var(--radius-sm);\n      padding: 8px 14px;\n      font-family: inherit;\n      font-size: 12px;\n      font-weight: 600;\n      cursor: pointer;\n      transition: all 0.15s ease;\n      white-space: nowrap;\n      text-decoration: none;\n    }\n    button:hover:not(:disabled), .btn:hover:not(:disabled) {\n      background: linear-gradient(135deg, rgba(22, 230, 160, 0.26), rgba(0, 194, 212, 0.26));\n      border-color: var(--accent);\n      box-shadow: 0 0 12px rgba(22, 230, 160, 0.2);\n    }\n    button:disabled, .btn:disabled {\n      opacity: 0.45;\n      cursor: not-allowed;\n    }\n\n    button.btn-secondary {\n      background: var(--surface);\n      color: var(--text-dim);\n      border-color: var(--border);\n    }\n    button.btn-secondary:hover:not(:disabled) {\n      background: var(--surface-2);\n      color: var(--text);\n      border-color: var(--border-2);\n      box-shadow: none;\n    }\n\n    button.danger {\n      background: var(--bad-bg);\n      color: var(--bad);\n      border-color: rgba(255, 90, 110, 0.35);\n    }\n    button.danger:hover:not(:disabled) {\n      background: rgba(255, 90, 110, 0.22);\n      border-color: var(--bad);\n      box-shadow: 0 0 12px rgba(255, 90, 110, 0.2);\n    }\n\n    /* Status Pills & Dots */\n    .pill {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 11px;\n      font-weight: 500;\n      padding: 3px 9px;\n      border-radius: 999px;\n      border: 1px solid var(--border);\n      color: var(--text-dim);\n      background: var(--surface);\n      display: inline-flex;\n      align-items: center;\n      gap: 6px;\n    }\n    .pill.ok {\n      color: var(--ok);\n      border-color: rgba(22, 230, 160, 0.35);\n      background: var(--ok-bg);\n    }\n    .pill.bad {\n      color: var(--bad);\n      border-color: rgba(255, 90, 110, 0.35);\n      background: var(--bad-bg);\n    }\n\n    .dot {\n      width: 7px;\n      height: 7px;\n      border-radius: 50%;\n      display: inline-block;\n      background: currentColor;\n      flex-shrink: 0;\n    }\n    .dot.ok { color: var(--ok); background: var(--ok); }\n    .dot.bad { color: var(--bad); background: var(--bad); }\n    .dot.pulse {\n      animation: pulse-dot 1.8s infinite ease-in-out;\n    }\n    @keyframes pulse-dot {\n      0%, 100% { transform: scale(1); opacity: 1; }\n      50% { transform: scale(1.3); opacity: 0.6; }\n    }\n\n    /* Output & Terminal Area */\n    pre, .code-box {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 12.5px;\n      white-space: pre-wrap;\n      word-break: break-word;\n      background: rgba(5, 8, 15, 0.85);\n      border: 1px solid var(--border);\n      border-radius: var(--radius-md);\n      padding: 14px;\n      color: #cbd5e1;\n      min-height: 80px;\n      max-height: 480px;\n      overflow-y: auto;\n      line-height: 1.6;\n    }\n\n    .prompt-presets {\n      display: flex;\n      gap: 6px;\n      flex-wrap: wrap;\n      margin-top: 8px;\n    }\n    .preset-chip {\n      font-size: 11px;\n      background: var(--surface);\n      border: 1px solid var(--border);\n      color: var(--text-dim);\n      padding: 3px 8px;\n      border-radius: 999px;\n      cursor: pointer;\n      transition: all 0.15s ease;\n    }\n    .preset-chip:hover {\n      color: var(--accent);\n      border-color: rgba(22, 230, 160, 0.4);\n      background: var(--surface-2);\n    }\n\n    /* Messages & Alerts */\n    .msg-box {\n      font-size: 12px;\n      margin-top: 10px;\n      padding: 8px 12px;\n      border-radius: var(--radius-sm);\n      display: none;\n    }\n    .msg-box.show { display: block; }\n    .msg-box.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid rgba(22, 230, 160, 0.3); }\n    .msg-box.err { background: var(--bad-bg); color: var(--bad); border: 1px solid rgba(255, 90, 110, 0.3); }\n\n    a { color: var(--accent); text-decoration: none; }\n    a:hover { text-decoration: underline; }\n    code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }\n\n/* CCTV-like left rail + tabs for HTML consoles */\nhtml, body { height: 100%; overflow: hidden; }\n.app {\n  display: flex;\n  align-items: stretch;\n  height: 100vh;\n  max-height: 100vh;\n  overflow: hidden;\n}\n.app-body {\n  flex: 1;\n  min-width: 0;\n  display: flex;\n  flex-direction: column;\n  height: 100vh;\n  overflow: hidden;\n}\n.rail {\n  width: 92px;\n  flex: 0 0 92px;\n  height: 100vh;\n  border-right: 1px solid var(--border);\n  display: flex;\n  flex-direction: column;\n  padding: 14px 10px 12px;\n  background: var(--surface);\n}\n.rail-brand {\n  display: flex;\n  justify-content: center;\n  padding: 2px 0 14px;\n  border-bottom: 1px solid var(--border);\n  margin-bottom: 12px;\n}\n.rail-logo { width: 56px; height: auto; display: block; }\n.rail-nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }\n.rail-tab {\n  position: relative;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 5px;\n  width: 100%;\n  min-height: 54px;\n  padding: 6px 4px;\n  border: 1px solid transparent;\n  border-radius: 12px;\n  background: transparent;\n  color: var(--text-dim);\n  cursor: pointer;\n  font: inherit;\n}\n.rail-tab-icon { display: grid; place-items: center; width: 22px; height: 22px; }\n.rail-tab-icon svg { width: 20px; height: 20px; }\n.rail-tab-label {\n  font-size: 10px;\n  font-weight: 600;\n  color: var(--text-faint);\n  line-height: 1.15;\n  text-align: center;\n}\n.rail-tab:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }\n.rail-tab-active {\n  background: rgba(22, 230, 160, 0.10);\n  color: var(--accent);\n  border-color: rgba(22, 230, 160, 0.22);\n}\n.rail-tab-active .rail-tab-label { color: var(--accent); }\n.rail-tab-active::before {\n  content: \"\";\n  position: absolute;\n  left: -10px;\n  top: 50%;\n  transform: translateY(-50%);\n  width: 3px;\n  height: 24px;\n  border-radius: 0 3px 3px 0;\n  background: var(--accent);\n}\n.rail-foot {\n  margin-top: auto;\n  padding-top: 12px;\n  border-top: 1px solid var(--border);\n  display: flex;\n  justify-content: center;\n}\n.rail-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }\n.rail-status-dot {\n  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);\n  box-shadow: 0 0 0 3px rgba(22, 230, 160, 0.18);\n}\n.rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint); text-align: center; }\n.topbar {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 12px 20px;\n  background: rgba(11, 17, 32, 0.82);\n  backdrop-filter: blur(16px);\n  border-bottom: 1px solid var(--border);\n  flex-shrink: 0;\n}\n.crumb { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }\n.site-badge {\n  font-size: 11px; font-weight: 600; color: var(--accent);\n  background: rgba(22, 230, 160, 0.12);\n  padding: 5px 11px; border-radius: 20px; white-space: nowrap;\n}\n.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }\n.dash {\n  flex: 1;\n  min-height: 0;\n  overflow: auto;\n  padding: 16px 22px 32px;\n  display: grid;\n  gap: 16px;\n  width: 100%;\n  max-width: none;\n}\n.studio-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);\n  grid-template-rows: auto minmax(200px, 1fr) auto auto;\n  gap: 10px 18px;\n  align-items: stretch;\n}\n.studio-col {\n  display: grid;\n  grid-template-rows: subgrid;\n  grid-row: 1 / -1;\n  min-width: 0;\n}\n.studio-col label { margin-bottom: 0; }\n.studio-col textarea,\n.studio-col pre {\n  min-height: 200px;\n  height: 100%;\n  max-height: none;\n  margin: 0;\n  box-sizing: border-box;\n}\n.studio-col-out pre { grid-row: 2 / -1; }\n.studio-col .prompt-presets { margin-top: 0; }\n.studio-col .row { margin-top: 0 !important; }\n@media (max-width: 1100px) {\n  .studio-grid {\n    grid-template-columns: 1fr;\n    grid-template-rows: none;\n  }\n  .studio-col { display: flex; flex-direction: column; gap: 8px; grid-row: auto; }\n  .studio-col-out pre { grid-row: auto; }\n}\n.tab-panel { display: grid; gap: 16px; width: 100%; min-width: 0; }\n.docs-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin: 8px 0 0; }\n.docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }\n.docs-table th, .docs-table td {\n  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;\n}\n.docs-table th { color: var(--text-faint); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }\n.docs-badge-get { color: var(--accent); font-weight: 700; font-size: 11px; }\n.docs-badge-post { color: var(--accent2);\
-    \ font-weight: 700; font-size: 11px; }\n.docs-badge-put { color: var(--accent-orange); font-weight: 700; font-size: 11px; }\n.docs-badge-del { color: var(--bad); font-weight: 700; font-size: 11px; }\n\n  </style>\n</head>\n<body>\n<div class=\"app theme-dark\">\n  <aside class=\"rail\">\n    <div class=\"rail-brand\" title=\"Physical AI · NeuroRAN\"><img class=\"rail-logo\" src=\"/static/logos/NeuroRAN.png\" alt=\"NeuroRAN\" /></div>\n    <nav class=\"rail-nav\" aria-label=\"Main navigation\">\n      <button type=\"button\" class=\"rail-tab rail-tab-active\" data-tab=\"overview\" onclick=\"setConsoleTab('overview')\">\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/></svg></span>\n        <span class=\"rail-tab-label\">Overview</span>\n      </button>\n      <button type=\"button\" class=\"rail-tab\" data-tab=\"ues\" onclick=\"setConsoleTab('ues')\">\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><path d=\"M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75\"/></svg></span>\n        <span class=\"rail-tab-label\">UEs</span>\n      </button>\n      <button type=\"button\" class=\"rail-tab\" data-tab=\"studio\" onclick=\"setConsoleTab('studio')\">\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polygon points=\"5 3 19 12 5 21 5 3\"/></svg></span>\n        <span class=\"rail-tab-label\">Studio</span>\n      </button>\n      <button type=\"button\" class=\"rail-tab\" data-tab=\"token\" onclick=\"setConsoleTab('token')\">\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"11\" width=\"18\" height=\"11\" rx=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg></span>\n        <span class=\"rail-tab-label\">Token</span>\n      </button>\n      <button type=\"button\" class=\"rail-tab\" data-tab=\"docs\" onclick=\"setConsoleTab('docs')\">\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 19.5A2.5 2.5 0 0 1 6.5 17H20\"/><path d=\"M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z\"/></svg></span>\n        <span class=\"rail-tab-label\">Docs</span>\n      </button>\n    </nav>\n    <div class=\"rail-foot\"><div class=\"rail-status\"><span class=\"rail-status-dot\"></span><span class=\"rail-status-text\">PAI</span></div></div>\n  </aside>\n  <div class=\"app-body\">\n    <header class=\"topbar\">\n      <div class=\"crumb\" id=\"crumb\">Physical AI · Cosmos3</div>\n      <span class=\"site-badge\">INA · Physical AI</span>\n      <div class=\"topbar-right\">\n        <div class=\"row\" id=\"header-pills\">\n        <span class=\"pill\"><span class=\"dot pulse\"></span> connecting…</span>\n      </div>\n      <a class=\"ext-link\" href=\"/api/docs\" target=\"_blank\" rel=\"noreferrer\" title=\"Swagger REST API Reference\">Swagger API</a>\n      <a class=\"ext-link grafana\" href=\"http://10.1.137.105:3000/d/ina-physical-ai/physical-ai-metrics?orgId=1&refresh=5s\" target=\"_blank\" rel=\"noreferrer\" title=\"Open Grafana Physical AI Metrics\">\n        <span>Grafana</span>\n        <svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3\"/></svg>\n      </a>\n      </div>\n    </header>\n        <main class=\"dash\">\n      <div class=\"tab-panel\" data-tab=\"overview\">\n    <div class=\"section-label\"><span class=\"section-bar\"></span><span class=\"section-text\">Status</span></div>\n    <div class=\"kpi-strip kpi-strip-status\">\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">HF Secret Token <span class=\"dot\" id=\"kpi-hf-dot\"></span></div>\n        <div class=\"kpi-value\" id=\"kpi-hf\">Checking…</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">vLLM Inference Engine <span class=\"dot\" id=\"kpi-vllm-dot\"></span></div>\n        <div class=\"kpi-value\" id=\"kpi-vllm\">Checking…</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Active Model</div>\n        <div class=\"kpi-value\" id=\"kpi-model\">nvidia/Cosmos3-Nano</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Cluster & Namespace</div>\n        <div class=\"kpi-value mono\" id=\"kpi-ns\">ina-infra · edge</div>\n      </div>\n      </div>\n      </div>\n      <div class=\"tab-panel\" data-tab=\"ues\">\n          <section class=\"card tier\">\n      <div class=\"card-header\">\n        <div>\n          <h2 class=\"card-title\">Connected UEs</h2>\n          <p class=\"card-subtitle\">Slice-2 UEs start sending automatically when they come up. Use Stop / Start on each card to pause or resume. Open the UE dashboard for the full log.</p>\n        </div>\n        <button type=\"button\" class=\"btn-secondary\" id=\"refresh-ues\">Refresh UEs</button>\n      </div>\n    <div class=\"kpi-strip kpi-strip-ue\">\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Connected <span class=\"dot\" id=\"kpi-ue-dot\"></span></div>\n        <div class=\"kpi-value\" id=\"kpi-ue-connected\">—</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Sending</div>\n        <div class=\"kpi-value\" id=\"kpi-ue-sending\">—</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">PDU ready</div>\n        <div class=\"kpi-value\" id=\"kpi-ue-pdu\">—</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Last latency</div>\n        <div class=\"kpi-value mono\" id=\"kpi-ue-lat\">—</div>\n      </div>\n    </div>\n      <div id=\"ue-ctrl-msg\" class=\"msg-box\"></div>\n      <div id=\"ue-list\" class=\"ue-grid\">Loading UEs…</div>\n    </section>\n\n      </div>\n      <div class=\"tab-panel\" data-tab=\"studio\">\n          <!-- Interactive Inference & Reasoning Studio -->\n    <section class=\"card tier\">\n      <div class=\"card-header\">\n        <div>\n          <h2 class=\"card-title\">\n            <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polygon points=\"5 3 19 12 5 21 5 3\"/></svg>\n            Physical AI Prompt & Reasoning Studio\n          </h2>\n          <p class=\"card-subtitle\">Execute multimodal spatial reasoning and scene synthesis queries against the live vLLM server on port <code>8000</code>.</p>\n        </div>\n        <div class=\"row\">\n          <label style=\"margin:0; text-transform:none;\">Max Tokens:</label>\n          <select id=\"max-tokens\" style=\"width: auto; padding: 4px 8px; font-size: 12px;\">\n            <option value=\"128\">128 tokens</option>\n            <option value=\"256\" selected>256 tokens</option>\n            <option value=\"512\">512 tokens</option>\n            <option value=\"1024\">1024 tokens</option>\n          </select>\n        </div>\n      </div>\n\n      <div class=\"studio-grid\">\n      <div class=\"studio-col\">\n      <label>Prompt / Scenario Input</label>\n      <textarea id=\"prompt\">Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.</textarea>\n      <div class=\"prompt-presets\">\n        <span style=\"font-size: 11px; color: var(--text-faint); margin-right: 4px; align-self: center;\">Quick Presets:</span>\n        <button type=\"button\" class=\"preset-chip\" data-p=\"Analyze this warehouse corridor for an autonomous mobile robot: identify potential navigation hazards, dynamic obstacles, and suggest safe path vectors.\">Robot Navigation</button>\n        <button type=\"button\" class=\"preset-chip\" data-p=\"Describe the spatial relationships of all objects in this scene for a robotic manipulation arm.\">Spatial Scene Map</button>\n        <button type=\"button\" class=\"preset-chip\" data-p=\"Detect any safety rule violations or unauthorized personnel in this high-voltage substation zone.\">Industrial Safety Check</button>\n      </div>\n      <div class=\"row\">\n        <button type=\"button\" id=\"send-chat\" style=\"padding: 9px 18px;\">\n          <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg>\n          Run Inference\n        </button>\n        <button type=\"button\" class=\"btn-secondary\" id=\"clear-out\">Clear Output</button>\n      </div>\n      </div>\n      <div class=\"studio-col studio-col-out\">\n        <label>Reasoning Output</label>\n        <pre id=\"output-box\">vLLM output will appear here once inference is requested…</pre>\n      </div>\n      </div>\n    </section>\n  \n      </div>\n            <div class=\"tab-panel\" data-tab=\"token\">\n          <!-- Hugging Face Token Configuration -->\n    <section class=\"card tier\">\n      <div class=\"card-header\">\n        <div>\n          <h2 class=\"card-title\">\n            <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"11\" width=\"18\" height=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg>\n            Hugging Face Model Access Token\n          </h2>\n          <p class=\"card-subtitle\">\n            Cosmos3-Nano requires\
-    \ authenticated license acceptance on <a href=\"https://huggingface.co/nvidia/Cosmos3-Nano\" target=\"_blank\" rel=\"noreferrer\">huggingface.co/nvidia/Cosmos3-Nano</a>. Token is saved securely into Secret <code>ina-hf-token</code>.\n          </p>\n        </div>\n      </div>\n\n      <label>User Access Token (Read)</label>\n      <div class=\"row\">\n        <input id=\"token\" type=\"password\" placeholder=\"hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" autocomplete=\"off\" style=\"flex: 1 1 280px;\" />\n        <button type=\"button\" class=\"btn-secondary\" id=\"toggle-token\">Show</button>\n        <button type=\"button\" id=\"save-token\">Save Token & Start Engine</button>\n        <button type=\"button\" class=\"danger\" id=\"remove-token\">Remove</button>\n      </div>\n      <div class=\"msg-box\" id=\"token-msg\"></div>\n    </section>\n\n\n      </div>\n          <div class=\"tab-panel\" data-tab=\"docs\">\n        <section class=\"card tier\">\n          <div class=\"card-header\"><div>\n            <h2 class=\"card-title\">Physical AI · Slice 2</h2>\n            <p class=\"card-subtitle\">Cosmos3-Nano on A40 · vLLM sidecar</p>\n          </div></div>\n          <p class=\"docs-lead\">HF token, chat inference, and UE send/receive are proxied by this console. Interactive OpenAPI: <a href=\"/api/docs\" target=\"_blank\" rel=\"noreferrer\">/api/docs</a>.</p>\n          <table class=\"docs-table\">\n            <thead><tr><th>Method</th><th>Endpoint</th><th>Type</th><th>Description</th></tr></thead>\n            <tbody>\n              <tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/status</code></td><td>JSON</td><td>HF token configured, vLLM ready, namespace</td></tr><tr><td><span class=\"docs-badge-put\">PUT</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Save Hugging Face token into Secret</td></tr><tr><td><span class=\"docs-badge-del\">DELETE</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Remove stored token</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/chat</code></td><td>JSON</td><td>Run a vLLM prompt</td></tr><tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/ues</code></td><td>JSON</td><td>Slice-2 UE consoles</td></tr><tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/ues/{idx}/exchanges</code></td><td>JSON</td><td>Recent send/receive log</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/ues/{idx}/control</code></td><td>JSON</td><td>Enable or pause UE send</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/ues/{idx}/send-once</code></td><td>JSON</td><td>Trigger one UE inference</td></tr>\n            </tbody>\n          </table>\n        </section>\n      </div>\n    </main>\n  </div>\n</div>\n\n  <script>\n    const $ = (id) => document.getElementById(id);\n\n    async function req(url, opts) {\n      const r = await fetch(url, Object.assign({ headers: { \"Content-Type\": \"application/json\" } }, opts || {}));\n      const body = await r.json().catch(() => ({}));\n      if (!r.ok) {\n        const d = body && body.detail;\n        const msg = typeof d === \"string\" ? d : (d && (d.detail || d.message)) || body.message || r.statusText;\n        throw new Error(typeof msg === \"string\" ? msg : JSON.stringify(msg));\n      }\n      return body;\n    }\n\n    function showMsg(boxId, text, isError = false) {\n      const el = $(boxId);\n      el.className = `msg-box show ${isError ? 'err' : 'ok'}`;\n      el.textContent = text;\n      setTimeout(() => { el.className = 'msg-box'; }, 6000);\n    }\n\n    async function refreshStatus() {\n      try {\n        const s = await req(\"/api/status\");\n        \n        // Header Pills\n        $(\"header-pills\").innerHTML =\n          `<span class=\"pill ${s.configured ? \"ok\" : \"bad\"}\"><span class=\"dot ${s.configured ? \"pulse\" : \"\"}\"></span>${s.configured ? \"HF Token Active\" : \"HF Token Missing\"}</span>` +\n          `<span class=\"pill ${s.vllm_ready ? \"ok\" : \"bad\"}\"><span class=\"dot ${s.vllm_ready ? \"pulse\" : \"\"}\"></span>${s.vllm_ready ? \"vLLM Ready\" : \"vLLM Engine Offline\"}</span>` +\n          `<span class=\"pill mono\">${s.namespace}</span>`;\n\n        // KPI Strip\n        $(\"kpi-hf\").textContent = s.configured ? \"Saved in Secret\" : \"Missing / Not Set\";\n        $(\"kpi-hf-dot\").className = `dot ${s.configured ? \"ok pulse\" : \"bad\"}`;\n        $(\"kpi-vllm\").textContent = s.vllm_ready ? \"Online (200 OK)\" : \"Waiting for Token / Start\";\n        $(\"kpi-vllm-dot\").className = `dot ${s.vllm_ready ? \"ok pulse\" : \"bad\"}`;\n        if (s.model) $(\"kpi-model\").textContent = s.model;\n        $(\"kpi-ns\").textContent = `${s.namespace} · edge (gpu-a40)`;\n      } catch (e) {\n        $(\"header-pills\").innerHTML = `<span class=\"pill bad\"><span class=\"dot\"></span> Connection Error</span>`;\n      }\n    }\n\n    // Token toggle\n    $(\"toggle-token\").onclick = () => {\n      const input = $(\"token\");\n      input.type = input.type === \"password\" ? \"text\" : \"password\";\n      $(\"toggle-token\").textContent = input.type === \"password\" ? \"Show\" : \"Hide\";\n    };\n\n    // Save token\n    $(\"save-token\").onclick = async () => {\n      const tok = $(\"token\").value.trim();\n      if (!tok) {\n        showMsg(\"token-msg\", \"Please enter a valid Hugging Face access token.\", true);\n        return;\n      }\n      $(\"save-token\").disabled = true;\n      try {\n        const res = await req(\"/api/hf-token\", { method: \"PUT\", body: JSON.stringify({ token: tok }) });\n        showMsg(\"token-msg\", res.message || \"Token saved successfully. vLLM engine is initializing…\");\n        $(\"token\").value = \"\";\n        await refreshStatus();\n      } catch (e) {\n        showMsg(\"token-msg\", e.message, true);\n      } finally {\n        $(\"save-token\").disabled = false;\n      }\n    };\n\n    // Remove token\n    $(\"remove-token\").onclick = async () => {\n      if (!confirm(\"Remove the stored Hugging Face token secret?\")) return;\n      $(\"remove-token\").disabled = true;\n      try {\n        const res = await req(\"/api/hf-token\", { method: \"DELETE\" });\n        showMsg(\"token-msg\", res.message || \"Token secret removed.\");\n        await refreshStatus();\n      } catch (e) {\n        showMsg(\"token-msg\", e.message, true);\n      } finally {\n        $(\"remove-token\").disabled = false;\n      }\n    };\n\n    // Preset prompts\n    document.querySelectorAll(\".preset-chip\").forEach((btn) => {\n      btn.onclick = () => {\n        $(\"prompt\").value = btn.getAttribute(\"data-p\");\n      };\n    });\n\n    // Chat Inference\n    $(\"send-chat\").onclick = async () => {\n      const promptText = $(\"prompt\").value.trim();\n      if (!promptText) return;\n      \n      const maxTokens = parseInt($(\"max-tokens\").value, 10) || 256;\n      $(\"output-box\").textContent = \"Executing Cosmos3 inference on GPU worker… please wait…\";\n      $(\"send-chat\").disabled = true;\n\n      const t0 = performance.now();\n      try {\n        const res = await req(\"/api/chat\", {\n          method: \"POST\",\n          body: JSON.stringify({ prompt: promptText, max_tokens: maxTokens })\n        });\n        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);\n        $(\"output-box\").textContent = `[Inference completed in ${elapsed}s]\\n\\n${res.text || JSON.stringify(res, null, 2)}`;\n      } catch (e) {\n        $(\"output-box\").textContent = `[Inference Error]: ${e.message}\\n\\nEnsure Hugging Face token is active and vLLM container has finished loading model weights.`;\n      } finally {\n        $(\"send-chat\").disabled = false;\n      }\n    };\n\n    $(\"clear-out\").onclick = () => {\n      $(\"output-box\").textContent = \"vLLM output will appear here once inference is requested…\";\n    };\n\n    let selectedUe = null;\n    const autoStarted = new Set(JSON.parse(sessionStorage.getItem(\"pai-auto-started\") || \"[]\"));\n    function rememberAutoStart(key) {\n      autoStarted.add(key);\n      sessionStorage.setItem(\"pai-auto-started\", JSON.stringify([...autoStarted]));\n    }\n\n    function isUeRunning(st) {\n      const v = st && st.send_enabled;\n      return v === true || v === \"true\" || v === 1 || v === \"1\";\n    }\n\n    function paintToggle(btn, running) {\n      if (!btn) return;\n      btn.disabled = false;\n      if (running) {\n        btn.className = \"danger ue-ctrl-btn\";\n        btn.setAttribute(\"data-action\", \"stop\");\n        btn.textContent = \"⏹ Stop\";\n      } else {\n        btn.className = \"ue-ctrl-btn\";\n        btn.setAttribute(\"data-action\", \"start\");\n        btn.textContent = \"▶ Start\";\n      }\n    }\n\n    function ueLatency(st) {\n      const rec = (st && st.last && st.last.received) || {};\n      const v = rec.latency_ms != null ? rec.latency_ms : st && st.latency_ms;\n      return (v != null && v !== \"\") ? Number(v) : null;\n    }\n\n    function fmtTok(n) {\n      const v = Number(n);\n      if (n == null || n === \"\" || Number.isNaN(v)) return \"—\";\n      return v.toLocaleString();\n    }\n\n    function ueTokenStats(st) {\n      const lastU = (st && st.last && st.last.received && st.last.received.usage) || {};\n      const hasCum = st && (st.prompt_tokens != null || st.completion_tokens != null);\n      return {\n        input: hasCum ? Number(st.prompt_tokens || 0) : Number(lastU.prompt_tokens || lastU.input_tokens || 0),\n        output: hasCum ? Number(st.completion_tokens || 0) : Number(lastU.completion_tokens || lastU.output_tokens || 0),\n        lastIn: Number(st && st.last_prompt_tokens != null ? st.last_prompt_tokens : (lastU.prompt_tokens || lastU.input_tokens || 0)),\n        lastOut: Number(st && st.last_completion_tokens != null ? st.last_completion_tokens : (lastU.completion_tokens || lastU.output_tokens\
-    \ || 0)),\n        cumulative: !!hasCum,\n      };\n    }\n\n    function paintUeStats(ues) {\n      const n = ues.length;\n      const nOk = ues.filter(u => u.connected).length;\n      const nSend = ues.filter(u => isUeRunning(u.status)).length;\n      const nPdu = ues.filter(u => !!(u.status || {}).pdu_ready).length;\n      const lats = ues.map(u => ueLatency(u.status)).filter(v => v != null && !Number.isNaN(v));\n      if ($(\"kpi-ue-connected\")) $(\"kpi-ue-connected\").textContent = n ? `${nOk}/${n}` : \"0\";\n      if ($(\"kpi-ue-dot\")) $(\"kpi-ue-dot\").className = `dot ${nOk ? \"ok pulse\" : \"bad\"}`;\n      if ($(\"kpi-ue-sending\")) $(\"kpi-ue-sending\").textContent = n ? `${nSend}/${n}` : \"0\";\n      if ($(\"kpi-ue-pdu\")) $(\"kpi-ue-pdu\").textContent = n ? `${nPdu}/${n}` : \"0\";\n      if ($(\"kpi-ue-lat\")) {\n        $(\"kpi-ue-lat\").textContent = lats.length\n          ? `${Math.round(lats.reduce((a, b) => a + b, 0) / lats.length)} ms`\n          : \"—\";\n      }\n    }\n\n    function renderUes(data) {\n      const ues = (data && data.ues) || [];\n      paintUeStats(ues);\n      if (!ues.length) {\n        $(\"ue-list\").textContent = \"No slice-2 UEs found. Deploy Physical AI UE clients.\";\n        return;\n      }\n      $(\"ue-list\").innerHTML = ues.map(u => {\n        const st = u.status || {};\n        const running = isUeRunning(st);\n        const sending = running ? \"running\" : \"stopped\";\n        const ok = !!u.connected;\n        const dash = u.dashboard_url || u.console_url || \"\";\n        const lat = ueLatency(st);\n        const tok = ueTokenStats(st);\n        const inSub = tok.cumulative ? `last ${fmtTok(tok.lastIn)}` : \"last exchange\";\n        const outSub = tok.cumulative ? `last ${fmtTok(tok.lastOut)}` : \"last exchange\";\n        const ctrlBtn = running\n          ? `<button type=\"button\" class=\"danger ue-ctrl-btn\" data-ue-ctrl=\"${u.client_index}\" data-action=\"stop\">⏹ Stop</button>`\n          : `<button type=\"button\" class=\"ue-ctrl-btn\" data-ue-ctrl=\"${u.client_index}\" data-action=\"start\">▶ Start</button>`;\n        return `<div class=\"ue-card\" data-ue=\"${u.client_index}\">\n          <div class=\"row\" style=\"justify-content:space-between;\">\n            <strong>UE ${u.client_index}</strong>\n            <span class=\"pill ${running ? \"ok\" : \"bad\"}\">${ok ? sending : (u.pod_phase || \"down\")}</span>\n          </div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:6px;\">${u.name}</div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:4px;\">\n            ${u.console_ip || \"—\"} · ${u.console_mac || \"—\"}\n          </div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:4px;\">\n            PDU ${st.pdu_ready ? \"up\" : \"wait\"} · ${lat != null ? lat + \" ms\" : \"no latency\"}\n          </div>\n          <div class=\"ue-tok\">\n            <div class=\"ue-tok-item\">\n              <div class=\"ue-tok-label\">Input tokens</div>\n              <div class=\"ue-tok-value\">${fmtTok(tok.input)}</div>\n              <div class=\"ue-tok-sub\">${inSub}</div>\n            </div>\n            <div class=\"ue-tok-item\">\n              <div class=\"ue-tok-label\">Output tokens</div>\n              <div class=\"ue-tok-value\">${fmtTok(tok.output)}</div>\n              <div class=\"ue-tok-sub\">${outSub}</div>\n            </div>\n          </div>\n          <div class=\"row\" style=\"margin-top:10px;\">\n            ${ctrlBtn}\n            <a class=\"ue-dash-btn\" href=\"${dash}\" target=\"_blank\" rel=\"noreferrer\">Open UE dashboard</a>\n            ${u.console_url ? `<a class=\"ext-link\" href=\"${u.console_url}\" target=\"_blank\" rel=\"noreferrer\">Multus ${u.console_ip}</a>` : \"\"}\n          </div>\n        </div>`;\n      }).join(\"\");\n      $(\"ue-list\").querySelectorAll(\"[data-ue-ctrl]\").forEach(btn => {\n        btn.onclick = (ev) => {\n          ev.stopPropagation();\n          const idx = parseInt(btn.getAttribute(\"data-ue-ctrl\"), 10);\n          const start = btn.getAttribute(\"data-action\") === \"start\";\n          paintToggle(btn, start);\n          controlUe(idx, start);\n        };\n      });\n    }\n\n    async function refreshUes() {\n      try {\n        const data = await req(\"/api/ues\");\n        renderUes(data);\n        const ues = (data && data.ues) || [];\n        for (const u of ues) {\n          const key = String(u.name || u.client_index);\n          if (isUeRunning(u.status)) {\n            rememberAutoStart(key);\n            continue;\n          }\n          if (!u.connected || autoStarted.has(key)) continue;\n          rememberAutoStart(key);\n          controlUe(u.client_index, true);\n          break;\n        }\n      } catch (e) {\n        $(\"ue-list\").textContent = e.message;\n      }\n    }\n\n    $(\"refresh-ues\").onclick = refreshUes;\n\n    async function controlUe(idx, start) {\n      const msg = $(\"ue-ctrl-msg\");\n      if (msg) { msg.className = \"msg-box\"; msg.textContent = \"\"; }\n      const cardBtn = document.querySelector(`[data-ue-ctrl=\"${idx}\"]`);\n      paintToggle(cardBtn, start);\n      if (cardBtn) cardBtn.disabled = true;\n      try {\n        const resp = await req(`/api/ues/${idx}/control`, {\n          method: \"POST\",\n          body: JSON.stringify({ send_enabled: !!start }),\n        });\n        const running = isUeRunning(resp);\n        paintToggle(cardBtn, running);\n        if (msg) showMsg(\"ue-ctrl-msg\", running ? `UE ${idx} started` : `UE ${idx} stopped`, false);\n        selectedUe = idx;\n        await refreshUes();\n      } catch (e) {\n        paintToggle(cardBtn, !start);\n        if (msg) showMsg(\"ue-ctrl-msg\", `Unable to ${start ? \"start\" : \"stop\"} UE ${idx}: ${e.message}`, true);\n      }\n    }\n\n\n    const CONSOLE_CRUMBS = {\n      \"overview\": \"Physical AI · Cosmos3\",\n      \"ues\": \"Physical AI · Cosmos3\",\n      \"studio\": \"Physical AI · Cosmos3\",\n      \"token\": \"Physical AI · Cosmos3\",\n      \"docs\": \"Physical AI · Cosmos3\"\n    };\n    function setConsoleTab(id) {\n      document.querySelectorAll(\".rail-tab\").forEach((b) => b.classList.toggle(\"rail-tab-active\", b.dataset.tab === id));\n      const panel = document.querySelector(`.tab-panel[data-tab=\"${id}\"]`);\n      if (panel) panel.scrollIntoView({ behavior: \"smooth\", block: \"start\" });\n      const crumb = document.getElementById(\"crumb\");\n      if (crumb) crumb.textContent = CONSOLE_CRUMBS[id] || \"Physical AI · Cosmos3\";\n    }\n    refreshStatus();\n    refreshUes();\n    setInterval(refreshStatus, 6000);\n    setInterval(refreshUes, 8000);\n  </script>\n</body>\n</html>\n"
+"apiVersion": |-
+  v1
+"kind": |-
+  ConfigMap
+"metadata":
+  "name": |-
+    physical-ai-dashboard-code
+  "namespace": |-
+    exp1-a
+  "labels":
+    "app.kubernetes.io/name": |-
+      physical-ai-dashboard-code
+    "app.kubernetes.io/part-of": |-
+      ina-infra
+    "ina.lab/slice": |-
+      2
+    "ina.lab/app-type": |-
+      physical_ai
+"data":
+  "app.py": "#!/usr/bin/env python3\n\"\"\"Physical AI console sidecar: HF token Secret\
+    \ + vLLM health/chat proxy.\"\"\"\nfrom __future__ import annotations\n\nimport\
+    \ base64\nimport json\nimport os\nimport ssl\nimport threading\nimport time\n\
+    import urllib.error\nimport urllib.request\nfrom collections import deque\nfrom\
+    \ datetime import datetime, timezone\nfrom http.server import BaseHTTPRequestHandler,\
+    \ ThreadingHTTPServer\nfrom pathlib import Path\nfrom typing import Any, Optional\n\
+    \nfrom fastapi import FastAPI, HTTPException, Request\nfrom fastapi.responses\
+    \ import FileResponse, RedirectResponse, Response\nfrom fastapi.staticfiles import\
+    \ StaticFiles\nfrom pydantic import BaseModel, Field\n\nNS_FILE = Path(\"/var/run/secrets/kubernetes.io/serviceaccount/namespace\"\
+    )\nTOKEN_FILE = Path(\"/var/run/secrets/kubernetes.io/serviceaccount/token\")\n\
+    CA_FILE = Path(\"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\")\n\nSECRET_NAME\
+    \ = os.environ.get(\"HF_SECRET_NAME\", \"ina-hf-token\")\nSECRET_KEY = os.environ.get(\"\
+    HF_SECRET_KEY\", \"token\")\nDEPLOY_NAME = os.environ.get(\"HF_DEPLOY_NAME\",\
+    \ \"application-physical-ai\")\nVLLM_URL = os.environ.get(\"VLLM_URL\", \"http://127.0.0.1:8000\"\
+    ).rstrip(\"/\")\nSTATIC_DIR = Path(os.environ.get(\"DASHBOARD_STATIC\", \"/app/static\"\
+    ))\nSLICE_ID = int(os.environ.get(\"SLICE_ID\", \"2\"))\nUE_CONSOLE_PORT = int(os.environ.get(\"\
+    UE_CONSOLE_PORT\", \"80\"))\nUE_CONSOLE_OCTET_BASE = int(os.environ.get(\"UE_CONSOLE_OCTET_BASE\"\
+    , \"220\"))\n# OTA hits vLLM :8000; iptables REDIRECT net1:8000 \u2192 this proxy,\
+    \ then loopback vLLM.\nLATENCY_PROXY_PORT = int(os.environ.get(\"LATENCY_PROXY_PORT\"\
+    , \"18080\"))\n# Drop last-sample latency when no new UL request arrives (exporter\
+    \ scrape is 1s).\nLATENCY_STALE_S = float(os.environ.get(\"LATENCY_STALE_S\",\
+    \ \"2.5\"))\n\n\ndef _http_url(host: str, port: int = UE_CONSOLE_PORT) -> str:\n\
+    \    if port == 80:\n        return f\"http://{host}/\"\n    return f\"http://{host}:{port}/\"\
+    \n\napp = FastAPI(title=\"Physical AI console\", docs_url=\"/api/docs\")\n\n\n\
+    class TokenIn(BaseModel):\n    token: str = Field(..., min_length=1)\n\n\nclass\
+    \ ChatIn(BaseModel):\n    prompt: str = Field(..., min_length=1)\n    max_tokens:\
+    \ int = Field(128, ge=1, le=2048)\n\n\nclass UeControlIn(BaseModel):\n    send_enabled:\
+    \ Optional[bool] = None\n    include_image: Optional[bool] = None\n\n\ndef _console_ip(idx:\
+    \ int) -> str:\n    return f\"10.1.137.{UE_CONSOLE_OCTET_BASE + (SLICE_ID - 1)\
+    \ * 10 + max(int(idx), 1) - 1}\"\n\n\ndef _console_mac(idx: int) -> str:\n   \
+    \ return f\"02:0a:40:{SLICE_ID:02x}:00:{max(int(idx), 1):02x}\"\n\n\ndef _ns()\
+    \ -> str:\n    return os.environ.get(\"POD_NAMESPACE\") or (NS_FILE.read_text().strip()\
+    \ if NS_FILE.is_file() else \"ina-infra\")\n\n\ndef _k8s_ctx() -> tuple[str, ssl.SSLContext,\
+    \ dict[str, str]]:\n    host = os.environ.get(\"KUBERNETES_SERVICE_HOST\")\n \
+    \   port = os.environ.get(\"KUBERNETES_SERVICE_PORT\", \"443\")\n    if not host\
+    \ or not TOKEN_FILE.is_file():\n        raise HTTPException(status_code=503, detail=\"\
+    in-cluster Kubernetes credentials not available\")\n    token = TOKEN_FILE.read_text().strip()\n\
+    \    ctx = ssl.create_default_context()\n    if CA_FILE.is_file():\n        ctx.load_verify_locations(str(CA_FILE))\n\
+    \    headers = {\"Authorization\": f\"Bearer {token}\", \"Content-Type\": \"application/json\"\
+    }\n    return f\"https://{host}:{port}\", ctx, headers\n\n\ndef _k8s(method: str,\
+    \ path: str, body: Optional[dict] = None, extra_headers: Optional[dict] = None)\
+    \ -> tuple[int, Any]:\n    base, ctx, headers = _k8s_ctx()\n    hdrs = dict(headers)\n\
+    \    if extra_headers:\n        hdrs.update(extra_headers)\n    data = json.dumps(body).encode()\
+    \ if body is not None else None\n    req = urllib.request.Request(base + path,\
+    \ data=data, headers=hdrs, method=method)\n    try:\n        with urllib.request.urlopen(req,\
+    \ context=ctx, timeout=20) as resp:\n            raw = resp.read().decode() or\
+    \ \"{}\"\n            return resp.status, json.loads(raw)\n    except urllib.error.HTTPError\
+    \ as exc:\n        raw = exc.read().decode(errors=\"replace\")\n        try:\n\
+    \            parsed = json.loads(raw) if raw else {}\n        except json.JSONDecodeError:\n\
+    \            parsed = {\"message\": raw[:400]}\n        return exc.code, parsed\n\
+    \n\ndef _vllm(method: str, path: str, body: Optional[dict] = None) -> tuple[int,\
+    \ Any]:\n    data = json.dumps(body).encode() if body is not None else None\n\
+    \    headers = {\"Content-Type\": \"application/json\"} if body is not None else\
+    \ {}\n    req = urllib.request.Request(f\"{VLLM_URL}{path}\", data=data, headers=headers,\
+    \ method=method)\n    try:\n        with urllib.request.urlopen(req, timeout=120)\
+    \ as resp:\n            raw = resp.read().decode() or \"{}\"\n            return\
+    \ resp.status, json.loads(raw)\n    except urllib.error.HTTPError as exc:\n  \
+    \      raw = exc.read().decode(errors=\"replace\")\n        try:\n           \
+    \ parsed = json.loads(raw) if raw else {}\n        except json.JSONDecodeError:\n\
+    \            parsed = {\"message\": raw[:400]}\n        return exc.code, parsed\n\
+    \    except urllib.error.URLError as exc:\n        raise HTTPException(status_code=503,\
+    \ detail=f\"vLLM not ready: {exc.reason}\") from exc\n\n\n@app.get(\"/api/status\"\
+    )\ndef api_status() -> dict:\n    ns = _ns()\n    code, secret = _k8s(\"GET\"\
+    , f\"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}\")\n    configured = code ==\
+    \ 200 and bool((secret or {}).get(\"data\", {}).get(SECRET_KEY))\n    vllm_ok\
+    \ = False\n    model = None\n    vcode, vbody = 0, {}\n    try:\n        vcode,\
+    \ vbody = _vllm(\"GET\", \"/v1/models\")\n        vllm_ok = vcode == 200\n   \
+    \     data = (vbody or {}).get(\"data\") or []\n        if data:\n           \
+    \ model = data[0].get(\"id\")\n    except HTTPException:\n        vllm_ok = False\n\
+    \    return {\n        \"ok\": True,\n        \"namespace\": ns,\n        \"secret\"\
+    : SECRET_NAME,\n        \"configured\": configured,\n        \"vllm_ready\": vllm_ok,\n\
+    \        \"model\": model,\n        \"vllm_url\": VLLM_URL,\n    }\n\n\n@app.put(\"\
+    /api/hf-token\")\ndef api_save_token(body: TokenIn) -> dict:\n    token = body.token.strip()\n\
+    \    if not token:\n        raise HTTPException(status_code=400, detail=\"token\
+    \ is required\")\n    ns = _ns()\n    payload = {\n        \"apiVersion\": \"\
+    v1\",\n        \"kind\": \"Secret\",\n        \"metadata\": {\n            \"\
+    name\": SECRET_NAME,\n            \"namespace\": ns,\n            \"labels\":\
+    \ {\"ina.lab/role\": \"hf-token\"},\n        },\n        \"type\": \"Opaque\"\
+    ,\n        \"stringData\": {SECRET_KEY: token},\n    }\n    code, _ = _k8s(\"\
+    GET\", f\"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}\")\n    if code == 200:\n\
+    \        code, resp = _k8s(\"PATCH\", f\"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}\"\
+    , payload, extra_headers={\"Content-Type\": \"application/merge-patch+json\"})\n\
+    \    else:\n        code, resp = _k8s(\"POST\", f\"/api/v1/namespaces/{ns}/secrets\"\
+    , payload)\n    if code not in (200, 201):\n        raise HTTPException(status_code=400,\
+    \ detail=(resp or {}).get(\"message\", f\"secret apply failed ({code})\"))\n \
+    \   restarted = _restart_deploy(ns)\n    return {\"ok\": True, \"configured\"\
+    : True, \"restarted\": restarted, \"message\": \"Token saved.\" + (\" vLLM restarting.\"\
+    \ if restarted else \"\")}\n\n\n@app.delete(\"/api/hf-token\")\ndef api_delete_token()\
+    \ -> dict:\n    ns = _ns()\n    _k8s(\"DELETE\", f\"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}\"\
+    )\n    restarted = _restart_deploy(ns)\n    return {\"ok\": True, \"configured\"\
+    : False, \"restarted\": restarted, \"message\": \"Token removed.\"}\n\n\ndef _restart_deploy(ns:\
+    \ str) -> bool:\n    stamp = datetime.now(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\"\
+    )\n    patch = {\"spec\": {\"template\": {\"metadata\": {\"annotations\": {\"\
+    ina.lab/restarted-at\": stamp}}}}}\n    code, _ = _k8s(\n        \"PATCH\",\n\
+    \        f\"/apis/apps/v1/namespaces/{ns}/deployments/{DEPLOY_NAME}\",\n     \
+    \   patch,\n        extra_headers={\"Content-Type\": \"application/strategic-merge-patch+json\"\
+    },\n    )\n    return code in (200, 201)\n\n\n@app.post(\"/api/chat\")\ndef api_chat(body:\
+    \ ChatIn) -> dict:\n    code, resp = _vllm(\n        \"POST\",\n        \"/v1/chat/completions\"\
+    ,\n        {\n            \"model\": os.environ.get(\"MODEL_NAME\", \"nvidia/Cosmos3-Nano\"\
+    ),\n            \"messages\": [{\"role\": \"user\", \"content\": body.prompt}],\n\
+    \            \"max_tokens\": body.max_tokens,\n        },\n    )\n    if code\
+    \ != 200:\n        raise HTTPException(status_code=code if code >= 400 else 502,\
+    \ detail=resp)\n    choices = (resp or {}).get(\"choices\") or []\n    text =\
+    \ \"\"\n    if choices:\n        text = ((choices[0].get(\"message\") or {}).get(\"\
+    content\")) or \"\"\n    return {\"ok\": True, \"text\": text, \"raw\": resp}\n\
+    \n\ndef _ue_idx_from_name(name: str) -> Optional[int]:\n    prefix = f\"oai-ue-slice-{SLICE_ID}-client-\"\
+    \n    if not name.startswith(prefix):\n        return None\n    try:\n       \
+    \ return int(name[len(prefix) :])\n    except ValueError:\n        return None\n\
+    \n\ndef _ue_deploy_name(idx: int) -> str:\n    return f\"oai-ue-slice-{SLICE_ID}-client-{idx}\"\
+    \n\n\ndef _ue_pod_ip(idx: int) -> Optional[str]:\n    ns = _ns()\n    name = _ue_deploy_name(idx)\n\
+    \    code, pods = _k8s(\"GET\", f\"/api/v1/namespaces/{ns}/pods\")\n    if code\
+    \ != 200:\n        return None\n    for pod in (pods or {}).get(\"items\") or\
+    \ []:\n        labels = (pod.get(\"metadata\") or {}).get(\"labels\") or {}\n\
+    \        if (labels.get(\"app.kubernetes.io/name\") or labels.get(\"app\")) !=\
+    \ name:\n            continue\n        if (pod.get(\"status\") or {}).get(\"phase\"\
+    ) != \"Running\":\n            continue\n        ip = (pod.get(\"status\") or\
+    \ {}).get(\"podIP\")\n        if ip:\n            return str(ip)\n    return None\n\
+    \n\ndef _ue_upstreams(idx: int) -> list[str]:\n    \"\"\"Query UE console via\
+    \ Multus IP and cluster service.\"\"\"\n    ip = _console_ip(idx)\n    svc = f\"\
+    oai-ue-slice-{SLICE_ID}-client-{idx}\"\n    ns = _ns()\n    return [\n       \
+    \ f\"{ip}:80\",\n        f\"{ip}:8090\",\n        f\"{svc}:8090\",\n        f\"\
+    {svc}:80\",\n        f\"{svc}.{ns}.svc.cluster.local:8090\",\n        f\"{svc}.{ns}.svc.cluster.local:80\"\
+    ,\n    ]\n\n\ndef _ue_http_idx(\n    idx: int,\n    path: str,\n    method: str\
+    \ = \"GET\",\n    body: Optional[dict] = None,\n    timeout: int = 8,\n) -> tuple[int,\
+    \ Any]:\n    data = json.dumps(body).encode() if body is not None else None\n\
+    \    headers = {\"Content-Type\": \"application/json\"} if body is not None else\
+    \ {}\n    last_err = \"unreachable\"\n    path = path if path.startswith(\"/\"\
+    ) else f\"/{path}\"\n    for host in _ue_upstreams(idx):\n        url = f\"http://{host}{path}\"\
+    \n        req = urllib.request.Request(url, data=data, headers=headers, method=method)\n\
+    \        try:\n            with urllib.request.urlopen(req, timeout=timeout) as\
+    \ resp:\n                raw = resp.read().decode() or \"{}\"\n              \
+    \  try:\n                    return resp.status, json.loads(raw)\n           \
+    \     except json.JSONDecodeError:\n                    return resp.status, {\"\
+    raw\": raw[:400]}\n        except urllib.error.HTTPError as exc:\n           \
+    \ raw = exc.read().decode(errors=\"replace\")\n            try:\n            \
+    \    parsed = json.loads(raw) if raw else {}\n            except json.JSONDecodeError:\n\
+    \                parsed = {\"message\": raw[:400]}\n            return exc.code,\
+    \ parsed\n        except urllib.error.URLError as exc:\n            last_err =\
+    \ f\"{host}: {exc.reason}\"\n            continue\n    return 503, {\"detail\"\
+    : last_err}\n\n\n@app.get(\"/api/ues\")\ndef api_ues() -> dict:\n    ns = _ns()\n\
+    \    code, body = _k8s(\"GET\", f\"/apis/apps/v1/namespaces/{ns}/deployments\"\
+    )\n    if code not in (200, 201):\n        raise HTTPException(status_code=502,\
+    \ detail=(body or {}).get(\"message\", f\"list deployments failed ({code})\"))\n\
+    \    pcode, pods = _k8s(\"GET\", f\"/api/v1/namespaces/{ns}/pods\")\n    pods_by_app:\
+    \ dict[str, dict] = {}\n    if pcode == 200:\n        for pod in (pods or {}).get(\"\
+    items\") or []:\n            labels = (pod.get(\"metadata\") or {}).get(\"labels\"\
+    ) or {}\n            app = labels.get(\"app.kubernetes.io/name\") or labels.get(\"\
+    app\") or \"\"\n            if app:\n                pods_by_app[app] = pod\n\
+    \    ues = []\n    for dep in (body or {}).get(\"items\") or []:\n        meta\
+    \ = dep.get(\"metadata\") or {}\n        name = meta.get(\"name\") or \"\"\n \
+    \       idx = _ue_idx_from_name(name)\n        if idx is None:\n            continue\n\
+    \        labels = meta.get(\"labels\") or {}\n        spec = (dep.get(\"spec\"\
+    ) or {}).get(\"template\") or {}\n        spec_labels = (spec.get(\"metadata\"\
+    ) or {}).get(\"labels\") or {}\n        ip = labels.get(\"ina.lab/console-ip\"\
+    ) or spec_labels.get(\"ina.lab/console-ip\") or _console_ip(idx)\n        raw_mac\
+    \ = labels.get(\"ina.lab/console-mac\") or spec_labels.get(\"ina.lab/console-mac\"\
+    ) or \"\"\n        mac = raw_mac.replace(\"-\", \":\") if raw_mac else _console_mac(idx)\n\
+    \        st = (dep.get(\"status\") or {})\n        ready = int(st.get(\"readyReplicas\"\
+    ) or 0)\n        desired = int(st.get(\"replicas\") or 1)\n        pod = pods_by_app.get(name)\
+    \ or {}\n        phase = (pod.get(\"status\") or {}).get(\"phase\") or \"\"\n\
+    \        containers = (pod.get(\"status\") or {}).get(\"containerStatuses\") or\
+    \ []\n        sidecar = {c.get(\"name\"): bool(c.get(\"ready\")) for c in containers\
+    \ if isinstance(c, dict)}\n        live = None\n        sc, live = _ue_http_idx(idx,\
+    \ \"/api/status\", timeout=3)\n        if sc != 200:\n            live = {\"ok\"\
+    : False, \"http_status\": sc, **(live if isinstance(live, dict) else {})}\n  \
+    \      multus_url = _http_url(ip) if ip else f\"http://{_console_ip(idx)}:80\"\
+    \n        ues.append(\n            {\n                \"name\": name,\n      \
+    \          \"client_index\": idx,\n                \"ready\": ready,\n       \
+    \         \"desired\": desired,\n                \"pod_phase\": phase,\n     \
+    \           \"sidecars\": sidecar,\n                \"console_ip\": ip,\n    \
+    \            \"console_mac\": mac,\n                \"console_url\": multus_url,\n\
+    \                \"dashboard_url\": multus_url,\n                \"connected\"\
+    : (ready >= 1) or (phase == \"Running\"),\n                \"status\": live,\n\
+    \            }\n        )\n    ues.sort(key=lambda u: int(u[\"client_index\"]))\n\
+    \    return {\"ok\": True, \"slice_id\": SLICE_ID, \"ues\": ues}\n\n\n@app.get(\"\
+    /api/ues/{idx}/exchanges\")\ndef api_ue_exchanges(idx: int, limit: int = 40) ->\
+    \ dict:\n    code, body = _ue_http_idx(idx, f\"/api/exchanges?limit={int(limit)}\"\
+    , timeout=8)\n    if code != 200:\n        raise HTTPException(status_code=code\
+    \ if code >= 400 else 502, detail=body)\n    return body\n\n\n@app.post(\"/api/ues/{idx}/control\"\
+    )\ndef api_ue_control(idx: int, body: UeControlIn) -> dict:\n    payload = {k:\
+    \ v for k, v in body.model_dump().items() if v is not None}\n    code, resp =\
+    \ _ue_http_idx(idx, \"/api/control\", method=\"POST\", body=payload, timeout=8)\n\
+    \    if code != 200:\n        raise HTTPException(status_code=code if code >=\
+    \ 400 else 502, detail=resp)\n    return resp\n\n\n@app.post(\"/api/ues/{idx}/send-once\"\
+    )\ndef api_ue_send_once(idx: int) -> dict:\n    code, resp = _ue_http_idx(idx,\
+    \ \"/api/send-once\", method=\"POST\", body={}, timeout=130)\n    if code != 200:\n\
+    \        raise HTTPException(status_code=code if code >= 400 else 502, detail=resp)\n\
+    \    return resp\n\n\n_slo_lock = threading.Lock()\n_slo = {\n    \"latency_ms\"\
+    : None,\n    \"throughput_mbps\": 0.0,\n    \"ues\": {},  # ue_id -> {latency_ms?,\
+    \ throughput_mbps}\n}\n\n_ul_lock = threading.Lock()\n_ul_delay_ms: dict[str,\
+    \ float] = {}\n_ul_delay_at: dict[str, float] = {}\n_ul_window: deque[tuple[float,\
+    \ float]] = deque(maxlen=64)\n\n\ndef _grafana_ue_id(app_name: Any, client_index:\
+    \ Any) -> str:\n    if isinstance(app_name, str) and app_name.strip():\n     \
+    \   return app_name.strip()\n    try:\n        return f\"slice{SLICE_ID}-physical-ai-client-{int(client_index)}\"\
+    \n    except (TypeError, ValueError):\n        return f\"slice{SLICE_ID}-physical-ai-client\"\
+    \n\n\ndef _record_ul_latency(ue_id: str, delay_ms: float) -> None:\n    uid =\
+    \ str(ue_id or _grafana_ue_id(None, None))\n    now = time.time()\n    with _ul_lock:\n\
+    \        _ul_delay_ms[uid] = float(delay_ms)\n        _ul_delay_at[uid] = now\n\
+    \        _ul_window.append((now, float(delay_ms)))\n\n\ndef _fresh_ul(now: Optional[float]\
+    \ = None) -> tuple[dict[str, float], list[float]]:\n    \"\"\"Uplink delay from\
+    \ messages received within LATENCY_STALE_S. Omit otherwise.\"\"\"\n    now = time.time()\
+    \ if now is None else now\n    cutoff = now - max(1.0, LATENCY_STALE_S)\n    with\
+    \ _ul_lock:\n        for uid in [u for u, ts in _ul_delay_at.items() if ts < cutoff]:\n\
+    \            _ul_delay_ms.pop(uid, None)\n            _ul_delay_at.pop(uid, None)\n\
+    \        window = [v for ts, v in _ul_window if ts >= cutoff]\n        return\
+    \ dict(_ul_delay_ms), window\n\n\ndef _one_way_ms(_ue_id: str, raw_s: float) ->\
+    \ float:\n    \"\"\"Radio one-way delay: ``t_recv \u2212 t_send`` in milliseconds.\n\
+    \n    Requires NTP-aligned UE host (usrp) and server host (gpu-a40). Negative\n\
+    \    values are clock skew, not reverse flight time \u2014 clamp to 0 like IoT.\n\
+    \    \"\"\"\n    delay_ms = float(raw_s) * 1000.0\n    if delay_ms < 0:\n    \
+    \    return 0.0\n    return delay_ms\n\n\nclass _LatencyProxyHandler(BaseHTTPRequestHandler):\n\
+    \    \"\"\"Stamp uplink one-way delay (recv \u2212 t_send) then forward to vLLM.\"\
+    \"\"\n\n    protocol_version = \"HTTP/1.1\"\n\n    def log_message(self, fmt:\
+    \ str, *args: Any) -> None:\n        return\n\n    def _vllm(self, method: str,\
+    \ path: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes, str]:\n\
+    \        hdrs = {\"Content-Type\": headers.get(\"Content-Type\") or \"application/json\"\
+    }\n        req = urllib.request.Request(\n            f\"{VLLM_URL}{path}\",\n\
+    \            data=body if method not in (\"GET\", \"HEAD\") else None,\n     \
+    \       headers=hdrs,\n            method=method,\n        )\n        try:\n \
+    \           with urllib.request.urlopen(req, timeout=120) as resp:\n         \
+    \       raw = resp.read()\n                ctype = resp.headers.get(\"Content-Type\"\
+    ) or \"application/json\"\n                return int(resp.status), raw, ctype\n\
+    \        except urllib.error.HTTPError as exc:\n            raw = exc.read()\n\
+    \            ctype = (exc.headers.get(\"Content-Type\") if exc.headers else None)\
+    \ or \"application/json\"\n            return int(exc.code), raw, ctype\n    \
+    \    except urllib.error.URLError as exc:\n            payload = json.dumps({\"\
+    error\": {\"message\": f\"vLLM not ready: {exc.reason}\"}}).encode()\n       \
+    \     return 503, payload, \"application/json\"\n\n    def _reply(self, code:\
+    \ int, raw: bytes, ctype: str) -> None:\n        self.send_response(code)\n  \
+    \      self.send_header(\"Content-Type\", ctype)\n        self.send_header(\"\
+    Content-Length\", str(len(raw)))\n        self.send_header(\"Connection\", \"\
+    close\")\n        self.end_headers()\n        self.wfile.write(raw)\n\n    def\
+    \ do_GET(self) -> None:  # noqa: N802\n        path = self.path or \"/\"\n   \
+    \     code, raw, ctype = self._vllm(\"GET\", path, b\"\", dict(self.headers))\n\
+    \        self._reply(code, raw, ctype)\n\n    def do_POST(self) -> None:  # noqa:\
+    \ N802\n        recv = time.time()\n        path = self.path or \"/\"\n      \
+    \  try:\n            length = int(self.headers.get(\"Content-Length\") or 0)\n\
+    \        except (TypeError, ValueError):\n            length = 0\n        raw_in\
+    \ = self.rfile.read(length) if length > 0 else b\"\"\n        fwd = raw_in\n \
+    \       t_send = None\n        app_name = self.headers.get(\"X-INA-App-Name\"\
+    )\n        client_index = self.headers.get(\"X-INA-Client-Index\")\n        hdr_t\
+    \ = self.headers.get(\"X-INA-T-Send\")\n        if hdr_t:\n            try:\n\
+    \                t_send = float(hdr_t)\n            except (TypeError, ValueError):\n\
+    \                t_send = None\n        try:\n            parsed = json.loads(raw_in)\
+    \ if raw_in else None\n        except (ValueError, TypeError):\n            parsed\
+    \ = None\n        if isinstance(parsed, dict):\n            ina = parsed.pop(\"\
+    ina\", None)\n            if isinstance(ina, dict):\n                if t_send\
+    \ is None:\n                    try:\n                        t_send = float(ina.get(\"\
+    t_send\"))\n                    except (TypeError, ValueError):\n            \
+    \            t_send = None\n                app_name = app_name or ina.get(\"\
+    app_name\")\n                if client_index is None:\n                    client_index\
+    \ = ina.get(\"client_index\")\n            if \"t_send\" in parsed and t_send\
+    \ is None:\n                try:\n                    t_send = float(parsed.pop(\"\
+    t_send\"))\n                except (TypeError, ValueError):\n                \
+    \    parsed.pop(\"t_send\", None)\n            fwd = json.dumps(parsed, separators=(\"\
+    ,\", \":\")).encode(\"utf-8\")\n        delay_ms = None\n        if t_send is\
+    \ not None:\n            delay_ms = _one_way_ms(_grafana_ue_id(app_name, client_index),\
+    \ recv - float(t_send))\n            _record_ul_latency(_grafana_ue_id(app_name,\
+    \ client_index), delay_ms)\n        code, raw_out, ctype = self._vllm(\"POST\"\
+    , path, fwd, dict(self.headers))\n        if delay_ms is not None and \"json\"\
+    \ in (ctype or \"\"):\n            try:\n                out = json.loads(raw_out.decode(\"\
+    utf-8\") or \"{}\")\n            except (ValueError, TypeError, UnicodeDecodeError):\n\
+    \                out = None\n            if isinstance(out, dict):\n         \
+    \       out[\"ina\"] = {\n                    \"t_send\": t_send,\n          \
+    \          \"t_recv\": recv,\n                    \"latency_ms\": round(delay_ms,\
+    \ 3),\n                    \"app_name\": _grafana_ue_id(app_name, client_index),\n\
+    \                }\n                raw_out = json.dumps(out).encode(\"utf-8\"\
+    )\n        self._reply(code, raw_out, ctype)\n\n    def do_HEAD(self) -> None:\
+    \  # noqa: N802\n        self.do_GET()\n\n\ndef _start_latency_proxy() -> None:\n\
+    \    server = ThreadingHTTPServer((\"0.0.0.0\", LATENCY_PROXY_PORT), _LatencyProxyHandler)\n\
+    \    threading.Thread(target=server.serve_forever, name=\"ul-latency-proxy\",\
+    \ daemon=True).start()\n\n\ndef _slo_from_ues() -> None:\n    ues = {}\n    tput\
+    \ = 0.0\n    try:\n        body = api_ues()\n    except Exception:\n        body\
+    \ = {\"ues\": []}\n    for u in body.get(\"ues\") or []:\n        idx = u.get(\"\
+    client_index\")\n        st = u.get(\"status\") or {}\n        uid = str(st.get(\"\
+    app_name\") or u.get(\"name\") or f\"slice{SLICE_ID}-physical-ai-client-{idx}\"\
+    )\n        last = st.get(\"last\") or {}\n        sent = last.get(\"sent\") or\
+    \ {}\n        sent_b = float(sent.get(\"bytes\") or 0.0)\n        try:\n     \
+    \       interval = float(st.get(\"interval_s\") or 8)\n        except (TypeError,\
+    \ ValueError):\n            interval = 8.0\n        mbps = (sent_b * 8.0) / (interval\
+    \ * 1e6) if interval > 0 and sent_b else 0.0\n        ues[uid] = {\"throughput_mbps\"\
+    : mbps}\n        tput += mbps\n    ul, window = _fresh_ul()\n    for uid, lat\
+    \ in ul.items():\n        slot = dict(ues.get(uid) or {\"throughput_mbps\": 0.0})\n\
+    \        slot[\"latency_ms\"] = lat\n        ues[uid] = slot\n    with _slo_lock:\n\
+    \        _slo[\"ues\"] = ues\n        _slo[\"latency_ms\"] = (sum(window) / len(window))\
+    \ if window else None\n        _slo[\"throughput_mbps\"] = tput\n\n\ndef _slo_loop()\
+    \ -> None:\n    while True:\n        try:\n            _slo_from_ues()\n     \
+    \   except Exception:\n            pass\n        time.sleep(2)\n\n\n@app.get(\"\
+    /metrics\")\ndef prometheus_metrics() -> Response:\n    with _slo_lock:\n    \
+    \    agg_tput = _slo[\"throughput_mbps\"]\n        ues = dict(_slo[\"ues\"])\n\
+    \    ul, _window = _fresh_ul()\n    lines = [\n        \"# HELP app_throughput_mbps\
+    \ Aggregated application throughput (Mbps)\",\n        \"# TYPE app_throughput_mbps\
+    \ gauge\",\n        f\"app_throughput_mbps {agg_tput}\",\n        \"# HELP app_ue_throughput_mbps\
+    \ Per-UE application throughput (Mbps)\",\n        \"# TYPE app_ue_throughput_mbps\
+    \ gauge\",\n    ]\n    if ul:\n        lines.extend(\n            [\n        \
+    \        \"# HELP app_ue_latency_ms Per-UE application latency (milliseconds)\"\
+    ,\n                \"# TYPE app_ue_latency_ms gauge\",\n            ]\n      \
+    \  )\n        for uid, lat in ul.items():\n            safe = uid.replace('\"\
+    ', \"\")\n            lines.append(f'app_ue_latency_ms{{ue_id=\"{safe}\"}} {lat}')\n\
+    \    for uid, vals in ues.items():\n        safe = uid.replace('\"', \"\")\n \
+    \       lines.append(f'app_ue_throughput_mbps{{ue_id=\"{safe}\"}} {vals.get(\"\
+    throughput_mbps\") or 0.0}')\n    return Response(content=\"\\n\".join(lines)\
+    \ + \"\\n\", media_type=\"text/plain; version=0.0.4\")\n\n\n@app.get(\"/\")\n\
+    def index() -> FileResponse:\n    return FileResponse(STATIC_DIR / \"index.html\"\
+    )\n\n\n@app.on_event(\"startup\")\ndef _start_slo_loop() -> None:\n    try:\n\
+    \        _start_latency_proxy()\n    except Exception:\n        pass\n    threading.Thread(target=_slo_loop,\
+    \ name=\"slo-metrics\", daemon=True).start()\n\n\nif STATIC_DIR.is_dir():\n  \
+    \  app.mount(\"/static\", StaticFiles(directory=str(STATIC_DIR)), name=\"static\"\
+    )\n"
+  "index.html": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\"\
+    \ />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"\
+    \ />\n  <title>Physical AI \xB7 NeuroRAN</title>\n  <link rel=\"icon\" type=\"\
+    image/png\" href=\"/static/logos/NeuroRAN.png\" />\n  <link rel=\"preconnect\"\
+    \ href=\"https://fonts.googleapis.com\" />\n  <link rel=\"preconnect\" href=\"\
+    https://fonts.gstatic.com\" crossorigin />\n  <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap\"\
+    \ rel=\"stylesheet\" />\n  <style>\n    /* NeuroRAN Visual Identity Standard \u2014\
+    \ CSS Design System */\n    :root {\n      --bg0: #070b14;\n      --bg1: #0b1120;\n\
+    \      --card: rgba(15, 23, 42, 0.75);\n      --card-raised: rgba(22, 34, 60,\
+    \ 0.85);\n      --surface: rgba(255, 255, 255, 0.035);\n      --surface-2: rgba(255,\
+    \ 255, 255, 0.06);\n      --surface-raised: rgba(255, 255, 255, 0.09);\n     \
+    \ --border: rgba(255, 255, 255, 0.08);\n      --border-2: rgba(255, 255, 255,\
+    \ 0.14);\n      --text: #eef2f9;\n      --text-dim: #93a0b8;\n      --text-faint:\
+    \ #5e6b85;\n      --accent: #16E6A0;\n      --accent2: #00C2D4;\n      --accent-glow:\
+    \ rgba(22, 230, 160, 0.25);\n      --accent-orange: #f5a623;\n      --bad: #ff5a6e;\n\
+    \      --bad-bg: rgba(255, 90, 110, 0.12);\n      --ok: #16e6a0;\n      --ok-bg:\
+    \ rgba(22, 230, 160, 0.12);\n      --warn: #f5a623;\n      --warn-bg: rgba(245,\
+    \ 166, 35, 0.12);\n      --radius-sm: 6px;\n      --radius-md: 10px;\n      --radius-lg:\
+    \ 14px;\n      --shadow-tier: 0 18px 50px -22px rgba(0, 0, 0, 0.7);\n    }\n\n\
+    \    * { box-sizing: border-box; margin: 0; padding: 0; }\n    html, body { min-height:\
+    \ 100vh; }\n\n    body {\n      font-family: 'IBM Plex Sans', system-ui, -apple-system,\
+    \ sans-serif;\n      background:\n        radial-gradient(1200px 600px at 80%\
+    \ -10%, rgba(22, 230, 160, 0.12) 0%, transparent 60%),\n        radial-gradient(1000px\
+    \ 700px at 10% 110%, rgba(0, 194, 212, 0.10) 0%, transparent 55%),\n        linear-gradient(180deg,\
+    \ var(--bg0) 0%, var(--bg1) 100%);\n      color: var(--text);\n      -webkit-font-smoothing:\
+    \ antialiased;\n      line-height: 1.5;\n    }\n\n    .mono {\n      font-family:\
+    \ 'IBM Plex Mono', monospace;\n      font-variant-numeric: tabular-nums;\n   \
+    \ }\n\n    /* Header & Navigation */\n    header {\n      background: rgba(7,\
+    \ 11, 20, 0.82);\n      backdrop-filter: blur(14px);\n      -webkit-backdrop-filter:\
+    \ blur(14px);\n      border-bottom: 1px solid var(--border);\n      padding: 14px\
+    \ 28px;\n      position: sticky;\n      top: 0;\n      z-index: 50;\n      display:\
+    \ flex;\n      justify-content: space-between;\n      align-items: center;\n \
+    \     gap: 16px;\n      flex-wrap: wrap;\n    }\n\n    .brand-wrap {\n      display:\
+    \ flex;\n      align-items: center;\n      gap: 14px;\n    }\n\n    .brand-logo\
+    \ {\n      width: 32px;\n      height: 38px;\n      display: inline-block;\n \
+    \     flex-shrink: 0;\n    }\n\n    .brand-text h1 {\n      font-family: 'Space\
+    \ Grotesk', sans-serif;\n      font-size: 17px;\n      font-weight: 700;\n   \
+    \   letter-spacing: -0.01em;\n      color: var(--text);\n      display: flex;\n\
+    \      align-items: center;\n      gap: 8px;\n    }\n\n    .brand-text h1 .badge\
+    \ {\n      font-family: 'IBM Plex Mono', monospace;\n      font-size: 11px;\n\
+    \      font-weight: 600;\n      color: var(--accent);\n      background: rgba(22,\
+    \ 230, 160, 0.12);\n      border: 1px solid rgba(22, 230, 160, 0.3);\n      padding:\
+    \ 2px 7px;\n      border-radius: 999px;\n      letter-spacing: 0.04em;\n    }\n\
+    \n    .kicker {\n      color: var(--text-dim);\n      font-size: 11px;\n     \
+    \ text-transform: uppercase;\n      letter-spacing: 0.12em;\n      font-weight:\
+    \ 600;\n    }\n\n    .header-actions {\n      display: flex;\n      align-items:\
+    \ center;\n      gap: 10px;\n      flex-wrap: wrap;\n    }\n\n    .ext-link {\n\
+    \      display: inline-flex;\n      align-items: center;\n      gap: 5px;\n  \
+    \    color: var(--text-dim);\n      text-decoration: none;\n      font-size: 12px;\n\
+    \      font-weight: 500;\n      background: var(--surface);\n      border: 1px\
+    \ solid var(--border);\n      padding: 5px 10px;\n      border-radius: var(--radius-sm);\n\
+    \      transition: all 0.15s ease;\n    }\n    .ext-link:hover {\n      color:\
+    \ var(--text);\n      border-color: var(--border-2);\n      background: var(--surface-2);\n\
+    \    }\n    .ext-link.grafana {\n      color: var(--accent);\n      border-color:\
+    \ rgba(22, 230, 160, 0.25);\n      background: rgba(22, 230, 160, 0.06);\n   \
+    \ }\n    .ue-grid {\n      display: grid;\n      grid-template-columns: repeat(auto-fit,\
+    \ minmax(220px, 1fr));\n      gap: 12px;\n    }\n    .card .kpi-strip-ue { margin:\
+    \ 0 0 14px; }\n    .ue-card {\n      background: var(--surface);\n      border:\
+    \ 1px solid var(--border);\n      border-radius: var(--radius-md);\n      padding:\
+    \ 14px 16px;\n    }\n    .ue-tok {\n      display: grid;\n      grid-template-columns:\
+    \ 1fr 1fr;\n      gap: 8px;\n      margin-top: 10px;\n    }\n    .ue-tok-item\
+    \ {\n      background: rgba(7, 11, 20, 0.45);\n      border: 1px solid var(--border);\n\
+    \      border-radius: 8px;\n      padding: 8px 10px;\n      min-width: 0;\n  \
+    \  }\n    .ue-tok-label {\n      font-size: 10px;\n      font-weight: 600;\n \
+    \     letter-spacing: 0.08em;\n      text-transform: uppercase;\n      color:\
+    \ var(--text-faint);\n    }\n    .ue-tok-value {\n      font-family: 'IBM Plex\
+    \ Mono', monospace;\n      font-size: 15px;\n      font-weight: 600;\n      margin-top:\
+    \ 4px;\n      color: var(--text);\n    }\n    .ue-tok-sub {\n      font-size:\
+    \ 11px;\n      color: var(--text-dim);\n      margin-top: 2px;\n    }\n    .ue-dash-btn\
+    \ {\n      display: inline-flex; align-items: center; gap: 6px;\n      background:\
+    \ var(--accent); color: #04140e; font-weight: 700; font-size: 13px;\n      padding:\
+    \ 8px 14px; border-radius: 8px; text-decoration: none !important;\n    }\n   \
+    \ .ue-dash-btn:hover { filter: brightness(1.08); }\n\n    .ext-link.grafana:hover\
+    \ {\n      border-color: var(--accent);\n      background: rgba(22, 230, 160,\
+    \ 0.14);\n    }\n\n    /* Container \u2014 full dash width (rail already takes\
+    \ 92px) */\n    main, main.dash {\n      padding: 16px 22px 32px;\n      max-width:\
+    \ none;\n      width: 100%;\n      margin: 0;\n      display: grid;\n      gap:\
+    \ 16px;\n    }\n\n    .section-label {\n      display: flex;\n      align-items:\
+    \ center;\n      gap: 8px;\n      margin-bottom: 2px;\n    }\n    .section-bar\
+    \ {\n      width: 3px;\n      height: 13px;\n      border-radius: 2px;\n     \
+    \ background: linear-gradient(180deg, var(--accent), var(--accent2));\n    }\n\
+    \    .section-text {\n      font-size: 12px;\n      font-weight: 600;\n      letter-spacing:\
+    \ 0.08em;\n      text-transform: uppercase;\n      color: var(--text-dim);\n \
+    \   }\n\n    /* KPI Summary Strip \u2014 5 equal columns across the dash */\n\
+    \    .kpi-strip {\n      display: grid;\n      grid-template-columns: repeat(5,\
+    \ minmax(0, 1fr));\n      gap: 12px;\n    }\n    @media (max-width: 1279px) {\n\
+    \      .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }\n    }\n\
+    \    @media (max-width: 1023px) {\n      .kpi-strip { grid-template-columns: repeat(2,\
+    \ minmax(0, 1fr)); }\n    }\n    @media (max-width: 480px) {\n      .kpi-strip\
+    \ { grid-template-columns: 1fr; }\n    }\n    .kpi-strip-status,\n    .kpi-strip-ue\
+    \ {\n      grid-template-columns: repeat(4, minmax(0, 1fr));\n    }\n    @media\
+    \ (max-width: 1023px) {\n      .kpi-strip-status,\n      .kpi-strip-ue { grid-template-columns:\
+    \ repeat(2, minmax(0, 1fr)); }\n    }\n\n    .kpi-card {\n      background: var(--card);\n\
+    \      border: 1px solid var(--border);\n      border-radius: var(--radius-md);\n\
+    \      padding: 16px 18px 18px;\n      box-shadow: 0 4px 20px -8px rgba(0, 0,\
+    \ 0, 0.5);\n      backdrop-filter: blur(8px);\n      transition: border-color\
+    \ 0.15s ease;\n      min-width: 0;\n    }\n    .kpi-card:hover {\n      border-color:\
+    \ var(--border-2);\n    }\n\n    .kpi-label {\n      font-size: 11px;\n      text-transform:\
+    \ uppercase;\n      letter-spacing: 0.08em;\n      color: var(--text-dim);\n \
+    \     margin-bottom: 10px;\n      display: flex;\n      align-items: center;\n\
+    \      justify-content: space-between;\n      gap: 8px;\n    }\n\n    .kpi-value\
+    \ {\n      font-family: 'Space Grotesk', sans-serif;\n      font-size: 22px;\n\
+    \      font-weight: 700;\n      letter-spacing: -0.02em;\n      color: var(--text);\n\
+    \      display: flex;\n      align-items: center;\n      gap: 8px;\n      line-height:\
+    \ 1.2;\n      word-break: break-word;\n    }\n    .kpi-value.mono {\n      font-family:\
+    \ 'IBM Plex Mono', monospace;\n      font-size: 15px;\n      font-weight: 600;\n\
+    \      letter-spacing: 0;\n    }\n\n    /* Standard Cards */\n    .card {\n  \
+    \    background: var(--card);\n      border: 1px solid var(--border);\n      border-radius:\
+    \ var(--radius-lg);\n      padding: 20px 24px;\n      box-shadow: var(--shadow-tier);\n\
+    \      backdrop-filter: blur(12px);\n      position: relative;\n    }\n\n    .card.tier::before\
+    \ {\n      content: '';\n      position: absolute;\n      top: 0;\n      left:\
+    \ 24px;\n      right: 24px;\n      height: 1px;\n      background: linear-gradient(90deg,\
+    \ transparent, rgba(22, 230, 160, 0.4), transparent);\n    }\n\n    .card-header\
+    \ {\n      margin-bottom: 16px;\n      display: flex;\n      align-items: center;\n\
+    \      justify-content: space-between;\n      gap: 12px;\n      flex-wrap: wrap;\n\
+    \    }\n\n    .card-title {\n      font-family: 'Space Grotesk', sans-serif;\n\
+    \      font-size: 15px;\n      font-weight: 700;\n      color: var(--text);\n\
+    \      display: flex;\n      align-items: center;\n      gap: 8px;\n    }\n\n\
+    \    .card-subtitle {\n      color: var(--text-dim);\n      font-size: 13px;\n\
+    \      margin-top: 4px;\n      line-height: 1.4;\n    }\n\n    /* Form Controls\
+    \ */\n    .row {\n      display: flex;\n      gap: 10px;\n      flex-wrap: wrap;\n\
+    \      align-items: center;\n    }\n\n    label {\n      display: block;\n   \
+    \   font-size: 12px;\n      font-weight: 600;\n      color: var(--text-dim);\n\
+    \      margin-bottom: 6px;\n      text-transform: uppercase;\n      letter-spacing:\
+    \ 0.06em;\n    }\n\n    input, textarea, select {\n      width: 100%;\n      background:\
+    \ rgba(7, 11, 20, 0.7);\n      color: var(--text);\n      border: 1px solid var(--border);\n\
+    \      border-radius: var(--radius-sm);\n      padding: 9px 12px;\n      font-family:\
+    \ inherit;\n      font-size: 13px;\n      outline: none;\n      transition: all\
+    \ 0.15s ease;\n    }\n    input:focus, textarea:focus, select:focus {\n      border-color:\
+    \ var(--accent);\n      box-shadow: 0 0 0 2px var(--accent-glow);\n      background:\
+    \ rgba(7, 11, 20, 0.95);\n    }\n\n    textarea {\n      min-height: 96px;\n \
+    \     resize: vertical;\n      font-family: inherit;\n      line-height: 1.5;\n\
+    \    }\n\n    /* Buttons */\n    button, .btn {\n      display: inline-flex;\n\
+    \      align-items: center;\n      justify-content: center;\n      gap: 6px;\n\
+    \      background: linear-gradient(135deg, rgba(22, 230, 160, 0.16), rgba(0, 194,\
+    \ 212, 0.16));\n      color: var(--accent);\n      border: 1px solid rgba(22,\
+    \ 230, 160, 0.35);\n      border-radius: var(--radius-sm);\n      padding: 8px\
+    \ 14px;\n      font-family: inherit;\n      font-size: 12px;\n      font-weight:\
+    \ 600;\n      cursor: pointer;\n      transition: all 0.15s ease;\n      white-space:\
+    \ nowrap;\n      text-decoration: none;\n    }\n    button:hover:not(:disabled),\
+    \ .btn:hover:not(:disabled) {\n      background: linear-gradient(135deg, rgba(22,\
+    \ 230, 160, 0.26), rgba(0, 194, 212, 0.26));\n      border-color: var(--accent);\n\
+    \      box-shadow: 0 0 12px rgba(22, 230, 160, 0.2);\n    }\n    button:disabled,\
+    \ .btn:disabled {\n      opacity: 0.45;\n      cursor: not-allowed;\n    }\n\n\
+    \    button.btn-secondary {\n      background: var(--surface);\n      color: var(--text-dim);\n\
+    \      border-color: var(--border);\n    }\n    button.btn-secondary:hover:not(:disabled)\
+    \ {\n      background: var(--surface-2);\n      color: var(--text);\n      border-color:\
+    \ var(--border-2);\n      box-shadow: none;\n    }\n\n    button.danger {\n  \
+    \    background: var(--bad-bg);\n      color: var(--bad);\n      border-color:\
+    \ rgba(255, 90, 110, 0.35);\n    }\n    button.danger:hover:not(:disabled) {\n\
+    \      background: rgba(255, 90, 110, 0.22);\n      border-color: var(--bad);\n\
+    \      box-shadow: 0 0 12px rgba(255, 90, 110, 0.2);\n    }\n\n    /* Status Pills\
+    \ & Dots */\n    .pill {\n      font-family: 'IBM Plex Mono', monospace;\n   \
+    \   font-size: 11px;\n      font-weight: 500;\n      padding: 3px 9px;\n     \
+    \ border-radius: 999px;\n      border: 1px solid var(--border);\n      color:\
+    \ var(--text-dim);\n      background: var(--surface);\n      display: inline-flex;\n\
+    \      align-items: center;\n      gap: 6px;\n    }\n    .pill.ok {\n      color:\
+    \ var(--ok);\n      border-color: rgba(22, 230, 160, 0.35);\n      background:\
+    \ var(--ok-bg);\n    }\n    .pill.bad {\n      color: var(--bad);\n      border-color:\
+    \ rgba(255, 90, 110, 0.35);\n      background: var(--bad-bg);\n    }\n\n    .dot\
+    \ {\n      width: 7px;\n      height: 7px;\n      border-radius: 50%;\n      display:\
+    \ inline-block;\n      background: currentColor;\n      flex-shrink: 0;\n    }\n\
+    \    .dot.ok { color: var(--ok); background: var(--ok); }\n    .dot.bad { color:\
+    \ var(--bad); background: var(--bad); }\n    .dot.pulse {\n      animation: pulse-dot\
+    \ 1.8s infinite ease-in-out;\n    }\n    @keyframes pulse-dot {\n      0%, 100%\
+    \ { transform: scale(1); opacity: 1; }\n      50% { transform: scale(1.3); opacity:\
+    \ 0.6; }\n    }\n\n    /* Output & Terminal Area */\n    pre, .code-box {\n  \
+    \    font-family: 'IBM Plex Mono', monospace;\n      font-size: 12.5px;\n    \
+    \  white-space: pre-wrap;\n      word-break: break-word;\n      background: rgba(5,\
+    \ 8, 15, 0.85);\n      border: 1px solid var(--border);\n      border-radius:\
+    \ var(--radius-md);\n      padding: 14px;\n      color: #cbd5e1;\n      min-height:\
+    \ 80px;\n      max-height: 480px;\n      overflow-y: auto;\n      line-height:\
+    \ 1.6;\n    }\n\n    .prompt-presets {\n      display: flex;\n      gap: 6px;\n\
+    \      flex-wrap: wrap;\n      margin-top: 8px;\n    }\n    .preset-chip {\n \
+    \     font-size: 11px;\n      background: var(--surface);\n      border: 1px solid\
+    \ var(--border);\n      color: var(--text-dim);\n      padding: 3px 8px;\n   \
+    \   border-radius: 999px;\n      cursor: pointer;\n      transition: all 0.15s\
+    \ ease;\n    }\n    .preset-chip:hover {\n      color: var(--accent);\n      border-color:\
+    \ rgba(22, 230, 160, 0.4);\n      background: var(--surface-2);\n    }\n\n   \
+    \ /* Messages & Alerts */\n    .msg-box {\n      font-size: 12px;\n      margin-top:\
+    \ 10px;\n      padding: 8px 12px;\n      border-radius: var(--radius-sm);\n  \
+    \    display: none;\n    }\n    .msg-box.show { display: block; }\n    .msg-box.ok\
+    \ { background: var(--ok-bg); color: var(--ok); border: 1px solid rgba(22, 230,\
+    \ 160, 0.3); }\n    .msg-box.err { background: var(--bad-bg); color: var(--bad);\
+    \ border: 1px solid rgba(255, 90, 110, 0.3); }\n\n    a { color: var(--accent);\
+    \ text-decoration: none; }\n    a:hover { text-decoration: underline; }\n    code\
+    \ { font-family: 'IBM Plex Mono', monospace; color: var(--accent); background:\
+    \ rgba(22, 230, 160, 0.08); padding: 1px 4px; border-radius: 3px; }\n\n/* CCTV-like\
+    \ left rail + tabs for HTML consoles */\nhtml, body { height: 100%; overflow:\
+    \ hidden; }\n.app {\n  display: flex;\n  align-items: stretch;\n  height: 100vh;\n\
+    \  max-height: 100vh;\n  overflow: hidden;\n}\n.app-body {\n  flex: 1;\n  min-width:\
+    \ 0;\n  display: flex;\n  flex-direction: column;\n  height: 100vh;\n  overflow:\
+    \ hidden;\n}\n.rail {\n  width: 92px;\n  flex: 0 0 92px;\n  height: 100vh;\n \
+    \ border-right: 1px solid var(--border);\n  display: flex;\n  flex-direction:\
+    \ column;\n  padding: 14px 10px 12px;\n  background: var(--surface);\n}\n.rail-brand\
+    \ {\n  display: flex;\n  justify-content: center;\n  padding: 2px 0 14px;\n  border-bottom:\
+    \ 1px solid var(--border);\n  margin-bottom: 12px;\n}\n.rail-logo { width: 56px;\
+    \ height: auto; display: block; }\n.rail-nav { display: flex; flex-direction:\
+    \ column; gap: 6px; flex: 1; }\n.rail-tab {\n  position: relative;\n  display:\
+    \ flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content:\
+    \ center;\n  gap: 5px;\n  width: 100%;\n  min-height: 54px;\n  padding: 6px 4px;\n\
+    \  border: 1px solid transparent;\n  border-radius: 12px;\n  background: transparent;\n\
+    \  color: var(--text-dim);\n  cursor: pointer;\n  font: inherit;\n}\n.rail-tab-icon\
+    \ { display: grid; place-items: center; width: 22px; height: 22px; }\n.rail-tab-icon\
+    \ svg { width: 20px; height: 20px; }\n.rail-tab-label {\n  font-size: 10px;\n\
+    \  font-weight: 600;\n  color: var(--text-faint);\n  line-height: 1.15;\n  text-align:\
+    \ center;\n}\n.rail-tab:hover { background: var(--surface-2); color: var(--text);\
+    \ border-color: var(--border); }\n.rail-tab-active {\n  background: rgba(22, 230,\
+    \ 160, 0.10);\n  color: var(--accent);\n  border-color: rgba(22, 230, 160, 0.22);\n\
+    }\n.rail-tab-active .rail-tab-label { color: var(--accent); }\n.rail-tab-active::before\
+    \ {\n  content: \"\";\n  position: absolute;\n  left: -10px;\n  top: 50%;\n  transform:\
+    \ translateY(-50%);\n  width: 3px;\n  height: 24px;\n  border-radius: 0 3px 3px\
+    \ 0;\n  background: var(--accent);\n}\n.rail-foot {\n  margin-top: auto;\n  padding-top:\
+    \ 12px;\n  border-top: 1px solid var(--border);\n  display: flex;\n  justify-content:\
+    \ center;\n}\n.rail-status { display: flex; flex-direction: column; align-items:\
+    \ center; gap: 6px; }\n.rail-status-dot {\n  width: 8px; height: 8px; border-radius:\
+    \ 50%; background: var(--accent);\n  box-shadow: 0 0 0 3px rgba(22, 230, 160,\
+    \ 0.18);\n}\n.rail-status-text { font-size: 8.5px; font-weight: 700; color: var(--text-faint);\
+    \ text-align: center; }\n.topbar {\n  display: flex;\n  align-items: center;\n\
+    \  gap: 16px;\n  padding: 12px 20px;\n  background: rgba(11, 17, 32, 0.82);\n\
+    \  backdrop-filter: blur(16px);\n  border-bottom: 1px solid var(--border);\n \
+    \ flex-shrink: 0;\n}\n.crumb { font-family: 'Space Grotesk', sans-serif; font-size:\
+    \ 17px; font-weight: 700; letter-spacing: -0.01em; }\n.site-badge {\n  font-size:\
+    \ 11px; font-weight: 600; color: var(--accent);\n  background: rgba(22, 230, 160,\
+    \ 0.12);\n  padding: 5px 11px; border-radius: 20px; white-space: nowrap;\n}\n\
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px;\
+    \ flex-wrap: wrap; }\n.dash {\n  flex: 1;\n  min-height: 0;\n  overflow: auto;\n\
+    \  padding: 16px 22px 32px;\n  display: grid;\n  gap: 16px;\n  width: 100%;\n\
+    \  max-width: none;\n}\n.studio-grid {\n  display: grid;\n  grid-template-columns:\
+    \ minmax(0, 1fr) minmax(0, 1fr);\n  grid-template-rows: auto minmax(200px, 1fr)\
+    \ auto auto;\n  gap: 10px 18px;\n  align-items: stretch;\n}\n.studio-col {\n \
+    \ display: grid;\n  grid-template-rows: subgrid;\n  grid-row: 1 / -1;\n  min-width:\
+    \ 0;\n}\n.studio-col label { margin-bottom: 0; }\n.studio-col textarea,\n.studio-col\
+    \ pre {\n  min-height: 200px;\n  height: 100%;\n  max-height: none;\n  margin:\
+    \ 0;\n  box-sizing: border-box;\n}\n.studio-col-out pre { grid-row: 2 / -1; }\n\
+    .studio-col .prompt-presets { margin-top: 0; }\n.studio-col .row { margin-top:\
+    \ 0 !important; }\n@media (max-width: 1100px) {\n  .studio-grid {\n    grid-template-columns:\
+    \ 1fr;\n    grid-template-rows: none;\n  }\n  .studio-col { display: flex; flex-direction:\
+    \ column; gap: 8px; grid-row: auto; }\n  .studio-col-out pre { grid-row: auto;\
+    \ }\n}\n.tab-panel { display: grid; gap: 16px; width: 100%; min-width: 0; }\n\
+    .docs-lead { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin:\
+    \ 8px 0 0; }\n.docs-table { width: 100%; border-collapse: collapse; font-size:\
+    \ 12.5px; margin-top: 10px; }\n.docs-table th, .docs-table td {\n  text-align:\
+    \ left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align:\
+    \ top;\n}\n.docs-table th { color: var(--text-faint); font-size: 11px; letter-spacing:\
+    \ 0.04em; text-transform: uppercase; }\n.docs-badge-get { color: var(--accent);\
+    \ font-weight: 700; font-size: 11px; }\n.docs-badge-post { color: var(--accent2);\
+    \ font-weight: 700; font-size: 11px; }\n.docs-badge-put { color: var(--accent-orange);\
+    \ font-weight: 700; font-size: 11px; }\n.docs-badge-del { color: var(--bad); font-weight:\
+    \ 700; font-size: 11px; }\n\n  </style>\n</head>\n<body>\n<div class=\"app theme-dark\"\
+    >\n  <aside class=\"rail\">\n    <div class=\"rail-brand\" title=\"Physical AI\
+    \ \xB7 NeuroRAN\"><img class=\"rail-logo\" src=\"/static/logos/NeuroRAN.png\"\
+    \ alt=\"NeuroRAN\" /></div>\n    <nav class=\"rail-nav\" aria-label=\"Main navigation\"\
+    >\n      <button type=\"button\" class=\"rail-tab rail-tab-active\" data-tab=\"\
+    overview\" onclick=\"setConsoleTab('overview')\">\n        <span class=\"rail-tab-icon\"\
+    ><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"\
+    3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"\
+    7\" rx=\"1\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/></svg></span>\n\
+    \        <span class=\"rail-tab-label\">Overview</span>\n      </button>\n   \
+    \   <button type=\"button\" class=\"rail-tab\" data-tab=\"ues\" onclick=\"setConsoleTab('ues')\"\
+    >\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4\
+    \ 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><path d=\"M23 21v-2a4 4\
+    \ 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75\"/></svg></span>\n        <span class=\"\
+    rail-tab-label\">UEs</span>\n      </button>\n      <button type=\"button\" class=\"\
+    rail-tab\" data-tab=\"studio\" onclick=\"setConsoleTab('studio')\">\n        <span\
+    \ class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"\
+    \ stroke-width=\"2\"><polygon points=\"5 3 19 12 5 21 5 3\"/></svg></span>\n \
+    \       <span class=\"rail-tab-label\">Studio</span>\n      </button>\n      <button\
+    \ type=\"button\" class=\"rail-tab\" data-tab=\"token\" onclick=\"setConsoleTab('token')\"\
+    >\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"11\" width=\"18\"\
+    \ height=\"11\" rx=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg></span>\n\
+    \        <span class=\"rail-tab-label\">Token</span>\n      </button>\n      <button\
+    \ type=\"button\" class=\"rail-tab\" data-tab=\"docs\" onclick=\"setConsoleTab('docs')\"\
+    >\n        <span class=\"rail-tab-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 19.5A2.5 2.5 0 0 1 6.5\
+    \ 17H20\"/><path d=\"M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5\
+    \ 2z\"/></svg></span>\n        <span class=\"rail-tab-label\">Docs</span>\n  \
+    \    </button>\n    </nav>\n    <div class=\"rail-foot\"><div class=\"rail-status\"\
+    ><span class=\"rail-status-dot\"></span><span class=\"rail-status-text\">PAI</span></div></div>\n\
+    \  </aside>\n  <div class=\"app-body\">\n    <header class=\"topbar\">\n     \
+    \ <div class=\"crumb\" id=\"crumb\">Physical AI \xB7 Cosmos3</div>\n      <span\
+    \ class=\"site-badge\">INA \xB7 Physical AI</span>\n      <div class=\"topbar-right\"\
+    >\n        <div class=\"row\" id=\"header-pills\">\n        <span class=\"pill\"\
+    ><span class=\"dot pulse\"></span> connecting\u2026</span>\n      </div>\n   \
+    \   <a class=\"ext-link\" href=\"/api/docs\" target=\"_blank\" rel=\"noreferrer\"\
+    \ title=\"Swagger REST API Reference\">Swagger API</a>\n      <a class=\"ext-link\
+    \ grafana\" href=\"http://10.1.137.105:3000/d/ina-physical-ai/physical-ai-metrics?orgId=1&refresh=5s\"\
+    \ target=\"_blank\" rel=\"noreferrer\" title=\"Open Grafana Physical AI Metrics\"\
+    >\n        <span>Grafana</span>\n        <svg width=\"12\" height=\"12\" viewBox=\"\
+    0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"\
+    M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3\"\
+    /></svg>\n      </a>\n      </div>\n    </header>\n        <main class=\"dash\"\
+    >\n      <div class=\"tab-panel\" data-tab=\"overview\">\n    <div class=\"section-label\"\
+    ><span class=\"section-bar\"></span><span class=\"section-text\">Status</span></div>\n\
+    \    <div class=\"kpi-strip kpi-strip-status\">\n      <div class=\"kpi-card\"\
+    >\n        <div class=\"kpi-label\">HF Secret Token <span class=\"dot\" id=\"\
+    kpi-hf-dot\"></span></div>\n        <div class=\"kpi-value\" id=\"kpi-hf\">Checking\u2026\
+    </div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\"\
+    >vLLM Inference Engine <span class=\"dot\" id=\"kpi-vllm-dot\"></span></div>\n\
+    \        <div class=\"kpi-value\" id=\"kpi-vllm\">Checking\u2026</div>\n     \
+    \ </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\">Active\
+    \ Model</div>\n        <div class=\"kpi-value\" id=\"kpi-model\">nvidia/Cosmos3-Nano</div>\n\
+    \      </div>\n      <div class=\"kpi-card\">\n        <div class=\"kpi-label\"\
+    >Cluster & Namespace</div>\n        <div class=\"kpi-value mono\" id=\"kpi-ns\"\
+    >ina-infra \xB7 edge</div>\n      </div>\n      </div>\n      </div>\n      <div\
+    \ class=\"tab-panel\" data-tab=\"ues\">\n          <section class=\"card tier\"\
+    >\n      <div class=\"card-header\">\n        <div>\n          <h2 class=\"card-title\"\
+    >Connected UEs</h2>\n          <p class=\"card-subtitle\">Slice-2 UEs start sending\
+    \ automatically when they come up. Use Stop / Start on each card to pause or resume.\
+    \ Open the UE dashboard for the full log.</p>\n        </div>\n        <button\
+    \ type=\"button\" class=\"btn-secondary\" id=\"refresh-ues\">Refresh UEs</button>\n\
+    \      </div>\n    <div class=\"kpi-strip kpi-strip-ue\">\n      <div class=\"\
+    kpi-card\">\n        <div class=\"kpi-label\">Connected <span class=\"dot\" id=\"\
+    kpi-ue-dot\"></span></div>\n        <div class=\"kpi-value\" id=\"kpi-ue-connected\"\
+    >\u2014</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"\
+    kpi-label\">Sending</div>\n        <div class=\"kpi-value\" id=\"kpi-ue-sending\"\
+    >\u2014</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"\
+    kpi-label\">PDU ready</div>\n        <div class=\"kpi-value\" id=\"kpi-ue-pdu\"\
+    >\u2014</div>\n      </div>\n      <div class=\"kpi-card\">\n        <div class=\"\
+    kpi-label\">Last latency</div>\n        <div class=\"kpi-value mono\" id=\"kpi-ue-lat\"\
+    >\u2014</div>\n      </div>\n    </div>\n      <div id=\"ue-ctrl-msg\" class=\"\
+    msg-box\"></div>\n      <div id=\"ue-list\" class=\"ue-grid\">Loading UEs\u2026\
+    </div>\n    </section>\n\n      </div>\n      <div class=\"tab-panel\" data-tab=\"\
+    studio\">\n          <!-- Interactive Inference & Reasoning Studio -->\n    <section\
+    \ class=\"card tier\">\n      <div class=\"card-header\">\n        <div>\n   \
+    \       <h2 class=\"card-title\">\n            <svg width=\"16\" height=\"16\"\
+    \ viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\"><polygon points=\"5 3 19 12 5 21 5 3\"/></svg>\n            Physical AI Prompt\
+    \ & Reasoning Studio\n          </h2>\n          <p class=\"card-subtitle\">Execute\
+    \ multimodal spatial reasoning and scene synthesis queries against the live vLLM\
+    \ server on port <code>8000</code>.</p>\n        </div>\n        <div class=\"\
+    row\">\n          <label style=\"margin:0; text-transform:none;\">Max Tokens:</label>\n\
+    \          <select id=\"max-tokens\" style=\"width: auto; padding: 4px 8px; font-size:\
+    \ 12px;\">\n            <option value=\"128\">128 tokens</option>\n          \
+    \  <option value=\"256\" selected>256 tokens</option>\n            <option value=\"\
+    512\">512 tokens</option>\n            <option value=\"1024\">1024 tokens</option>\n\
+    \          </select>\n        </div>\n      </div>\n\n      <div class=\"studio-grid\"\
+    >\n      <div class=\"studio-col\">\n      <label>Prompt / Scenario Input</label>\n\
+    \      <textarea id=\"prompt\">Analyze this warehouse corridor for an autonomous\
+    \ mobile robot: identify potential navigation hazards, dynamic obstacles, and\
+    \ suggest safe path vectors.</textarea>\n      <div class=\"prompt-presets\">\n\
+    \        <span style=\"font-size: 11px; color: var(--text-faint); margin-right:\
+    \ 4px; align-self: center;\">Quick Presets:</span>\n        <button type=\"button\"\
+    \ class=\"preset-chip\" data-p=\"Analyze this warehouse corridor for an autonomous\
+    \ mobile robot: identify potential navigation hazards, dynamic obstacles, and\
+    \ suggest safe path vectors.\">Robot Navigation</button>\n        <button type=\"\
+    button\" class=\"preset-chip\" data-p=\"Describe the spatial relationships of\
+    \ all objects in this scene for a robotic manipulation arm.\">Spatial Scene Map</button>\n\
+    \        <button type=\"button\" class=\"preset-chip\" data-p=\"Detect any safety\
+    \ rule violations or unauthorized personnel in this high-voltage substation zone.\"\
+    >Industrial Safety Check</button>\n      </div>\n      <div class=\"row\">\n \
+    \       <button type=\"button\" id=\"send-chat\" style=\"padding: 9px 18px;\"\
+    >\n          <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\"><line x1=\"22\" y1=\"2\" x2=\"11\"\
+    \ y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg>\n         \
+    \ Run Inference\n        </button>\n        <button type=\"button\" class=\"btn-secondary\"\
+    \ id=\"clear-out\">Clear Output</button>\n      </div>\n      </div>\n      <div\
+    \ class=\"studio-col studio-col-out\">\n        <label>Reasoning Output</label>\n\
+    \        <pre id=\"output-box\">vLLM output will appear here once inference is\
+    \ requested\u2026</pre>\n      </div>\n      </div>\n    </section>\n  \n    \
+    \  </div>\n            <div class=\"tab-panel\" data-tab=\"token\">\n        \
+    \  <!-- Hugging Face Token Configuration -->\n    <section class=\"card tier\"\
+    >\n      <div class=\"card-header\">\n        <div>\n          <h2 class=\"card-title\"\
+    >\n            <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"11\" width=\"18\"\
+    \ height=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg>\n\
+    \            Hugging Face Model Access Token\n          </h2>\n          <p class=\"\
+    card-subtitle\">\n            Cosmos3-Nano requires authenticated license acceptance\
+    \ on <a href=\"https://huggingface.co/nvidia/Cosmos3-Nano\" target=\"_blank\"\
+    \ rel=\"noreferrer\">huggingface.co/nvidia/Cosmos3-Nano</a>. Token is saved securely\
+    \ into Secret <code>ina-hf-token</code>.\n          </p>\n        </div>\n   \
+    \   </div>\n\n      <label>User Access Token (Read)</label>\n      <div class=\"\
+    row\">\n        <input id=\"token\" type=\"password\" placeholder=\"hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\
+    \ autocomplete=\"off\" style=\"flex: 1 1 280px;\" />\n        <button type=\"\
+    button\" class=\"btn-secondary\" id=\"toggle-token\">Show</button>\n        <button\
+    \ type=\"button\" id=\"save-token\">Save Token & Start Engine</button>\n     \
+    \   <button type=\"button\" class=\"danger\" id=\"remove-token\">Remove</button>\n\
+    \      </div>\n      <div class=\"msg-box\" id=\"token-msg\"></div>\n    </section>\n\
+    \n\n      </div>\n          <div class=\"tab-panel\" data-tab=\"docs\">\n    \
+    \    <section class=\"card tier\">\n          <div class=\"card-header\"><div>\n\
+    \            <h2 class=\"card-title\">Physical AI \xB7 Slice 2</h2>\n        \
+    \    <p class=\"card-subtitle\">Cosmos3-Nano on A40 \xB7 vLLM sidecar</p>\n  \
+    \        </div></div>\n          <p class=\"docs-lead\">HF token, chat inference,\
+    \ and UE send/receive are proxied by this console. Interactive OpenAPI: <a href=\"\
+    /api/docs\" target=\"_blank\" rel=\"noreferrer\">/api/docs</a>.</p>\n        \
+    \  <table class=\"docs-table\">\n            <thead><tr><th>Method</th><th>Endpoint</th><th>Type</th><th>Description</th></tr></thead>\n\
+    \            <tbody>\n              <tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/status</code></td><td>JSON</td><td>HF\
+    \ token configured, vLLM ready, namespace</td></tr><tr><td><span class=\"docs-badge-put\"\
+    >PUT</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Save Hugging\
+    \ Face token into Secret</td></tr><tr><td><span class=\"docs-badge-del\">DELETE</span></td><td><code>/api/hf-token</code></td><td>JSON</td><td>Remove\
+    \ stored token</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/chat</code></td><td>JSON</td><td>Run\
+    \ a vLLM prompt</td></tr><tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/ues</code></td><td>JSON</td><td>Slice-2\
+    \ UE consoles</td></tr><tr><td><span class=\"docs-badge-get\">GET</span></td><td><code>/api/ues/{idx}/exchanges</code></td><td>JSON</td><td>Recent\
+    \ send/receive log</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/ues/{idx}/control</code></td><td>JSON</td><td>Enable\
+    \ or pause UE send</td></tr><tr><td><span class=\"docs-badge-post\">POST</span></td><td><code>/api/ues/{idx}/send-once</code></td><td>JSON</td><td>Trigger\
+    \ one UE inference</td></tr>\n            </tbody>\n          </table>\n     \
+    \   </section>\n      </div>\n    </main>\n  </div>\n</div>\n\n  <script>\n  \
+    \  const $ = (id) => document.getElementById(id);\n\n    async function req(url,\
+    \ opts) {\n      const r = await fetch(url, Object.assign({ headers: { \"Content-Type\"\
+    : \"application/json\" } }, opts || {}));\n      const body = await r.json().catch(()\
+    \ => ({}));\n      if (!r.ok) {\n        const d = body && body.detail;\n    \
+    \    const msg = typeof d === \"string\" ? d : (d && (d.detail || d.message))\
+    \ || body.message || r.statusText;\n        throw new Error(typeof msg === \"\
+    string\" ? msg : JSON.stringify(msg));\n      }\n      return body;\n    }\n\n\
+    \    function showMsg(boxId, text, isError = false) {\n      const el = $(boxId);\n\
+    \      el.className = `msg-box show ${isError ? 'err' : 'ok'}`;\n      el.textContent\
+    \ = text;\n      setTimeout(() => { el.className = 'msg-box'; }, 6000);\n    }\n\
+    \n    async function refreshStatus() {\n      try {\n        const s = await req(\"\
+    /api/status\");\n        \n        // Header Pills\n        $(\"header-pills\"\
+    ).innerHTML =\n          `<span class=\"pill ${s.configured ? \"ok\" : \"bad\"\
+    }\"><span class=\"dot ${s.configured ? \"pulse\" : \"\"}\"></span>${s.configured\
+    \ ? \"HF Token Active\" : \"HF Token Missing\"}</span>` +\n          `<span class=\"\
+    pill ${s.vllm_ready ? \"ok\" : \"bad\"}\"><span class=\"dot ${s.vllm_ready ? \"\
+    pulse\" : \"\"}\"></span>${s.vllm_ready ? \"vLLM Ready\" : \"vLLM Engine Offline\"\
+    }</span>` +\n          `<span class=\"pill mono\">${s.namespace}</span>`;\n\n\
+    \        // KPI Strip\n        $(\"kpi-hf\").textContent = s.configured ? \"Saved\
+    \ in Secret\" : \"Missing / Not Set\";\n        $(\"kpi-hf-dot\").className =\
+    \ `dot ${s.configured ? \"ok pulse\" : \"bad\"}`;\n        $(\"kpi-vllm\").textContent\
+    \ = s.vllm_ready ? \"Online (200 OK)\" : \"Waiting for Token / Start\";\n    \
+    \    $(\"kpi-vllm-dot\").className = `dot ${s.vllm_ready ? \"ok pulse\" : \"bad\"\
+    }`;\n        if (s.model) $(\"kpi-model\").textContent = s.model;\n        $(\"\
+    kpi-ns\").textContent = `${s.namespace} \xB7 edge (gpu-a40)`;\n      } catch (e)\
+    \ {\n        $(\"header-pills\").innerHTML = `<span class=\"pill bad\"><span class=\"\
+    dot\"></span> Connection Error</span>`;\n      }\n    }\n\n    // Token toggle\n\
+    \    $(\"toggle-token\").onclick = () => {\n      const input = $(\"token\");\n\
+    \      input.type = input.type === \"password\" ? \"text\" : \"password\";\n \
+    \     $(\"toggle-token\").textContent = input.type === \"password\" ? \"Show\"\
+    \ : \"Hide\";\n    };\n\n    // Save token\n    $(\"save-token\").onclick = async\
+    \ () => {\n      const tok = $(\"token\").value.trim();\n      if (!tok) {\n \
+    \       showMsg(\"token-msg\", \"Please enter a valid Hugging Face access token.\"\
+    , true);\n        return;\n      }\n      $(\"save-token\").disabled = true;\n\
+    \      try {\n        const res = await req(\"/api/hf-token\", { method: \"PUT\"\
+    , body: JSON.stringify({ token: tok }) });\n        showMsg(\"token-msg\", res.message\
+    \ || \"Token saved successfully. vLLM engine is initializing\u2026\");\n     \
+    \   $(\"token\").value = \"\";\n        await refreshStatus();\n      } catch\
+    \ (e) {\n        showMsg(\"token-msg\", e.message, true);\n      } finally {\n\
+    \        $(\"save-token\").disabled = false;\n      }\n    };\n\n    // Remove\
+    \ token\n    $(\"remove-token\").onclick = async () => {\n      if (!confirm(\"\
+    Remove the stored Hugging Face token secret?\")) return;\n      $(\"remove-token\"\
+    ).disabled = true;\n      try {\n        const res = await req(\"/api/hf-token\"\
+    , { method: \"DELETE\" });\n        showMsg(\"token-msg\", res.message || \"Token\
+    \ secret removed.\");\n        await refreshStatus();\n      } catch (e) {\n \
+    \       showMsg(\"token-msg\", e.message, true);\n      } finally {\n        $(\"\
+    remove-token\").disabled = false;\n      }\n    };\n\n    // Preset prompts\n\
+    \    document.querySelectorAll(\".preset-chip\").forEach((btn) => {\n      btn.onclick\
+    \ = () => {\n        $(\"prompt\").value = btn.getAttribute(\"data-p\");\n   \
+    \   };\n    });\n\n    // Chat Inference\n    $(\"send-chat\").onclick = async\
+    \ () => {\n      const promptText = $(\"prompt\").value.trim();\n      if (!promptText)\
+    \ return;\n      \n      const maxTokens = parseInt($(\"max-tokens\").value, 10)\
+    \ || 256;\n      $(\"output-box\").textContent = \"Executing Cosmos3 inference\
+    \ on GPU worker\u2026 please wait\u2026\";\n      $(\"send-chat\").disabled =\
+    \ true;\n\n      const t0 = performance.now();\n      try {\n        const res\
+    \ = await req(\"/api/chat\", {\n          method: \"POST\",\n          body: JSON.stringify({\
+    \ prompt: promptText, max_tokens: maxTokens })\n        });\n        const elapsed\
+    \ = ((performance.now() - t0) / 1000).toFixed(2);\n        $(\"output-box\").textContent\
+    \ = `[Inference completed in ${elapsed}s]\\n\\n${res.text || JSON.stringify(res,\
+    \ null, 2)}`;\n      } catch (e) {\n        $(\"output-box\").textContent = `[Inference\
+    \ Error]: ${e.message}\\n\\nEnsure Hugging Face token is active and vLLM container\
+    \ has finished loading model weights.`;\n      } finally {\n        $(\"send-chat\"\
+    ).disabled = false;\n      }\n    };\n\n    $(\"clear-out\").onclick = () => {\n\
+    \      $(\"output-box\").textContent = \"vLLM output will appear here once inference\
+    \ is requested\u2026\";\n    };\n\n    let selectedUe = null;\n    const autoStarted\
+    \ = new Set(JSON.parse(sessionStorage.getItem(\"pai-auto-started\") || \"[]\"\
+    ));\n    function rememberAutoStart(key) {\n      autoStarted.add(key);\n    \
+    \  sessionStorage.setItem(\"pai-auto-started\", JSON.stringify([...autoStarted]));\n\
+    \    }\n\n    function isUeRunning(st) {\n      const v = st && st.send_enabled;\n\
+    \      return v === true || v === \"true\" || v === 1 || v === \"1\";\n    }\n\
+    \n    function paintToggle(btn, running) {\n      if (!btn) return;\n      btn.disabled\
+    \ = false;\n      if (running) {\n        btn.className = \"danger ue-ctrl-btn\"\
+    ;\n        btn.setAttribute(\"data-action\", \"stop\");\n        btn.textContent\
+    \ = \"\u23F9 Stop\";\n      } else {\n        btn.className = \"ue-ctrl-btn\"\
+    ;\n        btn.setAttribute(\"data-action\", \"start\");\n        btn.textContent\
+    \ = \"\u25B6 Start\";\n      }\n    }\n\n    function ueLatency(st) {\n      const\
+    \ rec = (st && st.last && st.last.received) || {};\n      const v = rec.latency_ms\
+    \ != null ? rec.latency_ms : st && st.latency_ms;\n      return (v != null &&\
+    \ v !== \"\") ? Number(v) : null;\n    }\n\n    function fmtTok(n) {\n      const\
+    \ v = Number(n);\n      if (n == null || n === \"\" || Number.isNaN(v)) return\
+    \ \"\u2014\";\n      return v.toLocaleString();\n    }\n\n    function ueTokenStats(st)\
+    \ {\n      const lastU = (st && st.last && st.last.received && st.last.received.usage)\
+    \ || {};\n      const hasCum = st && (st.prompt_tokens != null || st.completion_tokens\
+    \ != null);\n      return {\n        input: hasCum ? Number(st.prompt_tokens ||\
+    \ 0) : Number(lastU.prompt_tokens || lastU.input_tokens || 0),\n        output:\
+    \ hasCum ? Number(st.completion_tokens || 0) : Number(lastU.completion_tokens\
+    \ || lastU.output_tokens || 0),\n        lastIn: Number(st && st.last_prompt_tokens\
+    \ != null ? st.last_prompt_tokens : (lastU.prompt_tokens || lastU.input_tokens\
+    \ || 0)),\n        lastOut: Number(st && st.last_completion_tokens != null ? st.last_completion_tokens\
+    \ : (lastU.completion_tokens || lastU.output_tokens || 0)),\n        cumulative:\
+    \ !!hasCum,\n      };\n    }\n\n    function paintUeStats(ues) {\n      const\
+    \ n = ues.length;\n      const nOk = ues.filter(u => u.connected).length;\n  \
+    \    const nSend = ues.filter(u => isUeRunning(u.status)).length;\n      const\
+    \ nPdu = ues.filter(u => !!(u.status || {}).pdu_ready).length;\n      const lats\
+    \ = ues.map(u => ueLatency(u.status)).filter(v => v != null && !Number.isNaN(v));\n\
+    \      if ($(\"kpi-ue-connected\")) $(\"kpi-ue-connected\").textContent = n ?\
+    \ `${nOk}/${n}` : \"0\";\n      if ($(\"kpi-ue-dot\")) $(\"kpi-ue-dot\").className\
+    \ = `dot ${nOk ? \"ok pulse\" : \"bad\"}`;\n      if ($(\"kpi-ue-sending\")) $(\"\
+    kpi-ue-sending\").textContent = n ? `${nSend}/${n}` : \"0\";\n      if ($(\"kpi-ue-pdu\"\
+    )) $(\"kpi-ue-pdu\").textContent = n ? `${nPdu}/${n}` : \"0\";\n      if ($(\"\
+    kpi-ue-lat\")) {\n        $(\"kpi-ue-lat\").textContent = lats.length\n      \
+    \    ? `${Math.round(lats.reduce((a, b) => a + b, 0) / lats.length)} ms`\n   \
+    \       : \"\u2014\";\n      }\n    }\n\n    function renderUes(data) {\n    \
+    \  const ues = (data && data.ues) || [];\n      paintUeStats(ues);\n      if (!ues.length)\
+    \ {\n        $(\"ue-list\").textContent = \"No slice-2 UEs found. Deploy Physical\
+    \ AI UE clients.\";\n        return;\n      }\n      $(\"ue-list\").innerHTML\
+    \ = ues.map(u => {\n        const st = u.status || {};\n        const running\
+    \ = isUeRunning(st);\n        const sending = running ? \"running\" : \"stopped\"\
+    ;\n        const ok = !!u.connected;\n        const dash = u.dashboard_url ||\
+    \ u.console_url || \"\";\n        const lat = ueLatency(st);\n        const tok\
+    \ = ueTokenStats(st);\n        const inSub = tok.cumulative ? `last ${fmtTok(tok.lastIn)}`\
+    \ : \"last exchange\";\n        const outSub = tok.cumulative ? `last ${fmtTok(tok.lastOut)}`\
+    \ : \"last exchange\";\n        const ctrlBtn = running\n          ? `<button\
+    \ type=\"button\" class=\"danger ue-ctrl-btn\" data-ue-ctrl=\"${u.client_index}\"\
+    \ data-action=\"stop\">\u23F9 Stop</button>`\n          : `<button type=\"button\"\
+    \ class=\"ue-ctrl-btn\" data-ue-ctrl=\"${u.client_index}\" data-action=\"start\"\
+    >\u25B6 Start</button>`;\n        return `<div class=\"ue-card\" data-ue=\"${u.client_index}\"\
+    >\n          <div class=\"row\" style=\"justify-content:space-between;\">\n  \
+    \          <strong>UE ${u.client_index}</strong>\n            <span class=\"pill\
+    \ ${running ? \"ok\" : \"bad\"}\">${ok ? sending : (u.pod_phase || \"down\")}</span>\n\
+    \          </div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:6px;\"\
+    >${u.name}</div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:4px;\"\
+    >\n            ${u.console_ip || \"\u2014\"} \xB7 ${u.console_mac || \"\u2014\"\
+    }\n          </div>\n          <div class=\"mono\" style=\"font-size:12px;color:var(--text-dim);margin-top:4px;\"\
+    >\n            PDU ${st.pdu_ready ? \"up\" : \"wait\"} \xB7 ${lat != null ? lat\
+    \ + \" ms\" : \"no latency\"}\n          </div>\n          <div class=\"ue-tok\"\
+    >\n            <div class=\"ue-tok-item\">\n              <div class=\"ue-tok-label\"\
+    >Input tokens</div>\n              <div class=\"ue-tok-value\">${fmtTok(tok.input)}</div>\n\
+    \              <div class=\"ue-tok-sub\">${inSub}</div>\n            </div>\n\
+    \            <div class=\"ue-tok-item\">\n              <div class=\"ue-tok-label\"\
+    >Output tokens</div>\n              <div class=\"ue-tok-value\">${fmtTok(tok.output)}</div>\n\
+    \              <div class=\"ue-tok-sub\">${outSub}</div>\n            </div>\n\
+    \          </div>\n          <div class=\"row\" style=\"margin-top:10px;\">\n\
+    \            <a class=\"ue-dash-btn\" href=\"${u.console_url || (u.console_ip\
+    \ ? `http://${u.console_ip}/` : `http://10.1.137.200/`)}\" target=\"_blank\" rel=\"\
+    noreferrer\">Open UE console</a>\n          </div>\n        </div>`;\n      }).join(\"\
+    \");\n      $(\"ue-list\").querySelectorAll(\"[data-ue-ctrl]\").forEach(btn =>\
+    \ {\n        btn.onclick = (ev) => {\n          ev.stopPropagation();\n      \
+    \    const idx = parseInt(btn.getAttribute(\"data-ue-ctrl\"), 10);\n         \
+    \ const start = btn.getAttribute(\"data-action\") === \"start\";\n          paintToggle(btn,\
+    \ start);\n          controlUe(idx, start);\n        };\n      });\n    }\n\n\
+    \    async function refreshUes() {\n      try {\n        const data = await req(\"\
+    /api/ues\");\n        renderUes(data);\n        const ues = (data && data.ues)\
+    \ || [];\n        for (const u of ues) {\n          const key = String(u.name\
+    \ || u.client_index);\n          if (isUeRunning(u.status)) {\n            rememberAutoStart(key);\n\
+    \            continue;\n          }\n          if (!u.connected || autoStarted.has(key))\
+    \ continue;\n          rememberAutoStart(key);\n          controlUe(u.client_index,\
+    \ true);\n          break;\n        }\n      } catch (e) {\n        $(\"ue-list\"\
+    ).textContent = e.message;\n      }\n    }\n\n    $(\"refresh-ues\").onclick =\
+    \ refreshUes;\n\n    async function controlUe(idx, start) {\n      const msg =\
+    \ $(\"ue-ctrl-msg\");\n      if (msg) { msg.className = \"msg-box\"; msg.textContent\
+    \ = \"\"; }\n      const cardBtn = document.querySelector(`[data-ue-ctrl=\"${idx}\"\
+    ]`);\n      paintToggle(cardBtn, start);\n      if (cardBtn) cardBtn.disabled\
+    \ = true;\n      try {\n        const resp = await req(`/api/ues/${idx}/control`,\
+    \ {\n          method: \"POST\",\n          body: JSON.stringify({ send_enabled:\
+    \ !!start }),\n        });\n        const running = isUeRunning(resp);\n     \
+    \   paintToggle(cardBtn, running);\n        if (msg) showMsg(\"ue-ctrl-msg\",\
+    \ running ? `UE ${idx} started` : `UE ${idx} stopped`, false);\n        selectedUe\
+    \ = idx;\n        await refreshUes();\n      } catch (e) {\n        paintToggle(cardBtn,\
+    \ !start);\n        if (msg) showMsg(\"ue-ctrl-msg\", `Unable to ${start ? \"\
+    start\" : \"stop\"} UE ${idx}: ${e.message}`, true);\n      }\n    }\n\n\n   \
+    \ const CONSOLE_CRUMBS = {\n      \"overview\": \"Physical AI \xB7 Cosmos3\",\n\
+    \      \"ues\": \"Physical AI \xB7 Cosmos3\",\n      \"studio\": \"Physical AI\
+    \ \xB7 Cosmos3\",\n      \"token\": \"Physical AI \xB7 Cosmos3\",\n      \"docs\"\
+    : \"Physical AI \xB7 Cosmos3\"\n    };\n    function setConsoleTab(id) {\n   \
+    \   document.querySelectorAll(\".rail-tab\").forEach((b) => b.classList.toggle(\"\
+    rail-tab-active\", b.dataset.tab === id));\n      const panel = document.querySelector(`.tab-panel[data-tab=\"\
+    ${id}\"]`);\n      if (panel) panel.scrollIntoView({ behavior: \"smooth\", block:\
+    \ \"start\" });\n      const crumb = document.getElementById(\"crumb\");\n   \
+    \   if (crumb) crumb.textContent = CONSOLE_CRUMBS[id] || \"Physical AI \xB7 Cosmos3\"\
+    ;\n    }\n    refreshStatus();\n    refreshUes();\n    setInterval(refreshStatus,\
+    \ 6000);\n    setInterval(refreshUes, 8000);\n  </script>\n</body>\n</html>\n"

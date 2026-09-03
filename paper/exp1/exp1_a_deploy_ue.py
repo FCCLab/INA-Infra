@@ -142,14 +142,26 @@ UE_CONFIGS = [
 def generate_ue_manifests(cfg: dict, namespace: str) -> str:
     """Generates Kubernetes YAML for UE modem + live application client container."""
     s_id = cfg["slice_id"]
+    idx = int(cfg.get("client_index", 1))
     ue_name = cfg["name"]
     rf_net_name = f"ue{s_id}-sim-rf"
+    console_ip = f"10.1.137.{220 + (s_id - 1) * 10 + (idx - 1)}"
+    console_mac = f"02:0a:40:{s_id:02x}:00:{idx:02x}"
+    console_mac_label = f"02-0a-40-{s_id:02x}-00-{idx:02x}"
     
     yaml_content = f"""---
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: {rf_net_name}
+  namespace: {namespace}
+spec:
+  config: '{{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {{"type": "static"}}}}'
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue{s_id}-console-multus
   namespace: {namespace}
 spec:
   config: '{{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {{"type": "static"}}}}'
@@ -192,15 +204,18 @@ metadata:
     app.kubernetes.io/name: {ue_name}
     slice: "{s_id}"
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: {ue_name}
   ports:
   - name: http
     port: 80
     targetPort: 80
+    nodePort: {32280 + s_id}
   - name: backend
     port: 8090
     targetPort: 8090
+    nodePort: {32290 + s_id}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -213,6 +228,8 @@ metadata:
     slice: "{s_id}"
     ina.lab/role: ue-client
     ina.lab/slice: "{s_id}"
+    ina.lab/console-ip: "{console_ip}"
+    ina.lab/console-mac: "{console_mac_label}"
 spec:
   replicas: 1
   strategy:
@@ -228,8 +245,10 @@ spec:
         slice: "{s_id}"
         ina.lab/role: ue-client
         ina.lab/slice: "{s_id}"
+        ina.lab/console-ip: "{console_ip}"
+        ina.lab/console-mac: "{console_mac_label}"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{{"name": "{rf_net_name}", "interface": "rf", "ips": ["{cfg['rf_ip']}"], "gateways": ["10.1.140.3"]}}]'
+        k8s.v1.cni.cncf.io/networks: '[{{"name": "{rf_net_name}", "interface": "rf", "ips": ["{cfg['rf_ip']}"], "gateways": ["10.1.140.3"]}}, {{"name": "ue{s_id}-console-multus", "interface": "net1", "ips": ["{console_ip}/24"], "mac": "{console_mac}"}}]'
     spec:
       serviceAccountName: {ue_name}-sa
       terminationGracePeriodSeconds: 2

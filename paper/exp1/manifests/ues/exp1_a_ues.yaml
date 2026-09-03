@@ -7,6 +7,14 @@ metadata:
 spec:
   config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
 ---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue1-console-multus
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -45,15 +53,18 @@ metadata:
     app.kubernetes.io/name: oai-ue-1
     slice: "1"
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: oai-ue-1
   ports:
   - name: http
     port: 80
     targetPort: 80
+    nodePort: 32281
   - name: backend
     port: 8090
     targetPort: 8090
+    nodePort: 32291
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -66,6 +77,8 @@ metadata:
     slice: "1"
     ina.lab/role: ue-client
     ina.lab/slice: "1"
+    ina.lab/console-ip: "10.1.137.220"
+    ina.lab/console-mac: "02-0a-40-01-00-01"
 spec:
   replicas: 1
   strategy:
@@ -81,8 +94,10 @@ spec:
         slice: "1"
         ina.lab/role: ue-client
         ina.lab/slice: "1"
+        ina.lab/console-ip: "10.1.137.220"
+        ina.lab/console-mac: "02-0a-40-01-00-01"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{"name": "ue1-sim-rf", "interface": "rf", "ips": ["10.1.140.141/24"], "gateways": ["10.1.140.3"]}]'
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue1-sim-rf", "interface": "rf", "ips": ["10.1.140.141/24"], "gateways": ["10.1.140.3"]}, {"name": "ue1-console-multus", "interface": "net1", "ips": ["10.1.137.220/24"], "mac": "02:0a:40:01:00:01"}]'
     spec:
       serviceAccountName: oai-ue-1-sa
       terminationGracePeriodSeconds: 2
@@ -187,6 +202,14 @@ metadata:
 spec:
   config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
 ---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue2-console-multus
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -225,15 +248,18 @@ metadata:
     app.kubernetes.io/name: oai-ue-2
     slice: "2"
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: oai-ue-2
   ports:
   - name: http
     port: 80
     targetPort: 80
+    nodePort: 32282
   - name: backend
     port: 8090
     targetPort: 8090
+    nodePort: 32292
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -246,6 +272,8 @@ metadata:
     slice: "2"
     ina.lab/role: ue-client
     ina.lab/slice: "2"
+    ina.lab/console-ip: "10.1.137.230"
+    ina.lab/console-mac: "02-0a-40-02-00-01"
 spec:
   replicas: 1
   strategy:
@@ -261,8 +289,10 @@ spec:
         slice: "2"
         ina.lab/role: ue-client
         ina.lab/slice: "2"
+        ina.lab/console-ip: "10.1.137.230"
+        ina.lab/console-mac: "02-0a-40-02-00-01"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{"name": "ue2-sim-rf", "interface": "rf", "ips": ["10.1.140.142/24"], "gateways": ["10.1.140.3"]}]'
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue2-sim-rf", "interface": "rf", "ips": ["10.1.140.142/24"], "gateways": ["10.1.140.3"]}, {"name": "ue2-console-multus", "interface": "net1", "ips": ["10.1.137.230/24"], "mac": "02:0a:40:02:00:01"}]'
     spec:
       serviceAccountName: oai-ue-2-sa
       terminationGracePeriodSeconds: 2
@@ -387,6 +417,14 @@ metadata:
 spec:
   config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
 ---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue3-console-multus
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -425,15 +463,18 @@ metadata:
     app.kubernetes.io/name: oai-ue-3
     slice: "3"
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: oai-ue-3
   ports:
   - name: http
     port: 80
     targetPort: 80
+    nodePort: 32283
   - name: backend
     port: 8090
     targetPort: 8090
+    nodePort: 32293
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -446,6 +487,8 @@ metadata:
     slice: "3"
     ina.lab/role: ue-client
     ina.lab/slice: "3"
+    ina.lab/console-ip: "10.1.137.240"
+    ina.lab/console-mac: "02-0a-40-03-00-01"
 spec:
   replicas: 1
   strategy:
@@ -461,8 +504,10 @@ spec:
         slice: "3"
         ina.lab/role: ue-client
         ina.lab/slice: "3"
+        ina.lab/console-ip: "10.1.137.240"
+        ina.lab/console-mac: "02-0a-40-03-00-01"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{"name": "ue3-sim-rf", "interface": "rf", "ips": ["10.1.140.143/24"], "gateways": ["10.1.140.3"]}]'
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue3-sim-rf", "interface": "rf", "ips": ["10.1.140.143/24"], "gateways": ["10.1.140.3"]}, {"name": "ue3-console-multus", "interface": "net1", "ips": ["10.1.137.240/24"], "mac": "02:0a:40:03:00:01"}]'
     spec:
       serviceAccountName: oai-ue-3-sa
       terminationGracePeriodSeconds: 2
@@ -608,6 +653,14 @@ metadata:
 spec:
   config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
 ---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: ue4-console-multus
+  namespace: exp1-a
+spec:
+  config: '{"cniVersion": "0.3.1", "type": "macvlan", "master": "enp4s0f0", "mode": "bridge", "ipam": {"type": "static"}}'
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -646,15 +699,18 @@ metadata:
     app.kubernetes.io/name: oai-ue-4
     slice: "4"
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: oai-ue-4
   ports:
   - name: http
     port: 80
     targetPort: 80
+    nodePort: 32284
   - name: backend
     port: 8090
     targetPort: 8090
+    nodePort: 32294
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -667,6 +723,8 @@ metadata:
     slice: "4"
     ina.lab/role: ue-client
     ina.lab/slice: "4"
+    ina.lab/console-ip: "10.1.137.250"
+    ina.lab/console-mac: "02-0a-40-04-00-01"
 spec:
   replicas: 1
   strategy:
@@ -682,8 +740,10 @@ spec:
         slice: "4"
         ina.lab/role: ue-client
         ina.lab/slice: "4"
+        ina.lab/console-ip: "10.1.137.250"
+        ina.lab/console-mac: "02-0a-40-04-00-01"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{"name": "ue4-sim-rf", "interface": "rf", "ips": ["10.1.140.144/24"], "gateways": ["10.1.140.3"]}]'
+        k8s.v1.cni.cncf.io/networks: '[{"name": "ue4-sim-rf", "interface": "rf", "ips": ["10.1.140.144/24"], "gateways": ["10.1.140.3"]}, {"name": "ue4-console-multus", "interface": "net1", "ips": ["10.1.137.250/24"], "mac": "02:0a:40:04:00:01"}]'
     spec:
       serviceAccountName: oai-ue-4-sa
       terminationGracePeriodSeconds: 2
