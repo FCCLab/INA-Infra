@@ -9,6 +9,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -56,6 +57,7 @@ PDU_WAIT_TIMEOUT = int(os.environ.get("PDU_WAIT_TIMEOUT", "300"))
 LOG_LIMIT = int(os.environ.get("PUBLISH_LOG_LIMIT", "80"))
 STAT_WINDOW_S = float(os.environ.get("MQTT_STAT_WINDOW_S", "30"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9106"))
+BACKEND_PORT = int(os.environ.get("BACKEND_PORT", "8090"))
 UE_ID = os.environ.get("APP_NAME") or UE_NAME
 UL_TOPIC = os.environ.get("UL_TOPIC") or f"slice_d/ul/{DEVICE_ID}"
 DL_TOPIC = os.environ.get("DL_TOPIC") or f"slice_d/dl/{DEVICE_ID}"
@@ -934,4 +936,9 @@ def _startup() -> None:
             pass
     threading.Thread(target=_ping_loop, name="iot-ue-ping-loop", daemon=True).start()
     threading.Thread(target=_loop, name="iot-ue-loop", daemon=True).start()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=BACKEND_PORT)
 

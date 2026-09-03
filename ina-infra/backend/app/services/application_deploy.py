@@ -959,9 +959,9 @@ def generate_server_manifests(
             "volumes": [
                 {
                     "name": "hf-token-vol",
-                    "secret": {
-                        "secretName": "ina-hf-token",
-                        "optional": True,
+                    "hostPath": {
+                        "path": "/var/lib/ina-infra/hf-token",
+                        "type": "DirectoryOrCreate",
                     },
                 },
                 {
@@ -1074,6 +1074,10 @@ def generate_server_manifests(
                             "name": "dashboard-code",
                             "mountPath": "/app/static/index.html",
                             "subPath": "index.html",
+                        },
+                        {
+                            "name": "hf-token-vol",
+                            "mountPath": "/var/run/secrets/hf-token",
                         },
                     ],
                     "ports": [

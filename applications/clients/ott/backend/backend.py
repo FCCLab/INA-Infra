@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -89,28 +90,24 @@ _pdu_iface_live = PDU_IFACE_CFG
 _pdu_lock = threading.Lock()
 _api_iface_live = API_IFACE_CFG
 
-if Gauge is not None:
-    APP_UE_LATENCY_MS = Gauge(
-        "app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"]
-    )
-    APP_UE_RTT_MS = Gauge(
-        "app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"]
-    )
-    APP_UE_THROUGHPUT_MBPS = Gauge(
-        "app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"]
-    )
-    APP_UE_THROUGHPUT_DL_MBPS = Gauge(
-        "app_ue_throughput_dl_mbps", "Per-UE downlink throughput (Mbps)", ["ue_id"]
-    )
-    APP_UE_THROUGHPUT_UL_MBPS = Gauge(
-        "app_ue_throughput_ul_mbps", "Per-UE uplink throughput (Mbps)", ["ue_id"]
-    )
-    APP_LATENCY_MS = Gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
-    APP_THROUGHPUT_MBPS = Gauge(
-        "app_throughput_mbps", "Aggregated application throughput (Mbps)"
-    )
-else:
-    APP_UE_LATENCY_MS = APP_UE_RTT_MS = APP_UE_THROUGHPUT_MBPS = APP_UE_THROUGHPUT_DL_MBPS = APP_UE_THROUGHPUT_UL_MBPS = APP_LATENCY_MS = APP_THROUGHPUT_MBPS = None
+def _get_gauge(name: str, desc: str, labelnames: Sequence[str] = ()):
+    if Gauge is None:
+        return None
+    try:
+        from prometheus_client import REGISTRY
+        if name in REGISTRY._names_to_collectors:
+            return REGISTRY._names_to_collectors[name]
+        return Gauge(name, desc, labelnames)
+    except Exception:
+        return None
+
+APP_UE_LATENCY_MS = _get_gauge("app_ue_latency_ms", "Per-UE application latency (milliseconds)", ["ue_id"])
+APP_UE_RTT_MS = _get_gauge("app_ue_rtt_ms", "Per-UE round-trip time (milliseconds)", ["ue_id"])
+APP_UE_THROUGHPUT_MBPS = _get_gauge("app_ue_throughput_mbps", "Per-UE application throughput (Mbps)", ["ue_id"])
+APP_UE_THROUGHPUT_DL_MBPS = _get_gauge("app_ue_throughput_dl_mbps", "Per-UE downlink throughput (Mbps)", ["ue_id"])
+APP_UE_THROUGHPUT_UL_MBPS = _get_gauge("app_ue_throughput_ul_mbps", "Per-UE uplink throughput (Mbps)", ["ue_id"])
+APP_LATENCY_MS = _get_gauge("app_latency_ms", "Aggregated application latency (milliseconds)")
+APP_THROUGHPUT_MBPS = _get_gauge("app_throughput_mbps", "Aggregated application throughput (Mbps)")
 
 
 app = FastAPI(title=f"{UE_NAME} backend", docs_url="/docs")

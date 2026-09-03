@@ -13,6 +13,7 @@ import urllib.request
 import zlib
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -64,6 +65,7 @@ IMAGE_WIDTH = int(os.environ.get("IMAGE_WIDTH", "64"))
 IMAGE_HEIGHT = int(os.environ.get("IMAGE_HEIGHT", "36"))
 LOG_LIMIT = int(os.environ.get("EXCHANGE_LOG_LIMIT", "80"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "8001"))
+BACKEND_PORT = int(os.environ.get("BACKEND_PORT", "8090"))
 UE_ID = os.environ.get("APP_NAME") or UE_NAME
 
 if Gauge is not None:
@@ -645,4 +647,10 @@ def _startup() -> None:
             pass
     threading.Thread(target=_ping_loop, name="ue-ping-loop", daemon=True).start()
     threading.Thread(target=_loop, name="ue-send-loop", daemon=True).start()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=BACKEND_PORT)
+
 

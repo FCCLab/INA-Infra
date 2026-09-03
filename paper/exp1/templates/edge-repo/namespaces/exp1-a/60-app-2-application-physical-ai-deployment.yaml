@@ -49,9 +49,9 @@ spec:
       runtimeClassName: nvidia
       volumes:
       - name: hf-token-vol
-        secret:
-          secretName: ina-hf-token
-          optional: true
+        hostPath:
+          path: /var/lib/ina-infra/hf-token
+          type: DirectoryOrCreate
       - name: dashboard-code
         configMap:
           name: physical-ai-dashboard-code
@@ -132,7 +132,6 @@ spec:
         volumeMounts:
         - name: hf-token-vol
           mountPath: /var/run/secrets/hf-token
-          readOnly: true
         ports:
         - name: http
           containerPort: 8000
@@ -189,6 +188,8 @@ spec:
         - name: dashboard-code
           mountPath: /app/static/index.html
           subPath: index.html
+        - name: hf-token-vol
+          mountPath: /var/run/secrets/hf-token
         ports:
         - name: dashboard
           containerPort: 80

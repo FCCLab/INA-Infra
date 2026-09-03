@@ -57,9 +57,9 @@ def mtx_path_for(client_id: str) -> str:
 class ClientStreamContext:
     """Tracks state and latest frames for a single client stream."""
 
-    def __init__(self, client_id: str):
+    def __init__(self, client_id: str, name: Optional[str] = None):
         self.client_id = normalize_canonical_client_id(client_id)
-        self.name = format_client_name(client_id)
+        self.name = name or format_client_name(client_id)
         self.decoded_count = 0
         self.analyzed_count = 0
         self.yolo_seq = 0

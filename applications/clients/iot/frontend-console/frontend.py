@@ -58,3 +58,7 @@ async def proxy_api(path: str, request: Request) -> Response:
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("FRONTEND_PORT", "80")))

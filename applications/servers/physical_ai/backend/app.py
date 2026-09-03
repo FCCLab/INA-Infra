@@ -27,6 +27,8 @@ CA_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
 
 SECRET_NAME = os.environ.get("HF_SECRET_NAME", "ina-hf-token")
 SECRET_KEY = os.environ.get("HF_SECRET_KEY", "token")
+HF_TOKEN_DIR = Path(os.environ.get("HF_TOKEN_DIR", "/var/run/secrets/hf-token"))
+HF_TOKEN_PATH = HF_TOKEN_DIR / "token"
 DEPLOY_NAME = os.environ.get("HF_DEPLOY_NAME", "application-physical-ai")
 VLLM_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000").rstrip("/")
 STATIC_DIR = Path(os.environ.get("DASHBOARD_STATIC", "/app/static"))
@@ -128,8 +130,15 @@ def _vllm(method: str, path: str, body: Optional[dict] = None) -> tuple[int, Any
 @app.get("/api/status")
 def api_status() -> dict:
     ns = _ns()
+    token_on_vol = False
+    try:
+        if HF_TOKEN_PATH.is_file() and HF_TOKEN_PATH.read_text().strip():
+            token_on_vol = True
+    except Exception:
+        pass
     code, secret = _k8s("GET", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
-    configured = code == 200 and bool((secret or {}).get("data", {}).get(SECRET_KEY))
+    secret_configured = code == 200 and bool((secret or {}).get("data", {}).get(SECRET_KEY))
+    configured = token_on_vol or secret_configured
     vllm_ok = False
     model = None
     vcode, vbody = 0, {}
@@ -146,6 +155,7 @@ def api_status() -> dict:
         "namespace": ns,
         "secret": SECRET_NAME,
         "configured": configured,
+        "token_on_volume": token_on_vol,
         "vllm_ready": vllm_ok,
         "model": model,
         "vllm_url": VLLM_URL,
@@ -157,6 +167,18 @@ def api_save_token(body: TokenIn) -> dict:
     token = body.token.strip()
     if not token:
         raise HTTPException(status_code=400, detail="token is required")
+
+    # Persist token to persistent volume
+    try:
+        HF_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+        HF_TOKEN_PATH.write_text(token + "\n")
+        try:
+            os.chmod(HF_TOKEN_PATH, 0o666)
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning(f"Could not write token to {HF_TOKEN_PATH}: {exc}")
+
     ns = _ns()
     payload = {
         "apiVersion": "v1",
@@ -177,15 +199,20 @@ def api_save_token(body: TokenIn) -> dict:
     if code not in (200, 201):
         raise HTTPException(status_code=400, detail=(resp or {}).get("message", f"secret apply failed ({code})"))
     restarted = _restart_deploy(ns)
-    return {"ok": True, "configured": True, "restarted": restarted, "message": "Token saved." + (" vLLM restarting." if restarted else "")}
+    return {"ok": True, "configured": True, "restarted": restarted, "message": "Token saved to volume & secret." + (" vLLM restarting." if restarted else "")}
 
 
 @app.delete("/api/hf-token")
 def api_delete_token() -> dict:
+    try:
+        if HF_TOKEN_PATH.is_file():
+            HF_TOKEN_PATH.unlink()
+    except Exception:
+        pass
     ns = _ns()
     _k8s("DELETE", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
     restarted = _restart_deploy(ns)
-    return {"ok": True, "configured": False, "restarted": restarted, "message": "Token removed."}
+    return {"ok": True, "configured": False, "restarted": restarted, "message": "Token removed from volume & secret."}
 
 
 def _restart_deploy(ns: str) -> bool:
@@ -641,12 +668,52 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+def _sync_token_startup() -> None:
+    try:
+        if HF_TOKEN_PATH.is_file():
+            tok = HF_TOKEN_PATH.read_text().strip()
+            if tok:
+                ns = _ns()
+                code, secret = _k8s("GET", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
+                sec_tok = (secret or {}).get("data", {}).get(SECRET_KEY)
+                if not sec_tok:
+                    payload = {
+                        "apiVersion": "v1",
+                        "kind": "Secret",
+                        "metadata": {"name": SECRET_NAME, "namespace": ns, "labels": {"ina.lab/role": "hf-token"}},
+                        "type": "Opaque",
+                        "stringData": {SECRET_KEY: tok},
+                    }
+                    if code == 200:
+                        _k8s("PATCH", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}", payload, extra_headers={"Content-Type": "application/merge-patch+json"})
+                    else:
+                        _k8s("POST", f"/api/v1/namespaces/{ns}/secrets", payload)
+        else:
+            ns = _ns()
+            code, secret = _k8s("GET", f"/api/v1/namespaces/{ns}/secrets/{SECRET_NAME}")
+            if code == 200 and secret:
+                b64 = (secret.get("data") or {}).get(SECRET_KEY, "")
+                if b64:
+                    import base64
+                    tok = base64.b64decode(b64).decode("utf-8").strip()
+                    if tok:
+                        HF_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+                        HF_TOKEN_PATH.write_text(tok + "\n")
+                        try:
+                            os.chmod(HF_TOKEN_PATH, 0o666)
+                        except Exception:
+                            pass
+    except Exception as exc:
+        logger.warning(f"Token startup sync error: {exc}")
+
+
 @app.on_event("startup")
 def _start_slo_loop() -> None:
     try:
         _start_latency_proxy()
     except Exception:
         pass
+    _sync_token_startup()
     threading.Thread(target=_slo_loop, name="slo-metrics", daemon=True).start()
 
 
