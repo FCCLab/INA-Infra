@@ -17,12 +17,12 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 | **[`server/common/console`](server/common/console/)** | **Common (Slices C & D)** | • Web control console sidecar for OTT / IoT servers | • `ina-control-dashboard:nws-v0.21-amd64` | `./build-push.sh` |
 | **[`server/common/shared`](server/common/shared/)** | **Common** | • Shared stylesheet tokens and shell layouts | — | — |
 
-### 2. Client & Probe Workloads (`client/`)
+### 2. Client & Probe Workloads (`clients/`)
 
 | Directory | Role | Description |
 | :--- | :--- | :--- |
-| **[`client/rtt_probe`](client/rtt_probe/)** | Latency Measurement | Round-trip time (RTT) probe utility |
-| **[`client/throughput_statistics`](client/throughput_statistics/)** | Throughput Analysis | Periodic throughput calculation and telemetry exporter |
+| **[`clients/rtt_probe`](clients/rtt_probe/)** | Latency Measurement | Round-trip time (RTT) probe utility |
+| **[`clients/throughput_statistics`](clients/throughput_statistics/)** | Throughput Analysis | Periodic throughput calculation and telemetry exporter |
 
 ---
 
