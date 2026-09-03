@@ -329,11 +329,17 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
         "stream": False,
     }
     t_send = time.time()
+    api_if = _resolve_api_iface()
+    api_ip = get_interface_ip(api_if)
+    c_ip = CONSOLE_IP or api_ip or ""
+    c_url = f"http://{c_ip}:80" if c_ip else ""
     body["ina"] = {
         "t_send": t_send,
         "app_name": UE_ID,
         "client_index": CLIENT_INDEX,
         "ue": UE_NAME,
+        "console_ip": c_ip,
+        "console_url": c_url,
     }
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -344,6 +350,8 @@ def _openai_chat(prompt: str, include_image: bool) -> dict[str, Any]:
             "X-INA-T-Send": str(t_send),
             "X-INA-App-Name": UE_ID,
             "X-INA-Client-Index": str(CLIENT_INDEX),
+            "X-INA-Console-IP": c_ip,
+            "X-INA-Console-URL": c_url,
         },
         method="POST",
     )

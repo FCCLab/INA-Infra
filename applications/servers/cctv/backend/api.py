@@ -90,6 +90,8 @@ class ClientOut(BaseModel):
     whep_path: str
     mjpeg_path: str
     snapshot_path: str
+    console_ip: Optional[str] = None
+    console_url: Optional[str] = None
 
 
 class ConnectedClientItem(BaseModel):
@@ -99,6 +101,21 @@ class ConnectedClientItem(BaseModel):
     fps: float
     has_frame: bool
     mtx_publishing: bool
+    console_ip: Optional[str] = None
+    console_url: Optional[str] = None
+
+
+class ClientRegisterIn(BaseModel):
+    client_id: str
+    name: Optional[str] = None
+    console_ip: Optional[str] = None
+    console_url: Optional[str] = None
+    to_server_iface: Optional[str] = None
+    to_server_ip: Optional[str] = None
+    api_iface: Optional[str] = None
+    api_ip: Optional[str] = None
+    streaming: Optional[bool] = None
+    fps: Optional[float] = None
 
 
 class ConnectedClientsOut(BaseModel):
@@ -209,6 +226,32 @@ def status() -> StatusOut:
 @app.get("/api/clients", response_model=Dict[str, List[ClientOut]], tags=["Clients"], include_in_schema=False)
 def clients() -> Dict[str, List[ClientOut]]:
     return {"clients": [ClientOut.model_validate(c) for c in snapshot_clients()]}
+
+
+@app.post("/api/v1/clients/register", tags=["Clients"])
+@app.post("/api/v1/clients/heartbeat", tags=["Clients"])
+def register_client(body: ClientRegisterIn) -> dict:
+    norm_id = normalize_canonical_client_id(body.client_id)
+    with GLOBAL_LOCK:
+        ctx = CLIENT_STREAMS.get(norm_id)
+        if ctx is None:
+            ctx = ClientStreamContext(norm_id, name=body.name or norm_id)
+            CLIENT_STREAMS[norm_id] = ctx
+        if body.name:
+            ctx.name = body.name
+        if body.console_ip:
+            ctx.console_ip = body.console_ip
+        if body.console_url:
+            ctx.console_url = body.console_url
+        elif body.console_ip:
+            ctx.console_url = f"http://{body.console_ip}:80"
+        ctx.last_frame_time = time.monotonic()
+    return {
+        "ok": True,
+        "client_id": norm_id,
+        "console_ip": ctx.console_ip,
+        "console_url": ctx.console_url,
+    }
 
 
 @app.api_route("/snapshot/{client_id}", methods=["GET", "HEAD"], tags=["Media"], summary="JPEG snapshot")

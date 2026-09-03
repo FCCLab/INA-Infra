@@ -16,6 +16,8 @@ export type CctvClient = {
   whep_path: string;
   mjpeg_path: string;
   snapshot_path: string;
+  console_ip?: string;
+  console_url?: string;
 };
 
 export type CctvStatus = {

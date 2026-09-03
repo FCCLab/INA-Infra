@@ -13,7 +13,7 @@ echo "==> Building iot-mosquitto:${MOSQ_TAG}"
 docker build --platform linux/amd64 -f mosquitto/Dockerfile -t "iot-mosquitto:${MOSQ_TAG}" -t "${REGISTRY}/iot-mosquitto:${MOSQ_TAG}" mosquitto
 
 echo "==> Building sliced-edge:${IMAGE_TAG}"
-docker build --platform linux/amd64 -f edge/Dockerfile -t "sliced-edge:${IMAGE_TAG}" -t "${REGISTRY}/sliced-edge:${IMAGE_TAG}" .
+docker build --platform linux/amd64 -f backend/Dockerfile -t "sliced-edge:${IMAGE_TAG}" -t "${REGISTRY}/sliced-edge:${IMAGE_TAG}" .
 
 echo "==> Pushing images to ${REGISTRY}"
 docker push "${REGISTRY}/iot-mosquitto:${MOSQ_TAG}"

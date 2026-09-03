@@ -112,6 +112,7 @@ class ClientHeartbeatRequest(BaseModel):
     client_id: str
     ip: Optional[str] = None
     console_ip: Optional[str] = None
+    console_url: Optional[str] = None
     console_mac: Optional[str] = None
     name: Optional[str] = None
     pdu_ip: Optional[str] = None
@@ -296,6 +297,7 @@ def client_heartbeat(req: ClientHeartbeatRequest):
         client_id=req.client_id,
         ip=req.ip,
         console_ip=req.console_ip,
+        console_url=req.console_url,
         console_mac=req.console_mac,
         name=req.name,
         pdu_ip=req.pdu_ip,

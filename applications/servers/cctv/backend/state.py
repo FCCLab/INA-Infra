@@ -85,6 +85,8 @@ class ClientStreamContext:
         self.e2e_samples: list[float] = []
         self.mtx_path = mtx_path_for(client_id)
         self.mtx_publishing = False
+        self.console_ip = ""
+        self.console_url = ""
 
 
 def snapshot_clients(*, stale_s: float = 5.0) -> List[Dict[str, Any]]:
@@ -106,6 +108,7 @@ def snapshot_clients(*, stale_s: float = 5.0) -> List[Dict[str, Any]]:
             e2e_ms = round(ctx.e2e_delay_ms, 1)
             if e2e_ms < (net_ms + yolo_ms) and yolo_ms > 0:
                 e2e_ms = round(net_ms + yolo_ms, 1)
+            console_url = ctx.console_url or (f"http://{ctx.console_ip}:80" if ctx.console_ip else "")
             out.append(
                 {
                     "id": ctx.client_id,
@@ -125,6 +128,8 @@ def snapshot_clients(*, stale_s: float = 5.0) -> List[Dict[str, Any]]:
                     "whep_path": f"/whep/{ctx.mtx_path}",
                     "mjpeg_path": f"/video/{ctx.client_id}",
                     "snapshot_path": f"/snapshot/{ctx.client_id}",
+                    "console_ip": ctx.console_ip,
+                    "console_url": console_url,
                 }
             )
     return out

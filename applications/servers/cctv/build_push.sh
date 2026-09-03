@@ -15,7 +15,7 @@ export DOCKER_BUILDKIT=1
 cd "${SCRIPT_DIR}"
 
 echo "==> Building application-cctv:${IMAGE_TAG} (${PLATFORM}) [BuildKit cache]"
-docker build --platform "${PLATFORM}" -f edge/Dockerfile \
+docker build --platform "${PLATFORM}" -f backend/Dockerfile \
   -t "application-cctv:${IMAGE_TAG}" \
   -t "${REGISTRY}/application-cctv:${IMAGE_TAG}" \
   .
@@ -24,10 +24,10 @@ echo "==> Pushing ${REGISTRY}/application-cctv:${IMAGE_TAG}"
 docker push "${REGISTRY}/application-cctv:${IMAGE_TAG}"
 
 echo "==> Building application-cctv-frontend:${IMAGE_TAG} (${PLATFORM})"
-docker build --platform "${PLATFORM}" -f frontend/Dockerfile \
+docker build --platform "${PLATFORM}" -f frontend-console/Dockerfile \
   -t "application-cctv-frontend:${IMAGE_TAG}" \
   -t "${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}" \
-  frontend/
+  frontend-console/
 
 echo "==> Pushing ${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}"
 docker push "${REGISTRY}/application-cctv-frontend:${IMAGE_TAG}"

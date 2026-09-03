@@ -10,10 +10,10 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 
 | Directory | Slice Mapping | Applications & Roles | Container Images | Build Script |
 | :--- | :--- | :--- | :--- | :--- |
-| **[`servers/cctv`](servers/cctv/)** | **Slice A** (CCTV Vision Streaming) | • `edge/`: Real-time YOLO object detection analyzer<br>• `frontend/`: Web dashboard | • `application-cctv:nws-v0.9-amd64`<br>• `application-cctv-frontend:nws-v0.15-amd64` | `./build_push.sh` |
-| **[`servers/physical_ai`](servers/physical_ai/)** | **Slice B** (Physical AI / VLM) | • `Dockerfile.vllm`: Cosmos VLM server (NVIDIA A40/GH200)<br>• `dashboard/`: FastAPI model manager & proxy | • `cosmo3-vllm:nws-v0.7-amd64`<br>• `cosmo3-dashboard:nws-v0.11-amd64` | • `./build-push-vllm.sh`<br>• `./build-push-dashboard.sh` |
-| **[`servers/ott`](servers/ott/)** | **Slice C** (High-Bandwidth eMBB OTT) | • `server/`: 4K MediaMTX RTSP streaming server<br>• `frontend/`: React/Nginx video portal | • `application-ott:nws-v0.10-amd64`<br>• `application-ott-frontend:nws-v0.16-amd64` | `./server/Dockerfile`<br>`./frontend/Dockerfile` |
-| **[`servers/iot`](servers/iot/)** | **Slice D** (Background Best-Effort IoT) | • `edge/`: Mosquitto MQTT broker & telemetry processor | • `iot-mosquitto:nws-v0.1-amd64`<br>• `sliced-edge:nws-v0.9-amd64` | `edge/build_push.sh` |
+| **[`servers/cctv`](servers/cctv/)** | **Slice A** (CCTV Vision Streaming) | • `backend/`: Real-time YOLO object detection analyzer<br>• `frontend-console/`: Web dashboard | • `application-cctv:nws-v0.9-amd64`<br>• `application-cctv-frontend:nws-v0.15-amd64` | `./build_push.sh` |
+| **[`servers/physical_ai`](servers/physical_ai/)** | **Slice B** (Physical AI / VLM) | • `backend/`: Cosmos VLM server & FastAPI proxy<br>• `frontend-console/`: Physical AI web console | • `cosmo3-vllm:nws-v0.7-amd64`<br>• `cosmo3-dashboard:nws-v0.11-amd64` | • `./build-push-vllm.sh`<br>• `./build-push-dashboard.sh` |
+| **[`servers/ott`](servers/ott/)** | **Slice C** (High-Bandwidth eMBB OTT) | • `backend/`: 4K MediaMTX RTSP streaming server<br>• `frontend-console/`: React/Nginx video portal | • `application-ott:nws-v0.10-amd64`<br>• `application-ott-frontend:nws-v0.16-amd64` | `./build_push.sh` |
+| **[`servers/iot`](servers/iot/)** | **Slice D** (Background Best-Effort IoT) | • `backend/`: Mosquitto MQTT broker & telemetry processor<br>• `frontend-console/`: IoT web console | • `iot-mosquitto:nws-v0.1-amd64`<br>• `sliced-edge:nws-v0.9-amd64` | `./build_push.sh` |
 | **[`servers/common/console`](servers/common/console/)** | **Common (Slices C & D)** | • Web control console sidecar for OTT / IoT servers | • `ina-control-dashboard:nws-v0.21-amd64` | `./build-push.sh` |
 | **[`servers/common/shared`](servers/common/shared/)** | **Common** | • Shared stylesheet tokens and shell layouts | — | — |
 

@@ -175,6 +175,18 @@ function CameraTile({ cam }: { cam: CctvClient }) {
           <span className="cam-id-pill">{cam.id}</span>
         </div>
         <div className="cam-meta-right">
+          {cam.console_url && (
+            <a
+              href={cam.console_url}
+              target="_blank"
+              rel="noreferrer"
+              className="cam-badge"
+              style={{ textDecoration: "none", color: "inherit", border: "1px solid rgba(99,102,241,0.5)" }}
+              title={`Open UE Console (${cam.console_ip || cam.console_url})`}
+            >
+              UE Console ↗
+            </a>
+          )}
           <span className={`cam-badge ${cam.active ? "cam-badge-live" : "cam-badge-idle"}`}>
             {cam.active ? `${cam.fps.toFixed(1)} FPS` : "OFFLINE"}
           </span>

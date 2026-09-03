@@ -15,8 +15,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && /root/.local/bin/uv pip install --python /opt/venv fastapi uvicorn
 
 WORKDIR /app
-COPY dashboard/app.py /app/app.py
-COPY dashboard/static /app/static
+COPY backend/app.py /app/app.py
+COPY frontend-console/static /app/static
 
 EXPOSE 80
 CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port ${DASHBOARD_PORT:-80}"]

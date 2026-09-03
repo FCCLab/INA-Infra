@@ -377,11 +377,38 @@ def _connectivity_loop() -> None:
             
             http_ok = False
             try:
-                req = urllib.request.Request(f"{server_url}/health", headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=2) as resp:
+                to_srv_if = _resolve_to_server_iface() or TO_SERVER_IFACE_CFG
+                to_srv_ip = get_interface_ip(to_srv_if) if to_srv_if else None
+                api_if = _resolve_api_iface()
+                api_ip = get_interface_ip(api_if)
+                c_ip = CONSOLE_IP or api_ip or ""
+                hb_payload = json.dumps({
+                    "client_id": CLIENT_ID,
+                    "name": UE_NAME,
+                    "console_ip": c_ip,
+                    "console_url": f"http://{c_ip}:80" if c_ip else "",
+                    "to_server_iface": to_srv_if,
+                    "to_server_ip": to_srv_ip,
+                    "api_iface": api_if,
+                    "api_ip": api_ip,
+                    "streaming": _state.get("streaming_enabled", False),
+                    "fps": _state.get("fps", 0),
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{server_url}/api/v1/clients/heartbeat",
+                    data=hb_payload,
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=3) as resp:
                     http_ok = resp.status == 200
             except Exception:
-                http_ok = False
+                try:
+                    req = urllib.request.Request(f"{server_url}/health", headers={"Accept": "application/json"})
+                    with urllib.request.urlopen(req, timeout=2) as resp:
+                        http_ok = resp.status == 200
+                except Exception:
+                    http_ok = False
 
             with _lock:
                 _state["rtt_ms"] = round(rtt, 2)

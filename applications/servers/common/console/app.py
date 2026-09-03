@@ -639,15 +639,16 @@ def api_ues() -> dict:
                 idx = _ue_idx_from_name(name)
                 if idx is None:
                     continue
-                labels = (dep.get("metadata") or {}).get("labels") or {}
-                ip = labels.get("ina.lab/console-ip") or _console_ip(idx)
+                sc, live = _ue_http_idx(idx, "/api/status", timeout=2)
+                live_d = live if isinstance(live, dict) else {}
+                if sc != 200:
+                    live = {"ok": False, "http_status": sc, **live_d}
+                ip = str(live_d.get("console_ip") or labels.get("ina.lab/console-ip") or _console_ip(idx))
                 raw_mac = labels.get("ina.lab/console-mac") or ""
                 mac = raw_mac.replace("-", ":") if raw_mac else _console_mac(idx)
                 st = dep.get("status") or {}
                 ready = int(st.get("readyReplicas") or 0)
-                sc, live = _ue_http_idx(idx, "/api/status", timeout=2)
-                if sc != 200:
-                    live = {"ok": False, "http_status": sc, **(live if isinstance(live, dict) else {})}
+                c_url = str(live_d.get("console_url") or (_http_url(ip) if ip else ""))
                 found[idx] = {
                     "name": name,
                     "client_index": idx,
@@ -656,7 +657,7 @@ def api_ues() -> dict:
                     "pod_phase": "Running" if ready else "Pending",
                     "console_ip": ip,
                     "console_mac": mac,
-                    "console_url": _http_url(ip) if ip else "",
+                    "console_url": c_url,
                     "dashboard_url": f"/ue/{idx}/",
                     "connected": ready >= 1 or sc == 200,
                     "status": live if isinstance(live, dict) else {},

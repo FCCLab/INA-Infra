@@ -13,7 +13,7 @@ cd "${SCRIPT_DIR}"
 
 echo "==> Building application-ott:${IMAGE_TAG} (${PLATFORM})"
 docker build --platform "${PLATFORM}" \
-  -f server/Dockerfile \
+  -f backend/Dockerfile \
   -t "application-ott:${IMAGE_TAG}" \
   -t "${REGISTRY}/application-ott:${IMAGE_TAG}" \
   -t "${REGISTRY}/hd-stream-server:hdstream-v2" \
@@ -21,10 +21,10 @@ docker build --platform "${PLATFORM}" \
 
 echo "==> Building application-ott-frontend:${IMAGE_TAG} (${PLATFORM})"
 docker build --platform "${PLATFORM}" \
-  -f frontend/Dockerfile \
+  -f frontend-console/Dockerfile \
   -t "application-ott-frontend:${IMAGE_TAG}" \
   -t "${REGISTRY}/application-ott-frontend:${IMAGE_TAG}" \
-  frontend/
+  frontend-console/
 
 echo "==> Pushing images to ${REGISTRY}"
 docker push "${REGISTRY}/application-ott:${IMAGE_TAG}"

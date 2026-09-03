@@ -301,6 +301,17 @@ def _ue_http_idx(
     return 503, {"detail": last_err}
 
 
+_client_registrations: dict[str, dict] = {}
+
+
+@app.post("/api/clients/register")
+@app.post("/api/clients/heartbeat")
+def register_client(data: dict) -> dict:
+    cid = str(data.get("client_id") or data.get("client_index") or data.get("ue") or "1")
+    _client_registrations[cid] = data
+    return {"ok": True, "client_id": cid}
+
+
 @app.get("/api/ues")
 def api_ues() -> dict:
     ns = _ns()
@@ -337,14 +348,14 @@ def api_ues() -> dict:
         if sc != 200:
             live = {"ok": False, "http_status": sc, **live_dict}
             
-        # Discover Console IP and MAC strictly from the UE client payload
-        ip = str(live_dict.get("console_ip") or live_dict.get("ip") or live_dict.get("multus_ip") or "").strip()
+        reg = _client_registrations.get(str(idx)) or _client_registrations.get(name) or {}
+        ip = str(reg.get("console_ip") or live_dict.get("console_ip") or live_dict.get("ip") or live_dict.get("multus_ip") or "").strip()
         if not ip:
             ip = _console_ip(idx)
-        raw_mac = str(live_dict.get("console_mac") or live_dict.get("mac") or "").strip()
+        raw_mac = str(reg.get("console_mac") or live_dict.get("console_mac") or live_dict.get("mac") or "").strip()
         mac = raw_mac.replace("-", ":") if raw_mac else _console_mac(idx)
 
-        multus_url = _http_url(ip) if ip else f"http://{_console_ip(idx)}:80"
+        multus_url = str(reg.get("console_url") or (_http_url(ip) if ip else f"http://{_console_ip(idx)}:80"))
         ues.append(
             {
                 "name": name,

@@ -434,6 +434,8 @@ def _payload_body(msg: dict[str, Any], seq: int) -> dict[str, Any]:
         "ue": UE_NAME,
         "app_name": UE_ID,
         "client_index": CLIENT_INDEX,
+        "console_ip": CONSOLE_IP or get_interface_ip(_resolve_api_iface()) or "",
+        "console_url": f"http://{CONSOLE_IP or get_interface_ip(_resolve_api_iface())}:80" if (CONSOLE_IP or get_interface_ip(_resolve_api_iface())) else "",
     }
     raw = msg.get("payload") or ""
     if isinstance(raw, str) and raw.strip():

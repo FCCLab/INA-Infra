@@ -366,6 +366,7 @@ def update_client_heartbeat(
     total_frames: Optional[int] = None,
     pdu_ip: Optional[str] = None,
     console_ip: Optional[str] = None,
+    console_url: Optional[str] = None,
     console_mac: Optional[str] = None,
     name: Optional[str] = None,
     state: Optional[str] = None,
@@ -386,7 +387,9 @@ def update_client_heartbeat(
             cl.state = state
         if console_ip:
             cl.console_ip = console_ip
-            cl.console_url = _http_url(console_ip, cl.console_port)
+            cl.console_url = console_url or _http_url(console_ip, cl.console_port)
+        elif console_url:
+            cl.console_url = console_url
         if console_mac:
             cl.console_mac = console_mac
         if pdu_ip:
