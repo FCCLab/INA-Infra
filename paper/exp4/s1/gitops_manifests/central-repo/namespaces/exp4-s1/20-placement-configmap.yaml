@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ina-pl-placement
+  namespace: exp4-s1
+  labels:
+    app.kubernetes.io/name: ina-pl-placement
+    app.kubernetes.io/part-of: exp4
+    ina.lab/scheme: exp4-s1
+data:
+  placement.json: |
+    {
+      "cluster": "multi-cluster",
+      "namespace": "exp4-s1",
+      "profile": {
+        "name": "exp4-s1",
+        "subnet": "10.1.140.0/24",
+        "max_slices": 16,
+        "dnn_prefix": "10.140",
+        "du_node": "usrp",
+        "ue_node": "usrp"
+      },
+      "scheme_id": "exp4-s1",
+      "scheme_name": "S1 +PL",
+      "knobs": {
+        "pl": true,
+        "pm": false,
+        "ps": false
+      },
+      "deploy_map": {
+        "1": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "2": {
+          "cu": "Edge",
+          "upf": "Edge",
+          "app": "Edge",
+          "cu_id": 0,
+          "upf_id": 0,
+          "app_id": 0
+        },
+        "3": {
+          "cu": "Regional",
+          "upf": "Regional",
+          "app": "Regional",
+          "cu_id": 1,
+          "upf_id": 1,
+          "app_id": 1
+        },
+        "4": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        },
+        "5": {
+          "cu": "Central",
+          "upf": "Central",
+          "app": "Central",
+          "cu_id": 2,
+          "upf_id": 2,
+          "app_id": 2
+        }
+      },
+      "slices": [
+        {
+          "id": 1,
+          "slice_type": "FTP",
+          "label": "FTP 5 MB",
+          "direction": "DL",
+          "t_bar": 20.0,
+          "d_bar": 250.0,
+          "h_s": 0,
+          "eta_t0": 2.4,
+          "strict_sla": false,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 19.607843137254903,
+            "a_r_cu": 10.0,
+            "a_c_upf": 24.691358024691358,
+            "a_r_upf": 10.0,
+            "a_c_app": 0.5,
+            "a_r_app": 256.0,
+            "a_g_app": 0.0,
+            "b_min": 54.6,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 2,
+          "slice_type": "YOLO",
+          "label": "YOLO bbox overlay DL",
+          "direction": "DL",
+          "t_bar": 12.0,
+          "d_bar": 45.0,
+          "h_s": 1,
+          "eta_t0": 2.2,
+          "strict_sla": true,
+          "placement": {
+            "cu": "Edge",
+            "upf": "Edge",
+            "app": "Edge",
+            "cu_id": 0,
+            "upf_id": 0,
+            "app_id": 0
+          },
+          "resources": {
+            "a_c_cu": 11.76470588235294,
+            "a_r_cu": 10.0,
+            "a_c_upf": 14.814814814814813,
+            "a_r_upf": 10.0,
+            "a_c_app": 2.0,
+            "a_r_app": 256.0,
+            "a_g_app": 1.0,
+            "b_min": 54.6,
+            "b_ded": 54.6
+          }
+        },
+        {
+          "id": 3,
+          "slice_type": "VIDEO",
+          "label": "gstreamer / OTT watch DL",
+          "direction": "DL",
+          "t_bar": 22.0,
+          "d_bar": 58.0,
+          "h_s": 0,
+          "eta_t0": 2.5,
+          "strict_sla": true,
+          "placement": {
+            "cu": "Regional",
+            "upf": "Regional",
+            "app": "Regional",
+            "cu_id": 1,
+            "upf_id": 1,
+            "app_id": 1
+          },
+          "resources": {
+            "a_c_cu": 21.56862745098039,
+            "a_r_cu": 10.0,
+            "a_c_upf": 27.160493827160494,
+            "a_r_upf": 10.0,
+            "a_c_app": 2.0,
+            "a_r_app": 256.0,
+            "a_g_app": 0.0,
+            "b_min": 54.6,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 4,
+          "slice_type": "CPU-OFF",
+          "label": "encrypt+zip+scan+LUT then DL",
+          "direction": "DL",
+          "t_bar": 8.0,
+          "d_bar": 400.0,
+          "h_s": 0,
+          "eta_t0": 2.3,
+          "strict_sla": false,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 7.8431372549019605,
+            "a_r_cu": 10.0,
+            "a_c_upf": 9.876543209876543,
+            "a_r_upf": 10.0,
+            "a_c_app": 2.0,
+            "a_r_app": 256.0,
+            "a_g_app": 0.0,
+            "b_min": 54.6,
+            "b_ded": null
+          }
+        },
+        {
+          "id": 5,
+          "slice_type": "MQTT",
+          "label": "MQTT Get farm telemetry DL",
+          "direction": "DL",
+          "t_bar": 2.0,
+          "d_bar": 80.0,
+          "h_s": 0,
+          "eta_t0": 2.6,
+          "strict_sla": true,
+          "placement": {
+            "cu": "Central",
+            "upf": "Central",
+            "app": "Central",
+            "cu_id": 2,
+            "upf_id": 2,
+            "app_id": 2
+          },
+          "resources": {
+            "a_c_cu": 1.9607843137254901,
+            "a_r_cu": 10.0,
+            "a_c_upf": 2.4691358024691357,
+            "a_r_upf": 10.0,
+            "a_c_app": 0.5,
+            "a_r_app": 256.0,
+            "a_g_app": 0.0,
+            "b_min": 54.6,
+            "b_ded": null
+          }
+        }
+      ]
+    }

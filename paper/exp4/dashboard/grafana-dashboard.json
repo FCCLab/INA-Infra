@@ -1,0 +1,2789 @@
+{
+  "dashboard": {
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "links": [
+      {
+        "asDropdown": false,
+        "icon": "dashboard",
+        "includeVars": true,
+        "keepTime": true,
+        "tags": [
+          "exp4"
+        ],
+        "title": "Exp4 dashboards",
+        "type": "dashboards"
+      },
+      {
+        "icon": "external link",
+        "targetBlank": true,
+        "title": "S1 FTP",
+        "tooltip": "http://10.1.137.211/",
+        "type": "link",
+        "url": "http://10.1.137.211/"
+      },
+      {
+        "icon": "external link",
+        "targetBlank": true,
+        "title": "S2 CCTV/YOLO",
+        "tooltip": "http://10.1.137.212/",
+        "type": "link",
+        "url": "http://10.1.137.212/"
+      },
+      {
+        "icon": "external link",
+        "targetBlank": true,
+        "title": "S3 OTT",
+        "tooltip": "http://10.1.137.213/",
+        "type": "link",
+        "url": "http://10.1.137.213/"
+      },
+      {
+        "icon": "external link",
+        "targetBlank": true,
+        "title": "S4 CPU offload",
+        "tooltip": "http://10.1.137.214/",
+        "type": "link",
+        "url": "http://10.1.137.214/"
+      },
+      {
+        "icon": "external link",
+        "targetBlank": true,
+        "title": "S5 MQTT",
+        "tooltip": "http://10.1.137.215/",
+        "type": "link",
+        "url": "http://10.1.137.215/"
+      }
+    ],
+    "panels": [
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "suffix:m"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server CPU (millicores)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decmbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server RAM (MB)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "percent"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server GPU (%)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decmbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        },
+        "id": 4,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server VRAM (MB)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "Mbps"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "id": 5,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client DL throughput",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "id": 6,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client latency (ping \u2192 server)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "collapsed": true,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        },
+        "id": 100,
+        "panels": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "suffix:m"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 17
+            },
+            "id": 201,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server CPU (millicores)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 17
+            },
+            "id": 202,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server RAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "percent"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 17
+            },
+            "id": 203,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server GPU (%)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 17
+            },
+            "id": 204,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server VRAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "Mbps"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 25
+            },
+            "id": 205,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client DL throughput",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 25
+            },
+            "id": 206,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client latency (ping \u2192 server)",
+            "type": "timeseries",
+            "interval": "1s"
+          }
+        ],
+        "title": "S1 FTP  \u00b7  20 Mbps / 250 ms  \u00b7  http://10.1.137.211/",
+        "type": "row"
+      },
+      {
+        "collapsed": true,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 17
+        },
+        "id": 101,
+        "panels": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "suffix:m"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 18
+            },
+            "id": 211,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server CPU (millicores)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 18
+            },
+            "id": 212,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server RAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "percent"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 18
+            },
+            "id": 213,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server GPU (%)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 18
+            },
+            "id": 214,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server VRAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "Mbps"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 26
+            },
+            "id": 215,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client DL throughput",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 26
+            },
+            "id": 216,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client latency (ping \u2192 server)",
+            "type": "timeseries",
+            "interval": "1s"
+          }
+        ],
+        "title": "S2 CCTV/YOLO  \u00b7  12 Mbps / 45 ms  \u00b7  http://10.1.137.212/",
+        "type": "row"
+      },
+      {
+        "collapsed": true,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 18
+        },
+        "id": 102,
+        "panels": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "suffix:m"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 19
+            },
+            "id": 221,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server CPU (millicores)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 19
+            },
+            "id": 222,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server RAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "percent"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 19
+            },
+            "id": 223,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server GPU (%)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 19
+            },
+            "id": 224,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server VRAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "Mbps"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 27
+            },
+            "id": 225,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client DL throughput",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 27
+            },
+            "id": 226,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client latency (ping \u2192 server)",
+            "type": "timeseries",
+            "interval": "1s"
+          }
+        ],
+        "title": "S3 OTT  \u00b7  22 Mbps / 58 ms  \u00b7  http://10.1.137.213/",
+        "type": "row"
+      },
+      {
+        "collapsed": true,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 19
+        },
+        "id": 103,
+        "panels": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "suffix:m"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 20
+            },
+            "id": 231,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server CPU (millicores)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 20
+            },
+            "id": 232,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server RAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "percent"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 20
+            },
+            "id": 233,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server GPU (%)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 20
+            },
+            "id": 234,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server VRAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "Mbps"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 28
+            },
+            "id": 235,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client DL throughput",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 28
+            },
+            "id": 236,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client latency (ping \u2192 server)",
+            "type": "timeseries",
+            "interval": "1s"
+          }
+        ],
+        "title": "S4 CPU offload  \u00b7  8 Mbps / 400 ms  \u00b7  http://10.1.137.214/",
+        "type": "row"
+      },
+      {
+        "collapsed": true,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 20
+        },
+        "id": 104,
+        "panels": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "suffix:m"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 0,
+              "y": 21
+            },
+            "id": 241,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server CPU (millicores)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 6,
+              "y": 21
+            },
+            "id": 242,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server RAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "percent"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 21
+            },
+            "id": 243,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server GPU (%)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "decmbytes"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 21
+            },
+            "id": 244,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Server VRAM (MB)",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "Mbps"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 0,
+              "y": 29
+            },
+            "id": 245,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client DL throughput",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 12,
+              "x": 12,
+              "y": 29
+            },
+            "id": 246,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client latency (ping \u2192 server)",
+            "type": "timeseries",
+            "interval": "1s"
+          }
+        ],
+        "title": "S5 MQTT  \u00b7  2 Mbps / 80 ms  \u00b7  http://10.1.137.215/",
+        "type": "row"
+      }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 40,
+    "tags": [
+      "exp4",
+      "applications",
+      "all-slices"
+    ],
+    "templating": {
+      "list": [
+        {
+          "allValue": ".*",
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Scheme",
+          "multi": false,
+          "name": "scheme",
+          "options": [
+            {
+              "selected": true,
+              "text": "All",
+              "value": ".*"
+            },
+            {
+              "selected": false,
+              "text": "S0 static",
+              "value": "exp4-s0"
+            },
+            {
+              "selected": false,
+              "text": "S1 +PL",
+              "value": "exp4-s1"
+            },
+            {
+              "selected": false,
+              "text": "S2 +PL+PM",
+              "value": "exp4-s2"
+            },
+            {
+              "selected": false,
+              "text": "S3 +PL+PM+PS",
+              "value": "exp4-s3"
+            },
+            {
+              "selected": false,
+              "text": "no-5G",
+              "value": "exp4-no5g"
+            }
+          ],
+          "query": "exp4-s0,exp4-s1,exp4-s2,exp4-s3,exp4-no5g",
+          "skipUrlSync": false,
+          "type": "custom"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "1s",
+        "5s",
+        "10s",
+        "30s"
+      ]
+    },
+    "timezone": "browser",
+    "title": "Exp4 All Applications",
+    "uid": "ina-exp4-apps",
+    "version": 1
+  },
+  "overwrite": true,
+  "message": "Exp4 all slices: 4 server + 2 client, all slices per graph"
+}

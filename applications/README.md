@@ -28,6 +28,30 @@ This directory contains the source code, Dockerfiles, and build/push automation 
 | **[`clients/rtt_probe`](clients/rtt_probe/)** | **Common** | • Dedicated round-trip time (RTT) probe utility | • `rtt-probe:latest` | `./build_push.sh` |
 | **[`clients/throughput_statistics`](clients/throughput_statistics/)** | **Common** | • Real-time throughput statistical exporter | • `throughput-statistics:latest` | `./build_push.sh` |
 
+### 3. Experiment 4 dedicated trees (`exp4/exp4_s<x>_<name>`)
+
+Copies of the slice apps with Exp4 slice IDs, N6 IPs, and **downlink-only** defaults.
+Each app has a **backend** (workload) and a **frontend console** (`:80`) that proxies `/api/*` to the backend.
+Do not mix these with the Exp1 `servers/` / `clients/` trees.
+
+| Directory | Slice | N6 | Notes |
+| :--- | :---: | :--- | :--- |
+| [`exp4/exp4_s1_iperf_sftp`](exp4/exp4_s1_iperf_sftp/) | 1 | `10.1.137.211` | iperf3 + SFTP 5 MB DL |
+| [`exp4/exp4_s2_cctv`](exp4/exp4_s2_cctv/) | 2 | `10.1.137.212` | YOLO bbox overlay **to the UE** |
+| [`exp4/exp4_s3_ott`](exp4/exp4_s3_ott/) | 3 | `10.1.137.213` | gstreamer / OTT watch DL |
+| [`exp4/exp4_s4_cpu_offload`](exp4/exp4_s4_cpu_offload/) | 4 | `10.1.137.214` | encrypt→zip→scan→LUT then DL |
+| [`exp4/exp4_s5_iot`](exp4/exp4_s5_iot/) | 5 | `10.1.137.215` | MQTT Get / subscribe DL (`slice_5/`) |
+
+GitOps renderer (`paper/exp4/common/generate_gitops_lib.py`) loads server
+ConfigMaps from these directories.
+
+```bash
+# usage (build, no-5G deploy, consoles): applications/exp4/README.md
+IMAGE_TAG=nws-v0.2-amd64 ./applications/exp4/build_images.sh --push
+IMAGE_TAG=nws-v0.2-amd64 ./applications/exp4/exp4_deploy.sh --plan
+IMAGE_TAG=nws-v0.2-amd64 ./applications/exp4/exp4_deploy.sh s1
+```
+
 ---
 
 ## Quick Build & Push Instructions

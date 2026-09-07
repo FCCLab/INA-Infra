@@ -1,0 +1,392 @@
+{
+  "dashboard": {
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "links": [],
+    "panels": [
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "suffix:m"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"cpu_m\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server CPU (millicores)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decmbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"mem_mb\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server RAM (MB)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "percent"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"gpu_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server GPU (%)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decmbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        },
+        "id": 4,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"vram_mb\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server VRAM (MB)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "Mbps"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "id": 5,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"throughput_dl_mbps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client DL throughput",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "id": 6,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"latency_ms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client latency (ping \u2192 server)",
+        "type": "timeseries",
+        "interval": "1s"
+      }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 40,
+    "tags": [
+      "exp4",
+      "exp4-s3",
+      "applications"
+    ],
+    "templating": {
+      "list": []
+    },
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "1s",
+        "5s",
+        "10s",
+        "30s"
+      ]
+    },
+    "timezone": "browser",
+    "title": "Exp4 S3 OTT",
+    "uid": "ina-exp4-s3",
+    "version": 1
+  },
+  "overwrite": true,
+  "message": "Exp4 exp4-s3: 4 server + 2 client metrics"
+}

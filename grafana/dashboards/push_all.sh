@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PUSH="${REPO_ROOT}/applications/cctv/dashboard/dashboard_push.sh"
 
 python3 "${SCRIPT_DIR}/generate_app_dashboards.py"
+python3 "${REPO_ROOT}/paper/exp4/dashboard/generate.py"
 
 files=(
   "${REPO_ROOT}/applications/cctv/dashboard/grafana-dashboard.json"
@@ -16,6 +17,7 @@ files=(
   "${SCRIPT_DIR}/ott-metrics.json"
   "${SCRIPT_DIR}/iot-dashboard.json"
   "${SCRIPT_DIR}/iot-metrics.json"
+  "${REPO_ROOT}/paper/exp4/dashboard/grafana-dashboard.json"
 )
 
 for f in "${files[@]}"; do

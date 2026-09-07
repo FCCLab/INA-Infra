@@ -766,7 +766,12 @@ def _playback_watchdog_loop() -> None:
                 action = "not_streaming"
                 chrome = chrome_ctl.status()
                 cur = str(chrome.get("url") or "")
-                if cur and "about:blank" not in cur.lower() and (now - last_blank) > 10.0:
+                if (
+                    cur
+                    and "about:blank" not in cur.lower()
+                    and "youtube.com" not in cur.lower()
+                    and (now - last_blank) > 10.0
+                ):
                     try:
                         with _cdp_lock:
                             chrome_ctl.blank()

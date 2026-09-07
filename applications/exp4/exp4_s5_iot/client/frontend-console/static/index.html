@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>S5 Client Console: MQTT</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg0:#070b14; --bg1:#0b1120; --card:rgba(15,23,42,.75); --surface:rgba(255,255,255,.035);
+      --border:rgba(255,255,255,.08); --text:#eef2f9; --text-dim:#93a0b8; --text-faint:#5e6b85;
+      --accent:#16E6A0; --accent2:#00C2D4; --bad:#ff5a6e; --ok:#16e6a0;
+      --ok-bg:rgba(22,230,160,.12); --bad-bg:rgba(255,90,110,.12);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--text);min-height:100vh;
+      background:radial-gradient(1200px 600px at 80% -10%,rgba(22,230,160,.10),transparent 60%),
+                 linear-gradient(180deg,var(--bg0),var(--bg1))}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+      padding:14px 24px;border-bottom:1px solid var(--border);background:rgba(7,11,20,.85);
+      position:sticky;top:0;z-index:10}
+    h1{font-family:'Space Grotesk',sans-serif;font-size:20px}
+    .brand-lockup{display:flex;align-items:center;gap:12px}
+    .brand-logo{width:44px;height:auto;border-radius:8px}
+    .kicker{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent2)}
+    .pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font-family:'IBM Plex Mono',monospace}
+    .pill.ok{color:var(--ok);border-color:rgba(22,230,160,.35);background:var(--ok-bg)}
+    .pill.bad{color:var(--bad);border-color:rgba(255,90,110,.35);background:var(--bad-bg)}
+    a.pill{text-decoration:none;color:var(--accent2);border-color:rgba(0,194,212,.35)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    main{padding:24px;max-width:1100px;margin:0 auto;display:grid;gap:16px}
+    .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+    .kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+    .kpi-label{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em}
+    .kpi-value{font-size:15px;font-weight:600;margin-top:4px;word-break:break-all}
+    .kpi-value.mono,.mono{font-family:'IBM Plex Mono',monospace}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;display:grid;gap:12px}
+    .hint{font-size:12px;color:var(--text-dim)}
+    .topic-list{display:grid;gap:8px}
+    .topic-row{display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;
+      padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
+      font-family:'IBM Plex Mono',monospace;font-size:12px}
+    .topic-name{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .topic-freq{color:var(--accent);font-weight:600}
+    .topic-mbps{color:var(--accent2);font-weight:600}
+    .topic-dir{color:var(--text-faint);text-transform:uppercase;font-size:11px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-lockup">
+      <img class="brand-logo" src="/static/logos/NeuroRAN.png" alt="NeuroRAN"/>
+      <div>
+        <div class="kicker"></div>
+        <h1 id="title">S5 Client Console: MQTT</h1>
+      </div>
+    </div>
+    <div class="row" id="pills"><span class="pill">connecting…</span></div>
+  </header>
+  <main>
+    <div class="kpi">
+      <div class="kpi-card"><div class="kpi-label">Target (DL)</div><div class="kpi-value mono" id="kpi-target">2 Mbps</div></div>
+      <div class="kpi-card"><div class="kpi-label">DL throughput</div><div class="kpi-value mono" id="kpi-dl-mbps">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">DL freq</div><div class="kpi-value mono" id="kpi-dl-hz">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Mode</div><div class="kpi-value" id="kpi-mode">DL receive only</div></div>
+      <div class="kpi-card"><div class="kpi-label">PDU</div><div class="kpi-value" id="kpi-pdu">—</div></div>
+    </div>
+
+    <section class="card">
+      <h2 style="font-size:16px;">MQTT downlink</h2>
+      <p class="hint" id="cfg-hint">Server → UE only (~500 Hz × 5000 B ≈ 20 Mbps). No UL publish from this client.</p>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h2 style="font-size:16px;">Topic statistics</h2>
+          <p class="hint">Received DL topics over the last 30s (UL publish disabled).</p>
+        </div>
+        <span class="pill mono" id="stats-count">0 topics</span>
+      </div>
+      <div id="topic-stats"><div class="hint">No topics yet.</div></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function req(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
+      return body;
+    }
+    function esc(s) { return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    function fmtHz(hz) {
+      const n = Number(hz) || 0;
+      if (n >= 10) return n.toFixed(1) + " Hz";
+      if (n >= 1) return n.toFixed(2) + " Hz";
+      if (n >= 0.01) return n.toFixed(3) + " Hz";
+      return n.toFixed(4) + " Hz";
+    }
+    function fmtMbps(v) {
+      const n = Number(v) || 0;
+      return n.toFixed(2) + " Mbps";
+    }
+    function renderTopicStats(stats) {
+      const topics = ((stats && stats.topics) || []).filter(t => (t.direction || "") === "downlink" || String(t.topic || "").includes("/dl/"));
+      const n = topics.length;
+      if ($("stats-count")) $("stats-count").textContent = `${n} topic${n === 1 ? "" : "s"}`;
+      const box = $("topic-stats");
+      if (!topics.length) {
+        box.innerHTML = `<div class="hint">Waiting for DL…</div>`;
+        return;
+      }
+      box.innerHTML = `<div class="topic-list">${topics.map(t => `
+        <div class="topic-row">
+          <span class="topic-name">${esc(t.topic)}</span>
+          <span class="topic-dir">${esc(t.direction || "downlink")}</span>
+          <span class="topic-freq">${fmtHz(t.avg_freq_hz || t.freq_hz || 0)}</span>
+          <span class="topic-mbps">${fmtMbps(t.mbps || 0)}</span>
+        </div>`).join("")}</div>`;
+    }
+    async function refresh() {
+      try {
+        const s = await req("/api/status");
+        const st = s.stats || {};
+        $("kpi-target").textContent = fmtMbps(st.target_mbps || 2);
+        $("kpi-dl-mbps").textContent = fmtMbps(st.dl_mbps);
+        $("kpi-dl-hz").textContent = fmtHz(st.dl_avg_freq_hz);
+        $("kpi-mode").textContent = s.send_enabled ? "UL enabled (override)" : "DL receive only";
+        $("kpi-pdu").textContent = s.pdu_ready ? `Ready (${s.pdu_iface})` : `Waiting (${s.pdu_iface})`;
+        $("cfg-hint").textContent =
+          `Server → UE DL only ≈ ${fmtMbps(st.target_mbps || 2)}. No UL publish from client (send_enabled=${!!s.send_enabled}).`;
+        if ($("pills")) {
+          $("pills").innerHTML =
+            `<a class="pill" href="http://10.1.137.105:3000/d/ina-exp4-s5/ina-exp4-s5?orgId=1&refresh=5s" target="_blank" rel="noopener">Grafana dashboard</a>` +
+            `<span class="pill ${s.pdu_ready ? "ok":"bad"}">${s.pdu_ready ? "PDU up" : "PDU wait"}</span>` +
+            `<span class="pill ${s.mqtt_connected ? "ok":"bad"}">${s.mqtt_connected ? "MQTT" : "MQTT down"}</span>` +
+            `<span class="pill ok">DL only</span>`;
+        }
+        renderTopicStats(st);
+      } catch (e) {
+        if ($("pills")) $("pills").innerHTML = `<span class="pill bad">${esc(e.message)}</span>`;
+      }
+    }
+    refresh();
+    setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,434 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-cpu-offload-code
+  namespace: exp4-s1
+  labels:
+    app.kubernetes.io/name: application-cpu-offload
+    app.kubernetes.io/part-of: exp4
+    ina.lab/slice: '4'
+    ina.lab/app-type: cpu-offload
+    ina.lab/role: server
+    ina.lab/scheme: exp4-s1
+data:
+  server.py: |
+    """Exp4 slice 4: encrypt → zip → scan → LUT, then download.
+
+    CPU-bound pipeline so PM (when enabled) and central placement matter.
+    UE measures first/last byte of GET /download.
+    """
+
+    from __future__ import annotations
+
+    import hashlib
+    import io
+    import os
+    import time
+    import zipfile
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    SIZE = int(os.environ.get("EXP4_BLOB_BYTES", str(5 * 1024 * 1024)))
+    BLOB = os.urandom(SIZE)
+    PBKDF2_ITERS = int(os.environ.get("EXP4_PBKDF2_ITERS", "80000"))
+
+
+    def pipeline() -> tuple[bytes, float]:
+        t0 = time.time()
+        digest = hashlib.sha256(BLOB).hexdigest()
+        key = hashlib.pbkdf2_hmac("sha256", b"ina-exp4", digest.encode(), PBKDF2_ITERS)
+        enc = bytes(a ^ key[i % len(key)] for i, a in enumerate(BLOB))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("payload.bin", enc)
+            zf.writestr("lut.txt", digest)
+        return buf.getvalue(), (time.time() - t0) * 1000.0
+
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path in ("/", "/health"):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            if self.path.startswith("/download"):
+                body, proc_ms = pipeline()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("X-Proc-Ms", f"{proc_ms:.1f}")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_error(404)
+
+        def log_message(self, fmt: str, *args) -> None:
+            print(fmt % args, flush=True)
+
+
+    def main() -> None:
+        port = int(os.environ.get("PORT", "8080"))
+        ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+
+
+    if __name__ == "__main__":
+        main()
+  influx_publish.py: |
+    #!/usr/bin/env python3
+    """Exp4 server → InfluxDB: this container's CPU/RAM/GPU/VRAM, plus DL + e2e.
+
+    CPU and RAM come from this container's cgroup (never the host).
+    GPU and VRAM are summed over processes in this container's cgroup only.
+
+    Env:
+      INFLUXDB_URL / INFLUXDB_TOKEN / INFLUXDB_ORG / INFLUXDB_BUCKET
+      SLICE_ID, EXP4_APP_TYPE, APP_NAME, SCHEME_ID, CLUSTER
+      TO_CLIENT_IFACE   default net1 (N6 TX = DL to UE)
+      E2E_PROBE_HOST    default 10.140.<slice>.2 (UE PDU)
+      INTERVAL_S        default 1
+    """
+
+    from __future__ import annotations
+
+    import os
+    import re
+    import subprocess
+    import time
+    import urllib.request
+
+
+    def _env(name: str, default: str = "") -> str:
+        return (os.environ.get(name) or default).strip()
+
+
+    INFLUX_URL = _env("INFLUXDB_URL") or _env("INFLUX_URL") or "http://10.1.137.104:8086"
+    INFLUX_URL = INFLUX_URL.rstrip("/")
+    INFLUX_TOKEN = _env("INFLUXDB_TOKEN") or _env("INFLUX_TOKEN") or "ina-infra-influxdb-token"
+    INFLUX_ORG = _env("INFLUXDB_ORG") or _env("INFLUX_ORG") or "ina-infra"
+    INFLUX_BUCKET = _env("INFLUXDB_BUCKET") or _env("INFLUX_BUCKET") or "default"
+    MEASUREMENT = _env("INFLUXDB_MEASUREMENT") or "application_metrics"
+    SLICE_ID = _env("SLICE_ID", "1")
+    APP_TYPE = _env("EXP4_APP_TYPE") or f"exp4-s{SLICE_ID}"
+    APP_NAME = _env("APP_NAME") or APP_TYPE
+    SCHEME_ID = _env("SCHEME_ID") or _env("INA_LAB_SCHEME") or "exp4"
+    CLUSTER = _env("TARGET_CLUSTER") or _env("CLUSTER") or "unknown"
+    IFACE = _env("TO_CLIENT_IFACE") or _env("OTA_IFACE") or "net1"
+    PROBE_HOST = _env("E2E_PROBE_HOST") or f"10.140.{SLICE_ID}.2"
+    INTERVAL_S = float(_env("INTERVAL_S") or "1")
+    WRITE_URL = f"{INFLUX_URL}/api/v2/write?org={INFLUX_ORG}&bucket={INFLUX_BUCKET}&precision=ns"
+    HEADERS = {
+        "Authorization": f"Token {INFLUX_TOKEN}",
+        "Content-Type": "text/plain; charset=utf-8",
+    }
+
+
+    def _tag(value: str) -> str:
+        return value.replace(" ", "_").replace(",", "_").replace("=", "_").replace("\n", "_")
+
+
+    def _read(path: str) -> str | None:
+        try:
+            return open(path, encoding="utf-8").read()
+        except OSError:
+            return None
+
+
+    def _count_cpuset(spec: str) -> int:
+        n = 0
+        for part in spec.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                a, b = part.split("-", 1)
+                n += int(b) - int(a) + 1
+            else:
+                n += 1
+        return max(1, n)
+
+
+    def _cgroup_cpu_limit_cpus() -> float:
+        """This container's CPU limit in CPUs (quota/period), else cpuset width."""
+        raw = _read("/sys/fs/cgroup/cpu.max")
+        if raw:
+            parts = raw.split()
+            if len(parts) >= 2 and parts[0] != "max":
+                quota, period = int(parts[0]), int(parts[1])
+                if quota > 0 and period > 0:
+                    return quota / period
+        quota = _read("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+        period = _read("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+        if quota and period:
+            q, p = int(quota.strip()), int(period.strip())
+            if q > 0 and p > 0:
+                return q / p
+        cpus = (
+            _read("/sys/fs/cgroup/cpuset.cpus.effective")
+            or _read("/sys/fs/cgroup/cpuset.cpus")
+            or _read("/sys/fs/cgroup/cpuset/cpuset.cpus")
+        )
+        if cpus and cpus.strip() not in ("", "\n"):
+            return float(_count_cpuset(cpus.strip()))
+        return 1.0
+
+
+    def _cgroup_usage_usec() -> int | None:
+        raw = _read("/sys/fs/cgroup/cpu.stat")
+        if raw:
+            for line in raw.splitlines():
+                if line.startswith("usage_usec"):
+                    return int(line.split()[1])
+        raw = _read("/sys/fs/cgroup/cpuacct/cpuacct.usage")
+        if raw:
+            return int(raw.strip()) // 1000
+        return None
+
+
+    def cpu_pct(prev: tuple[int, float] | None) -> tuple[float, tuple[int, float] | None]:
+        """This container's CPU usage as % of its own cgroup limit."""
+        usage = _cgroup_usage_usec()
+        now = time.monotonic()
+        if usage is None:
+            return 0.0, prev
+        if prev is None:
+            return 0.0, (usage, now)
+        prev_u, prev_t = prev
+        du = max(0, usage - prev_u)
+        dt = max(1e-3, now - prev_t)
+        limit = max(1e-6, _cgroup_cpu_limit_cpus())
+        pct = 100.0 * (du / 1e6) / (dt * limit)
+        return min(max(pct, 0.0), 200.0), (usage, now)
+
+
+    def _cgroup_mem_current() -> int | None:
+        raw = _read("/sys/fs/cgroup/memory.current")
+        if raw:
+            return int(raw.strip())
+        raw = _read("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+        if raw:
+            return int(raw.strip())
+        return None
+
+
+    def _cgroup_mem_limit() -> int | None:
+        for path in (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.high",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+        ):
+            raw = _read(path)
+            if not raw:
+                continue
+            text = raw.strip()
+            if text in ("max", ""):
+                continue
+            try:
+                val = int(text)
+            except ValueError:
+                continue
+            if val <= 0 or val >= (1 << 62):
+                continue
+            return val
+        return None
+
+
+    def mem_stats() -> tuple[float, float]:
+        """This container's cgroup memory used (MiB) and % of its memory limit."""
+        used = _cgroup_mem_current()
+        if used is None:
+            return 0.0, 0.0
+        limit = _cgroup_mem_limit()
+        pct = 100.0 * used / limit if limit else 0.0
+        return used / (1024 * 1024), min(max(pct, 0.0), 100.0)
+
+
+    def _cgroup_pids() -> set[int]:
+        for path in (
+            "/sys/fs/cgroup/cgroup.procs",
+            "/sys/fs/cgroup/memory/cgroup.procs",
+            "/sys/fs/cgroup/cpu/cgroup.procs",
+        ):
+            raw = _read(path)
+            if raw:
+                return {int(x) for x in raw.split() if x.isdigit()}
+        return {os.getpid()}
+
+
+    def _smi(*args: str) -> str | None:
+        try:
+            return subprocess.check_output(
+                ["nvidia-smi", *args],
+                text=True,
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return None
+
+
+    def gpu_stats() -> tuple[float, float, float]:
+        """This container's GPU/VRAM only (PIDs in this cgroup). Zeros if no GPU work."""
+        mine = _cgroup_pids()
+        apps = _smi("--query-compute-apps=pid,used_gpu_memory", "--format=csv,noheader,nounits")
+        vram_mb = 0.0
+        app_pids: set[int] = set()
+        if apps:
+            for line in apps.splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 2 or not parts[0].isdigit():
+                    continue
+                pid = int(parts[0])
+                app_pids.add(pid)
+                if pid not in mine:
+                    continue
+                try:
+                    vram_mb += float(parts[1])
+                except ValueError:
+                    continue
+        gpu = _smi("--query-gpu=memory.total,utilization.gpu", "--format=csv,noheader,nounits")
+        total_mb = 0.0
+        device_util = 0.0
+        if gpu:
+            for line in gpu.splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 2:
+                    continue
+                try:
+                    total_mb += float(parts[0])
+                    device_util = max(device_util, float(parts[1]))
+                except ValueError:
+                    continue
+        gpu_pct = 0.0
+        pmon = _smi("pmon", "-c", "1", "-s", "u")
+        if pmon:
+            sm_vals: list[float] = []
+            for line in pmon.splitlines():
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                cols = line.split()
+                if len(cols) < 4 or not cols[1].isdigit():
+                    continue
+                pid = int(cols[1])
+                if pid not in mine:
+                    continue
+                try:
+                    sm_vals.append(float(cols[3]))
+                except ValueError:
+                    continue
+            if sm_vals:
+                gpu_pct = min(100.0, max(sm_vals) if len(sm_vals) == 1 else min(100.0, sum(sm_vals)))
+        if gpu_pct == 0.0 and app_pids and app_pids <= mine:
+            gpu_pct = device_util
+        vram_pct = 100.0 * vram_mb / total_mb if total_mb else 0.0
+        return min(gpu_pct, 100.0), vram_mb, min(vram_pct, 100.0)
+
+
+    def iface_tx_bytes(name: str) -> int | None:
+        try:
+            return int(open(f"/sys/class/net/{name}/statistics/tx_bytes", encoding="utf-8").read())
+        except (OSError, ValueError):
+            return None
+
+
+    def e2e_dl_ms() -> float | None:
+        """ICMP RTT application server → application client (UE PDU)."""
+        if not PROBE_HOST:
+            return None
+        cmd = ["ping", "-c", "1", "-W", "1", "-I", IFACE, PROBE_HOST]
+        try:
+            out = subprocess.check_output(cmd, text=True, timeout=2, stderr=subprocess.STDOUT)
+        except Exception:
+            cmd = ["ping", "-c", "1", "-W", "1", PROBE_HOST]
+            try:
+                out = subprocess.check_output(cmd, text=True, timeout=2, stderr=subprocess.STDOUT)
+            except Exception:
+                return None
+        m = re.search(r"time[=<]([\d.]+)\s*ms", out)
+        if not m:
+            return None
+        return float(m.group(1))
+
+
+    def publish(fields: dict[str, float]) -> None:
+        tags = (
+            f"profile_name=exp4,slice_id={_tag(SLICE_ID)},app_type={_tag(APP_TYPE)},"
+            f"app_name={_tag(APP_NAME)},cluster={_tag(CLUSTER)},origin=server,"
+            f"scheme={_tag(SCHEME_ID)},iface={_tag(IFACE)}"
+        )
+        fl = ",".join(f"{k}={v:.6f}" for k, v in fields.items())
+        body = f"{MEASUREMENT},{tags} {fl} {time.time_ns()}\n"
+        req = urllib.request.Request(WRITE_URL, data=body.encode(), headers=HEADERS, method="POST")
+        with urllib.request.urlopen(req, timeout=4):
+            pass
+
+
+    def main() -> None:
+        print(
+            f"[exp4-influx] {APP_TYPE} slice={SLICE_ID} container-cgroup "
+            f"iface={IFACE} probe={PROBE_HOST} -> {INFLUX_URL} every {INTERVAL_S}s",
+            flush=True,
+        )
+        cpu_prev = None
+        last_tx = iface_tx_bytes(IFACE)
+        last_t = time.monotonic()
+        while True:
+            time.sleep(max(0.2, INTERVAL_S))
+            now = time.monotonic()
+            dt = max(0.2, now - last_t)
+            last_t = now
+            cpu, cpu_prev = cpu_pct(cpu_prev)
+            mem_mb, mem_pct = mem_stats()
+            gpu_pct, vram_mb, vram_pct = gpu_stats()
+            tx = iface_tx_bytes(IFACE)
+            dl_mbps = 0.0
+            if tx is not None and last_tx is not None:
+                dl_mbps = max(0.0, (tx - last_tx) * 8.0 / dt / 1e6)
+            last_tx = tx if tx is not None else last_tx
+            e2e = e2e_dl_ms()
+            fields = {
+                "cpu_pct": cpu,
+                "mem_mb": mem_mb,
+                "mem_pct": mem_pct,
+                "gpu_pct": gpu_pct,
+                "vram_mb": vram_mb,
+                "vram_pct": vram_pct,
+                "throughput_dl_mbps": dl_mbps,
+            }
+            if e2e is not None:
+                fields["e2e_dl_ms"] = e2e
+            try:
+                publish(fields)
+            except Exception as exc:
+                print(f"[exp4-influx] write error: {exc}", flush=True)
+
+
+    if __name__ == "__main__":
+        main()
+  entrypoint.sh: |
+    #!/usr/bin/env bash
+    # Server: TO_CLIENT_IFACE=net1 (N6) + CONSOLE_IFACE=eth0.
+    set -euo pipefail
+    IFACE_TIMEOUT="${IFACE_TIMEOUT:-60}"
+    TO_CLIENT_IFACE="${TO_CLIENT_IFACE:-${OTA_IFACE:-net1}}"
+    CONSOLE_IFACE="${CONSOLE_IFACE:-eth0}"
+
+    log() { printf '{"ts":%s,"level":"%s","event":"iface","msg":"%s"}\n' "$(date +%s)" "$1" "$2"; }
+    wait_iface() {
+      local iface="$1" elapsed=0
+      [ -z "$iface" ] && return 0
+      while ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; do
+        [ "$elapsed" -ge "$IFACE_TIMEOUT" ] && { log warn "${iface} not ready"; return 0; }
+        sleep 1
+        elapsed=$((elapsed + 1))
+      done
+      log info "${iface} ready"
+    }
+
+    log info "to_client=${TO_CLIENT_IFACE} console=${CONSOLE_IFACE}"
+    wait_iface "$TO_CLIENT_IFACE"
+    wait_iface "$CONSOLE_IFACE"
+    export EXP4_APP_TYPE="${EXP4_APP_TYPE:-exp4-s4}"
+    export SLICE_ID="${SLICE_ID:-4}"
+    export TO_CLIENT_IFACE
+    python3 /app/influx_publish.py &
+    exec python3 /app/server.py

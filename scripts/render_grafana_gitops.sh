@@ -400,6 +400,7 @@ files = [
     Path(repo_root) / "grafana/dashboards/ott-metrics.json",
     Path(repo_root) / "grafana/dashboards/iot-dashboard.json",
     Path(repo_root) / "grafana/dashboards/iot-metrics.json",
+    Path(repo_root) / "paper/exp4/dashboard/grafana-dashboard.json",
 ]
 entries = []
 for path in files:

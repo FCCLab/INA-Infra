@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Exp4 S1 UE console</title>
+  <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"/>
+  <style>
+:root {
+  --bg0:#070b14; --bg1:#0b1120; --card:rgba(15,23,42,.75); --surface:rgba(255,255,255,.035);
+  --border:rgba(255,255,255,.08); --text:#eef2f9; --text-dim:#93a0b8; --text-faint:#5e6b85;
+  --accent:#16E6A0; --accent2:#00C2D4; --bad:#ff5a6e; --ok:#16e6a0;
+  --ok-bg:rgba(22,230,160,.12); --bad-bg:rgba(255,90,110,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--text);min-height:100vh;
+  background:radial-gradient(1200px 600px at 80% -10%,rgba(22,230,160,.10),transparent 60%),
+             linear-gradient(180deg,var(--bg0),var(--bg1))}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:14px 24px;border-bottom:1px solid var(--border);background:rgba(7,11,20,.85);
+  position:sticky;top:0;z-index:10}
+h1{font-family:'Space Grotesk',sans-serif;font-size:20px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand img{width:44px;height:auto;border-radius:8px}
+.kicker{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent2);font-weight:600}
+.pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font-family:'IBM Plex Mono',monospace}
+.pill.ok{color:var(--ok);border-color:rgba(22,230,160,.35);background:var(--ok-bg)}
+.pill.bad{color:var(--bad);border-color:rgba(255,90,110,.35);background:var(--bad-bg)}
+a.pill{text-decoration:none;color:var(--accent2);border-color:rgba(0,194,212,.35)}
+a.pill:hover{background:rgba(0,194,212,.12)}
+.hdr-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+main{padding:24px;max-width:1200px;margin:0 auto;display:grid;gap:16px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.kpi-label{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em}
+.kpi-value{font-size:15px;font-weight:600;margin-top:4px;word-break:break-all}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;display:grid;gap:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.field{display:grid;gap:4px;min-width:100px}
+button{background:var(--accent);color:#04140e;border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}
+button.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+button.danger{background:var(--bad-bg);color:var(--bad);border:1px solid rgba(255,90,110,.35)}
+button:disabled{opacity:.45;cursor:not-allowed}
+label{font-size:12px;color:var(--text-dim);display:block}
+input,textarea,select{background:#05080f;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font:inherit;width:100%}
+pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
+.console{background:#05080f;overflow:hidden;border:1px solid var(--border);border-radius:10px}
+.console-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:11px}
+.console-dots{display:flex;gap:5px}
+.console-dots span{width:8px;height:8px;border-radius:50%;background:#3a455c}
+.console-dots span:nth-child(1){background:#ff5a6e}
+.console-dots span:nth-child(2){background:#f5a623}
+.console-dots span:nth-child(3){background:#16e6a0}
+.console-title{color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase}
+.console-meta{margin-left:auto;color:var(--text-faint)}
+.console-body{font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.5;min-height:280px;max-height:min(56vh,640px);overflow:auto;padding:10px 12px 14px;white-space:pre-wrap;word-break:break-word;color:#c6f6d5}
+.console-idle{color:var(--text-faint)}
+.console-line{padding:1px 0}
+.console-line .ts{color:var(--text-faint);margin-right:8px}
+.console-line.sum{color:var(--accent)}
+.console-line.err{color:var(--bad)}
+.console-line.sshd{color:var(--accent2)}
+.divider{height:1px;background:var(--border);margin:2px 0}
+details.raw{border-top:1px solid var(--border);padding-top:10px}
+details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="/static/logos/NeuroRAN.png" alt="NeuroRAN"/>
+      <div>
+        <div class="kicker">Slice 1 · client console</div>
+        <h1>Exp4 S1 UE console</h1>
+      </div>
+    </div>
+    <div class="hdr-actions">
+      <a class="pill" href="http://10.1.137.105:3000/d/ina-exp4-s1/ina-exp4-s1?orgId=1&refresh=5s" target="_blank" rel="noopener">Grafana dashboard</a>
+      <span id="pill" class="pill">connecting</span>
+    </div>
+  </header>
+  <main>
+    <section class="kpi" id="kpis">
+      <div class="kpi-card"><div class="kpi-label">Server</div><div class="kpi-value" id="k_srv">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">iperf DL</div><div class="kpi-value" id="k_iperf">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">iperf rate</div><div class="kpi-value" id="k_rate">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Last SFTP</div><div class="kpi-value" id="k_last">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">SFTP goodput</div><div class="kpi-value" id="k_gp">—</div></div>
+    </section>
+
+    <section class="card">
+      <h2>Control</h2>
+
+      <div class="row">
+        <div class="field" style="min-width:90px">
+          <label for="ipar">Streams (-P)</label>
+          <input id="ipar" type="number" min="1" max="32" value="5"/>
+        </div>
+        <div class="field" style="min-width:110px">
+          <label for="ibw">Bandwidth (-b)</label>
+          <input id="ibw" type="text" value="10M"/>
+        </div>
+        <div class="field" style="min-width:90px">
+          <label for="itime">Time (-t)</label>
+          <input id="itime" type="text" value="0" title="0 = forever"/>
+        </div>
+        <button id="btn-start" onclick="iperf('start')">Start iperf3</button>
+        <button id="btn-restart" class="secondary" onclick="iperf('restart')">Restart</button>
+        <button id="btn-stop" class="danger" onclick="iperf('stop')">Stop</button>
+        <button class="secondary" onclick="sftp()">SFTP download</button>
+      </div>
+      <p class="kicker" id="cmd-hint">iperf3 -c … -R -P 5 -b 10M -t 0 (starts by default)</p>
+
+      <div class="divider"></div>
+
+      <div class="console">
+        <div class="console-bar">
+          <span class="console-dots"><span></span><span></span><span></span></span>
+          <span class="console-title" id="term-title">iperf3 / sftp log</span>
+          <span class="console-meta" id="term-meta">0 lines</span>
+        </div>
+        <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
+      </div>
+
+      <details class="raw">
+        <summary>Backend status</summary>
+        <pre id="raw" style="margin-top:10px">waiting…</pre>
+      </details>
+    </section>
+  </main>
+  <script>
+    const logEl = document.getElementById('log');
+    let lastSeq = 0;
+    let cfgSeeded = false;
+
+    function esc(s) {
+      return String(s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    }
+    function appendTerm(e) {
+      if (!e) return;
+      const seq = Number(e.seq || 0);
+      if (seq && seq <= lastSeq) return;
+      const idle = logEl.querySelector('.console-idle');
+      if (idle) idle.remove();
+      const line = e.line || String(e);
+      const div = document.createElement('div');
+      div.className = 'console-line';
+      const kind = String(e.kind || '');
+      const low = line.toLowerCase();
+      if (/error|fail|denied|refused/.test(low)) div.classList.add('err');
+      else if (/\[sum\]/i.test(line)) div.classList.add('sum');
+      else if (kind === 'sshd') div.classList.add('sshd');
+      div.innerHTML = '<span class="ts">' + esc(e.ts || '') + '</span>' + esc(line);
+      logEl.appendChild(div);
+      while (logEl.childElementCount > 500) logEl.removeChild(logEl.firstChild);
+      logEl.scrollTop = logEl.scrollHeight;
+      if (seq) lastSeq = seq;
+      const meta = document.getElementById('term-meta');
+      if (meta) meta.textContent = lastSeq + ' lines';
+    }
+    function drainLogs(logs) { (logs || []).forEach(appendTerm); }
+    function log(msg) {
+      appendTerm({seq: lastSeq + 1, ts: new Date().toISOString().slice(11,19), line: msg});
+    }
+    async function req(path, opts) {
+      const r = await fetch('/api/' + path, Object.assign({headers:{'Content-Type':'application/json'}}, opts||{}));
+      const t = await r.text();
+      let j; try { j = JSON.parse(t); } catch { j = {raw:t}; }
+      if (!r.ok) throw new Error(j.detail || t || r.status);
+      return j;
+    }
+    function cfgBody(action) {
+      return {
+        action,
+        parallel: Number(document.getElementById('ipar').value || 5),
+        bandwidth: String(document.getElementById('ibw').value || '10M').trim(),
+        time: String(document.getElementById('itime').value || '0').trim(),
+      };
+    }
+    function refreshHint(cfg) {
+      const p = (cfg && cfg.parallel) || document.getElementById('ipar').value;
+      const b = (cfg && cfg.bandwidth) || document.getElementById('ibw').value;
+      const t = (cfg && cfg.time) || document.getElementById('itime').value;
+      const cmd = 'iperf3 -c … -R -P ' + p + ' -b ' + b + ' -t ' + t;
+      document.getElementById('cmd-hint').textContent = cmd;
+      document.getElementById('term-title').textContent = cmd;
+    }
+    function paint(s) {
+      document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
+      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'down';
+      document.getElementById('k_srv').textContent = s.server || '—';
+      const ip = s.iperf || {};
+      const cfg = ip.config || {};
+      if (!cfgSeeded && (cfg.parallel || cfg.bandwidth || cfg.time)) {
+        if (cfg.parallel != null) document.getElementById('ipar').value = cfg.parallel;
+        if (cfg.bandwidth) document.getElementById('ibw').value = cfg.bandwidth;
+        if (cfg.time != null) document.getElementById('itime').value = cfg.time;
+        cfgSeeded = true;
+      }
+      refreshHint(cfg);
+      const running = !!ip.running;
+      document.getElementById('k_iperf').textContent = running
+        ? 'running'
+        : (ip.wanted ? 'starting…' : (ip.error || 'stopped'));
+      document.getElementById('k_rate').textContent =
+        (ip.mbits_per_second != null) ? (Number(ip.mbits_per_second).toFixed(2) + ' Mbit/s') : '—';
+      document.getElementById('k_last').textContent =
+        s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3) + ' s') : '—';
+      document.getElementById('k_gp').textContent =
+        s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2) + ' Mbit/s') : '—';
+      document.getElementById('btn-start').disabled = running;
+      document.getElementById('btn-stop').disabled = !(running || ip.wanted);
+      const slim = Object.assign({}, s);
+      delete slim.log;
+      if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
+      document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
+      drainLogs(s.log || ip.log || []);
+    }
+    async function tick() {
+      try { paint(await req('status')); }
+      catch (e) { document.getElementById('pill').className = 'pill bad'; log(e.message); }
+    }
+    async function sftp() {
+      try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); }
+      catch (e) { log(e.message); }
+    }
+    async function iperf(action) {
+      try {
+        const s = await req('iperf', {method:'POST', body: JSON.stringify(cfgBody(action))});
+        paint(s);
+      } catch (e) { log(e.message); }
+    }
+    ['ipar','ibw','itime'].forEach(id => {
+      document.getElementById(id).addEventListener('input', () => refreshHint(null));
+    });
+    tick(); setInterval(tick, 1000);
+  </script>
+</body>
+</html>

@@ -34,6 +34,19 @@ def cdp_ready(timeout: float = 2.0) -> bool:
         return False
 
 
+def wait_cdp(timeout: float = 60.0, interval: float = 1.0) -> bool:
+    """Block until Chromium CDP answers, or timeout. linuxserver can take ~30s to bind 9222."""
+    timeout = max(0.0, float(timeout))
+    interval = max(0.2, float(interval))
+    deadline = time.monotonic() + timeout
+    while True:
+        if cdp_ready(timeout=min(2.0, interval)):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
 def list_targets() -> List[dict]:
     try:
         with urllib.request.urlopen(f"{_cdp_base()}/json/list", timeout=5) as resp:
@@ -219,7 +232,8 @@ def _pick_page(prefer_video_id: Optional[str] = None) -> Optional[dict]:
 
 def navigate(url: str) -> Dict[str, Any]:
     """Navigate Chromium to url via CDP (creates a tab if needed)."""
-    if not cdp_ready():
+    wait_s = float(os.environ.get("CHROME_CDP_WAIT", "60") or "60")
+    if not wait_cdp(timeout=wait_s):
         raise RuntimeError(f"Chromium CDP not ready at {_cdp_base()}")
 
     page = _pick_page()

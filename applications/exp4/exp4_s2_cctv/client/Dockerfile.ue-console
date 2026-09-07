@@ -1,0 +1,44 @@
+# CCTV UE console: MediaMTX + Python backend (publish/control) + Frontend Console — linux/amd64.
+FROM bluenviron/mediamtx:1.12.2 AS mtx
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:/root/.local/bin:${PATH} \
+    DASHBOARD_STATIC=/app/frontend-console/static \
+    GST_DEBUG=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      iproute2 \
+      iputils-ping \
+      python3 \
+      python3-pip \
+      gstreamer1.0-tools \
+      gstreamer1.0-plugins-base \
+      gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad \
+      gstreamer1.0-plugins-ugly \
+      gstreamer1.0-libav \
+      gstreamer1.0-rtsp \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv venv --python 3.12 --seed --managed-python /opt/venv \
+    && /root/.local/bin/uv pip install --python /opt/venv fastapi uvicorn pydantic prometheus-client httpx
+
+COPY --from=mtx /mediamtx /usr/local/bin/mediamtx
+
+WORKDIR /app
+RUN mkdir -p /data
+COPY backend/ /app/backend/
+COPY frontend-console/ /app/frontend-console/
+COPY mediamtx.yml /app/mediamtx.yml
+COPY influx_publish.py /usr/local/bin/exp4_influx_publish.py
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /usr/local/bin/exp4_influx_publish.py /usr/local/bin/mediamtx /app/entrypoint.sh
+
+EXPOSE 80 8090 8555 8888 8889 9997
+ENTRYPOINT ["/app/entrypoint.sh"]

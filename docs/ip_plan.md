@@ -62,9 +62,9 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | **`.160`–`.199`** | **Site DHCP pool** | Glass/ISC on `central-0`; ina-infra UPF N6 dhclient |
 | **`.200`–`.209`** | **UE consoles (overflow)** | Slice 4 UEs 6–15. Skips `.255` broadcast. Allocator: `site_ips.ue_console_ip()`. |
 | `.210` | — | Spare (between overflow and application servers) |
-| **`.211`–`.214`** | **Application servers** | PL `app_ip` / N6 data + web consoles (`http://10.1.137.211/` … `.214/`, HTTP `:80`). Not on profile `10.1.140`. |
-| `.215`–`.219` | — | Spare |
-| **`.220`–`.254`** | **UE consoles** | Static Multus on `usrp`; 10 per slice: 1 `.220–.229`, 2 `.230–.239`, 3 `.240–.249`, 4 UEs 1–5 `.250–.254`. HTTP `:80`. **Not** `.255` (broadcast) or `.256+`. |
+| **`.211`–`.215`** | **Application server consoles** | Exp4 / PL web consoles (`http://10.1.137.21N/`, HTTP `:80`, Multus `net2`). Slice \(N\) is `.21N`. Simulated 5G data is `10.140.<N>.1` on `net1`. See [`applications/exp4/ip_plan.md`](../applications/exp4/ip_plan.md). |
+| `.216`–`.219` | — | Spare |
+| **`.220`–`.254`** | **UE consoles** | Static Multus on `usrp`; 10 per slice: 1 `.220–.229`, 2 `.230–.239`, 3 `.240–.249`, 4 UEs 1–5 `.250–.254`. HTTP `:80`. **Not** `.255` (broadcast) or `.256+`. Exp4 simulated-5G first client consoles are `.221`–`.225` (slice \(N\) = `.22N`, Multus `net2`); do not run Exp1 UEs at the same time. |
 
 ## `10.1.132.0/24` allocation (mgmt)
 
@@ -224,6 +224,8 @@ Ten addresses per slice starting at `.220`. That layout does not fit slice 4 UEs
 | 3 | 1–10 | `.240`–`.249` | UE 1 `http://10.1.137.240/` |
 | 4 | 1–5 | `.250`–`.254` | UE 1 `http://10.1.137.250/` |
 | 4 | 6–15 | `.200`–`.209` | UE 6 `http://10.1.137.200/` |
+
+Exp4 simulated-5G (`exp4_deploy.sh`) keeps consoles on `.221`–`.225` (slice \(N\) → `10.1.137.22N`, Multus `net2`) and puts data on `10.140.<N>.1`/`.2` (`net1`). That console block sits inside the slice-1 decade; do not mix with Exp1 UEs.
 
 Do not assign `.255` (IPv4 broadcast; Glass DHCP `broadcast-address`). Slice 4 UE 16+ hits spare `.210` or application servers `.211`–`.214` — the allocator raises.
 

@@ -1,0 +1,46 @@
+# UE MediaMTX — placeholders filled by entrypoint for N annotated DeepStream streams.
+# Do not put placeholder tokens in comments: str.replace would inject multi-line YAML
+# into the comment and leave bare keys (e.g. source:) at document top-level.
+# PATHS_BLOCK placeholder (below under paths:) -> annotated1..N path entries.
+# CONSOLE_IP placeholder (webrtc* fields) -> UE Multus IP for WebRTC ICE.
+# https://github.com/bluenviron/mediamtx
+
+logLevel: info
+logDestinations: [stdout]
+
+api: yes
+apiAddress: :9997
+
+metrics: no
+playback: no
+rtmp: no
+srt: no
+
+rtsp: yes
+rtspAddress: :8555
+protocols: [tcp]
+
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: "*"
+hlsAlwaysRemux: yes
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 500ms
+hlsPartDuration: 100ms
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: "*"
+webrtcLocalUDPAddress: __CONSOLE_IP__:8189
+webrtcLocalTCPAddress: __CONSOLE_IP__:8189
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [__CONSOLE_IP__]
+webrtcICEServers2: []
+
+pathDefaults:
+  # MediaMTX 1.12 rejects path-level rtspTransport; TCP is preferred via source URL / defaults.
+  overridePublisher: yes
+
+paths:
+__PATHS_BLOCK__

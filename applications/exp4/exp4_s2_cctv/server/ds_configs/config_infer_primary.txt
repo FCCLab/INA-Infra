@@ -1,0 +1,31 @@
+# DeepStream primary GIE — YOLO-class detector via stock ResNet Primary_Detector
+# (ships with DeepStream). Override with DS_PGIE_CONFIG for a custom YOLO engine.
+[property]
+gpu-id=0
+net-scale-factor=0.0039215697906911373
+model-color-format=0
+labelfile-path=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/labels.txt
+model-engine-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx_b8_gpu0_fp16.engine
+onnx-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx
+tlt-encoded-model=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet18_trafficcamnet_pruned.etlt
+tlt-model-key=tlt_encode
+infer-dims=3;544;960
+uff-input-order=0
+uff-input-blob-name=input_1
+batch-size=4
+process-mode=1
+model-color-format=0
+network-mode=2
+num-detected-classes=4
+interval=0
+gie-unique-id=1
+output-blob-names=output_cov/Sigmoid;output_bbox/BiasAdd
+cluster-mode=2
+maintain-aspect-ratio=1
+parse-bbox-func-name=NvDsInferParseCustomNVResize
+custom-lib-path=/opt/nvidia/deepstream/deepstream/lib/libnvds_infercustomparser.so
+
+[class-attrs-all]
+pre-cluster-threshold=0.2
+topk=20
+nms-iou-threshold=0.5
