@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Exp4 S1 UE console</title>
+  <title>S1 Client Console: FTP</title>
   <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png"/>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"/>
   <style>
@@ -36,16 +36,16 @@ main{padding:24px;max-width:1200px;margin:0 auto;display:grid;gap:16px}
 .kpi-label{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em}
 .kpi-value{font-size:15px;font-weight:600;margin-top:4px;word-break:break-all}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;display:grid;gap:12px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.field{display:grid;gap:4px;min-width:100px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 button{background:var(--accent);color:#04140e;border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}
 button.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
 button.danger{background:var(--bad-bg);color:var(--bad);border:1px solid rgba(255,90,110,.35)}
-button:disabled{opacity:.45;cursor:not-allowed}
-label{font-size:12px;color:var(--text-dim);display:block}
-input,textarea,select{background:#05080f;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font:inherit;width:100%}
+label{font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px}
+input,textarea,select{background:#05080f;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font:inherit}
+.log{background:#05080f;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12px;max-height:420px;overflow:auto;white-space:pre-wrap}
 pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
-.console{background:#05080f;overflow:hidden;border:1px solid var(--border);border-radius:10px}
+.card.term{padding:0;overflow:hidden}
+.console{background:#05080f;overflow:hidden}
 .console-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:11px}
 .console-dots{display:flex;gap:5px}
 .console-dots span{width:8px;height:8px;border-radius:50%;background:#3a455c}
@@ -61,18 +61,23 @@ pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
 .console-line.sum{color:var(--accent)}
 .console-line.err{color:var(--bad)}
 .console-line.sshd{color:var(--accent2)}
-.divider{height:1px;background:var(--border);margin:2px 0}
-details.raw{border-top:1px solid var(--border);padding-top:10px}
-details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600}
-  </style>
+.table-wrap{overflow:auto}
+table.clients{width:100%;border-collapse:collapse;font-size:13px}
+table.clients th,table.clients td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.clients th{color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+table.clients td.empty{color:var(--text-faint);text-align:center;padding:18px}
+table.clients a{color:var(--accent2);text-decoration:none}
+table.clients a:hover{text-decoration:underline}
+.muted{color:var(--text-faint);font-size:12px;margin-top:2px}
+</style>
 </head>
 <body>
   <header>
     <div class="brand">
       <img src="/static/logos/NeuroRAN.png" alt="NeuroRAN"/>
       <div>
-        <div class="kicker">Slice 1 · client console</div>
-        <h1>Exp4 S1 UE console</h1>
+        <div class="kicker"></div>
+        <h1>S1 Client Console: FTP</h1>
       </div>
     </div>
     <div class="hdr-actions">
@@ -81,50 +86,24 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
     </div>
   </header>
   <main>
-    <section class="kpi" id="kpis">
-      <div class="kpi-card"><div class="kpi-label">Server</div><div class="kpi-value" id="k_srv">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">iperf DL</div><div class="kpi-value" id="k_iperf">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">iperf rate</div><div class="kpi-value" id="k_rate">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">Last SFTP</div><div class="kpi-value" id="k_last">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">SFTP goodput</div><div class="kpi-value" id="k_gp">—</div></div>
-    </section>
-
+    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">Server</div><div class="kpi-value" id="k_srv">—</div></div><div class="kpi-card"><div class="kpi-label">iperf DL</div><div class="kpi-value" id="k_iperf">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP e2e</div><div class="kpi-value" id="k_e2e">—</div></div><div class="kpi-card"><div class="kpi-label">Last SFTP</div><div class="kpi-value" id="k_last">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP goodput</div><div class="kpi-value" id="k_gp">—</div></div></section>
+    
     <section class="card">
       <h2>Control</h2>
-
       <div class="row">
-        <div class="field" style="min-width:90px">
-          <label for="ipar">Streams (-P)</label>
-          <input id="ipar" type="number" min="1" max="32" value="5"/>
+          <button onclick="sftp()">SFTP one</button>
         </div>
-        <div class="field" style="min-width:110px">
-          <label for="ibw">Bandwidth (-b)</label>
-          <input id="ibw" type="text" value="10M"/>
-        </div>
-        <div class="field" style="min-width:90px">
-          <label for="itime">Time (-t)</label>
-          <input id="itime" type="text" value="0" title="0 = forever"/>
-        </div>
-        <button id="btn-start" onclick="iperf('start')">Start iperf3</button>
-        <button id="btn-restart" class="secondary" onclick="iperf('restart')">Restart</button>
-        <button id="btn-stop" class="danger" onclick="iperf('stop')">Stop</button>
-        <button class="secondary" onclick="sftp()">SFTP download</button>
-      </div>
-      <p class="kicker" id="cmd-hint">iperf3 -c … -R -P 5 -b 10M -t 0 (starts by default)</p>
-
-      <div class="divider"></div>
-
-      <div class="console">
+        <p class="kicker">Autostarts SFTP of queued 1 MB files (e2e = generate start → last byte). iperf3 -R is optional extra load.</p>
+      <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
         <div class="console-bar">
           <span class="console-dots"><span></span><span></span><span></span></span>
-          <span class="console-title" id="term-title">iperf3 / sftp log</span>
+          <span class="console-title" id="term-title">backend log</span>
           <span class="console-meta" id="term-meta">0 lines</span>
         </div>
         <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
       </div>
-
-      <details class="raw">
-        <summary>Backend status</summary>
+      <details style="border-top:1px solid var(--border);padding-top:10px;margin-top:8px">
+        <summary style="cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600">Backend status</summary>
         <pre id="raw" style="margin-top:10px">waiting…</pre>
       </details>
     </section>
@@ -132,8 +111,6 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
   <script>
     const logEl = document.getElementById('log');
     let lastSeq = 0;
-    let cfgSeeded = false;
-
     function esc(s) {
       return String(s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
     }
@@ -149,7 +126,7 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
       const kind = String(e.kind || '');
       const low = line.toLowerCase();
       if (/error|fail|denied|refused/.test(low)) div.classList.add('err');
-      else if (/\[sum\]/i.test(line)) div.classList.add('sum');
+      else if (/\[sum\]|\[ok\]/i.test(line)) div.classList.add('sum');
       else if (kind === 'sshd') div.classList.add('sshd');
       div.innerHTML = '<span class="ts">' + esc(e.ts || '') + '</span>' + esc(line);
       logEl.appendChild(div);
@@ -163,6 +140,46 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
     function log(msg) {
       appendTerm({seq: lastSeq + 1, ts: new Date().toISOString().slice(11,19), line: msg});
     }
+    function clientStatus(c) {
+      if (c.connection_status) return String(c.connection_status);
+      if (c.active === true) return 'Connected';
+      if (c.active === false) return 'Stale';
+      if (c.is_alive === true) return 'Connected';
+      if (c.is_alive === false) return 'Disconnected';
+      return 'Connected';
+    }
+    function renderClients(s) {
+      const rows = s.clients || [];
+      const kc = document.getElementById('k_clients');
+      if (kc) kc.textContent = String(rows.length);
+      const body = document.getElementById('clients-body');
+      if (!body) return;
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="5" class="empty">no clients connected</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(c => {
+        const id = esc(c.id || c.client_id || '');
+        const name = esc(c.name || '');
+        const ip = esc(c.console_ip || c.ip || c.to_server_ip || '');
+        const url = c.console_url || (ip ? ('http://' + ip) : '');
+        const st = clientStatus(c);
+        const extra = esc(
+          c.detail || c.state ||
+          (c.fps != null && c.fps !== '' ? (Number(c.fps).toFixed(1) + ' fps') : '') ||
+          (c.last_heartbeat_ago != null ? (c.last_heartbeat_ago + 's ago') : '')
+        );
+        const stClass = /disc|stale|off/i.test(st) ? 'bad' : (/unstable/i.test(st) ? '' : 'ok');
+        const link = url
+          ? ('<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>')
+          : '—';
+        return '<tr><td><div>' + id + '</div>' +
+          (name && name !== id ? '<div class="muted">' + name + '</div>' : '') +
+          '</td><td>' + (ip || '—') + '</td><td>' + link +
+          '</td><td><span class="pill ' + stClass + '">' + esc(st) + '</span></td><td>' +
+          (extra || '—') + '</td></tr>';
+      }).join('');
+    }
     async function req(path, opts) {
       const r = await fetch('/api/' + path, Object.assign({headers:{'Content-Type':'application/json'}}, opts||{}));
       const t = await r.text();
@@ -170,71 +187,27 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
       if (!r.ok) throw new Error(j.detail || t || r.status);
       return j;
     }
-    function cfgBody(action) {
-      return {
-        action,
-        parallel: Number(document.getElementById('ipar').value || 5),
-        bandwidth: String(document.getElementById('ibw').value || '10M').trim(),
-        time: String(document.getElementById('itime').value || '0').trim(),
-      };
-    }
-    function refreshHint(cfg) {
-      const p = (cfg && cfg.parallel) || document.getElementById('ipar').value;
-      const b = (cfg && cfg.bandwidth) || document.getElementById('ibw').value;
-      const t = (cfg && cfg.time) || document.getElementById('itime').value;
-      const cmd = 'iperf3 -c … -R -P ' + p + ' -b ' + b + ' -t ' + t;
-      document.getElementById('cmd-hint').textContent = cmd;
-      document.getElementById('term-title').textContent = cmd;
-    }
+    
+    document.getElementById('term-title').textContent = 'SFTP 1 MB queue / iperf3';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'down';
+      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
       document.getElementById('k_srv').textContent = s.server || '—';
       const ip = s.iperf || {};
-      const cfg = ip.config || {};
-      if (!cfgSeeded && (cfg.parallel || cfg.bandwidth || cfg.time)) {
-        if (cfg.parallel != null) document.getElementById('ipar').value = cfg.parallel;
-        if (cfg.bandwidth) document.getElementById('ibw').value = cfg.bandwidth;
-        if (cfg.time != null) document.getElementById('itime').value = cfg.time;
-        cfgSeeded = true;
-      }
-      refreshHint(cfg);
-      const running = !!ip.running;
-      document.getElementById('k_iperf').textContent = running
-        ? 'running'
-        : (ip.wanted ? 'starting…' : (ip.error || 'stopped'));
-      document.getElementById('k_rate').textContent =
-        (ip.mbits_per_second != null) ? (Number(ip.mbits_per_second).toFixed(2) + ' Mbit/s') : '—';
-      document.getElementById('k_last').textContent =
-        s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3) + ' s') : '—';
-      document.getElementById('k_gp').textContent =
-        s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2) + ' Mbit/s') : '—';
-      document.getElementById('btn-start').disabled = running;
-      document.getElementById('btn-stop').disabled = !(running || ip.wanted);
+      document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
+      document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
+      document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
+      document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
       const slim = Object.assign({}, s);
       delete slim.log;
       if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
       drainLogs(s.log || ip.log || []);
     }
-    async function tick() {
-      try { paint(await req('status')); }
-      catch (e) { document.getElementById('pill').className = 'pill bad'; log(e.message); }
-    }
-    async function sftp() {
-      try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); }
-      catch (e) { log(e.message); }
-    }
-    async function iperf(action) {
-      try {
-        const s = await req('iperf', {method:'POST', body: JSON.stringify(cfgBody(action))});
-        paint(s);
-      } catch (e) { log(e.message); }
-    }
-    ['ipar','ibw','itime'].forEach(id => {
-      document.getElementById(id).addEventListener('input', () => refreshHint(null));
-    });
+    async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
+    async function sftp() { try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); log('sftp done'); } catch(e) { log(e.message); } }
     tick(); setInterval(tick, 1000);
+        
   </script>
 </body>
 </html>

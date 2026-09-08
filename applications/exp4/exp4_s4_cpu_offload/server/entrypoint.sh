@@ -23,11 +23,23 @@ wait_iface() {
 log info "to_client=${TO_CLIENT_IFACE} console=${CONSOLE_IFACE}"
 wait_iface "$TO_CLIENT_IFACE"
 wait_iface "$CONSOLE_IFACE"
+if ip link show dev "$TO_CLIENT_IFACE" >/dev/null 2>&1; then
+  CIP="$(ip -4 -o addr show dev "$TO_CLIENT_IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
+  if [ -n "$CIP" ] && command -v arping >/dev/null 2>&1; then
+    arping -c 2 -U -I "$TO_CLIENT_IFACE" "$CIP" >/dev/null 2>&1 || true
+  fi
+fi
+
+mkdir -p /var/run/sshd /home/ina/download
+chown ina:ina /home/ina/download || true
 export EXP4_APP_TYPE="${EXP4_APP_TYPE:-exp4-s4}"
 export SLICE_ID="${SLICE_ID:-4}"
 export TO_CLIENT_IFACE
-python3 /app/influx_publish.py &
+python3 /usr/local/bin/exp4_influx_publish.py &
 export BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8080}"
 export DASHBOARD_STATIC="${DASHBOARD_STATIC:-/app/frontend-console/static}"
+export SSHD_LOG="${SSHD_LOG:-/tmp/sshd.log}"
+: > "${SSHD_LOG}"
+python3 /app/control_api.py &
 python3 /app/frontend-console/frontend.py &
-exec python3 /app/server.py
+exec /usr/sbin/sshd -D -E "${SSHD_LOG}"

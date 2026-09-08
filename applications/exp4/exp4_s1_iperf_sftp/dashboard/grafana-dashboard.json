@@ -355,7 +355,7 @@
             "resultFormat": "time_series"
           }
         ],
-        "title": "Client latency (ping \u2192 server)",
+        "title": "Client E2E latency (app t_send \u2192 client)",
         "type": "timeseries",
         "interval": "1s"
       }

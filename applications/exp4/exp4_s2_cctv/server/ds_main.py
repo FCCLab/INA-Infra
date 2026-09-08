@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -87,6 +88,40 @@ def client_heartbeat() -> Dict[str, Any]:
     return {"ok": True, "backend": YOLO_BACKEND, "num_streams": DS_NUM_STREAMS}
 
 
+@app.get("/api/e2e")
+@app.get("/api/v1/e2e")
+def e2e() -> Dict[str, Any]:
+    """Per-stream camera / YOLO / encode. t_send is mux wall clock (before YOLO).
+
+    Client measures each annotated path, then publishes mean E2E:
+      e2e_i  = camera_ms_i + yolo_ms_i + rtsp_hls_ms_i
+      e2e_ms = mean(e2e_i)
+    """
+    from ds_latency import read_file  # noqa: WPS433
+
+    stages = read_file(max_age_s=15.0) or {}
+    ready = 0
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{MTX_API}/v3/paths/list", timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        ready = sum(1 for x in data.get("items") or [] if x.get("ready"))
+    except Exception:
+        pass
+    streams = stages.get("streams") if isinstance(stages.get("streams"), list) else []
+    return {
+        "ok": True,
+        "streams": streams,
+        "camera_ms": float(stages.get("camera_ms") or 0.0),
+        "yolo_ms": float(stages.get("yolo_ms") or 0.0),
+        "encode_ms": float(stages.get("encode_ms") or 0.0),
+        "server_ms": float(stages.get("server_ms") or 0.0),
+        "mtx_ready": ready,
+        "n_streams": len(streams),
+    }
+
+
 @app.get("/api/status")
 @app.get("/api/v1/status")
 def status() -> Dict[str, Any]:
@@ -100,6 +135,7 @@ def status() -> Dict[str, Any]:
         "mtx_api": MTX_API,
         "uptime_s": int(time.time() - _start),
         "ds_running": bool(_ds_proc and _ds_proc.poll() is None),
+        "e2e": e2e(),
         "streams": streams,
         "clients": [
             {
@@ -201,12 +237,18 @@ def _sync_engine_file(dest: str) -> None:
     The custom YOLO engine builder writes ``model_b1_gpu0_fp16.engine`` into
     the process cwd (often ``/app``), while PGIE configs look under ``/models``.
     Without this copy every nvinfer rebuilds (~20 min each).
+
+    Image-baked engines live under ``/opt/exp4-s2-engines`` because the
+    hostPath mount at ``/models`` hides anything baked into that path.
     """
     os.makedirs(os.path.dirname(dest) or "/models", exist_ok=True)
     aliases = [
         dest,
         "/models/model_b1_gpu0_fp16.engine",
         "/models/yolov8n_b1_gpu0_fp16.engine",
+        "/opt/exp4-s2-engines/model_b1_gpu0_fp16.engine",
+        "/opt/exp4-s2-engines/yolov8n_b1_gpu0_fp16.engine",
+        "/opt/exp4-s2-engines/model.bin",
         "/app/model_b1_gpu0_fp16.engine",
     ]
     src = next(

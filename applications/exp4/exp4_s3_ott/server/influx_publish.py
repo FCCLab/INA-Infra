@@ -3,23 +3,26 @@
 
 Server (origin=server): absolute CPU millicores, RAM MiB, GPU %, VRAM MiB.
   cpu_m: 1000m = 100% of one CPU; gpu_pct: 0–100% of one GPU (container PIDs).
-Client (origin=client): DL throughput on TO_SERVER_IFACE (RX), latency ping
-  to TARGET_SERVER_IP via TO_SERVER_IFACE  — 2 fields.
+Client (origin=client): DL throughput on TO_SERVER_IFACE (RX), application E2E
+  latency (t_recv - t_send; t_send stamped on the app server before work).
 
 Env:
   EXP4_METRICS_ORIGIN   server|client  (default: server)
   INFLUXDB_URL / TOKEN / ORG / BUCKET
   SLICE_ID, EXP4_APP_TYPE, APP_NAME, SCHEME_ID, CLUSTER
   TO_CLIENT_IFACE / TO_SERVER_IFACE
-  TARGET_SERVER_IP / E2E_PROBE_HOST  (client ping target = server Multus IP)
+  TARGET_SERVER_IP / E2E_PROBE_HOST  (application /api/e2e host)
+  EXP4_LATENCY_MODE  app (default) | ping
   INTERVAL_S
 """
 
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.request
@@ -304,7 +307,89 @@ def iface_rx_bytes(name: str) -> int | None:
 
 
 def latency_ms() -> float | None:
-    """ICMP RTT client → server via TO_SERVER_IFACE."""
+    """Application E2E one-way delay (ms): client_recv - t_send.
+
+    t_send is stamped on the application server before app work. Prefer a
+    fresh sample written by the client app (s4 download, s5 MQTT DL).
+    Otherwise GET /api/e2e over TO_SERVER_IFACE / SIM5G_IP.
+    """
+    mode = (_env("EXP4_LATENCY_MODE") or "app").lower()
+    if mode in ("ping", "icmp"):
+        return _ping_ms()
+    from_file = _e2e_from_file()
+    if from_file is not None:
+        return from_file
+    http = _e2e_from_http()
+    if http is not None:
+        return http
+    if mode == "app":
+        return None
+    return _ping_ms()
+
+
+def _e2e_from_file(max_age_s: float = 3.0) -> float | None:
+    path = _env("EXP4_E2E_LATENCY_FILE") or "/tmp/exp4_e2e_latency_ms"
+    try:
+        st = os.stat(path)
+        if (time.time() - st.st_mtime) > max_age_s:
+            return None
+        return _clip_latency_ms(float(open(path, encoding="utf-8").read().strip().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _clip_latency_ms(ms: float) -> float | None:
+    """Drop epoch mistakes (t_send=0 → ~56 years) and other garbage."""
+    if ms < 0.0 or ms > 60_000.0:
+        return None
+    return ms
+
+
+def _e2e_from_http() -> float | None:
+    if not PROBE_HOST:
+        return None
+    port = int(_env("E2E_HTTP_PORT") or "8080")
+    path = _env("E2E_HTTP_PATH") or "/api/e2e"
+    src = _env("SIM5G_IP") or _env("MULTUS_IP") or ""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1.5)
+        if src:
+            sock.bind((src, 0))
+        sock.connect((PROBE_HOST, port))
+        req = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {PROBE_HOST}\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        sock.sendall(req.encode())
+        buf = b""
+        while True:
+            chunk = sock.recv(8192)
+            if not chunk:
+                break
+            buf += chunk
+        sock.close()
+    except Exception:
+        return None
+    t_recv = time.time()
+    try:
+        _hdr, body = buf.split(b"\r\n\r\n", 1)
+        data = json.loads(body.decode("utf-8", "replace"))
+        pre = data.get("e2e_ms")
+        if pre is not None:
+            return _clip_latency_ms(float(pre))
+        t_send = float(data.get("t_send"))
+    except Exception:
+        return None
+    # Unix seconds; 0 or NTP-vs-unix mix produces years of fake delay.
+    if t_send < 1_000_000_000.0:
+        return None
+    return _clip_latency_ms((t_recv - t_send) * 1000.0)
+
+
+def _ping_ms() -> float | None:
+    """ICMP RTT client → server via TO_SERVER_IFACE (opt-in)."""
     if not PROBE_HOST:
         return None
     cmd = ["ping", "-c", "1", "-W", "1", "-I", IFACE, PROBE_HOST]

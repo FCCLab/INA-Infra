@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Exp4 slice 1: SFTP download of a queued 1 MB file over the PDU.
+"""Exp4 slice 4: SFTP download of a queued encrypted 1 MB file over the PDU.
 
 Latency is last-byte receive minus t_send (stamped in the remote filename
-at generate start).
+at generate start, before encrypt).
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Exp4 S1 SFTP downlink")
-    p.add_argument("--host", default=os.environ.get("SFTP_HOST") or os.environ.get("TARGET_SERVER_IP") or "10.1.137.211")
+    p = argparse.ArgumentParser(description="Exp4 S4 SFTP downlink (encrypted 1 MB)")
+    p.add_argument("--host", default=os.environ.get("SFTP_HOST") or os.environ.get("TARGET_SERVER_IP") or "10.140.4.1")
     p.add_argument("--port", type=int, default=int(os.environ.get("SFTP_PORT", "22")))
     p.add_argument("--user", default=os.environ.get("SFTP_USER", "ina"))
     p.add_argument("--password", default=os.environ.get("SFTP_PASS", "ina"))

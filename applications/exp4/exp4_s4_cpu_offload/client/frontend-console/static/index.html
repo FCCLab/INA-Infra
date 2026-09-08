@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>S4 Client Console: file encrypt</title>
+  <title>S4 Client Console: FTP + encrypt</title>
   <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png"/>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"/>
   <style>
@@ -77,7 +77,7 @@ table.clients a:hover{text-decoration:underline}
       <img src="/static/logos/NeuroRAN.png" alt="NeuroRAN"/>
       <div>
         <div class="kicker"></div>
-        <h1>S4 Client Console: file encrypt</h1>
+        <h1>S4 Client Console: FTP + encrypt</h1>
       </div>
     </div>
     <div class="hdr-actions">
@@ -86,16 +86,14 @@ table.clients a:hover{text-decoration:underline}
     </div>
   </header>
   <main>
-    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">Stream</div><div class="kpi-value" id="k_stream">—</div></div><div class="kpi-card"><div class="kpi-label">Success</div><div class="kpi-value" id="k_ok">—</div></div><div class="kpi-card"><div class="kpi-label">Last file</div><div class="kpi-value" id="k_file">—</div></div><div class="kpi-card"><div class="kpi-label">Last bytes</div><div class="kpi-value" id="k_bytes">—</div></div><div class="kpi-card"><div class="kpi-label">Transfer</div><div class="kpi-value" id="k_dt">—</div></div><div class="kpi-card"><div class="kpi-label">Deleted</div><div class="kpi-value" id="k_del">—</div></div></section>
+    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">Server</div><div class="kpi-value" id="k_srv">—</div></div><div class="kpi-card"><div class="kpi-label">iperf DL</div><div class="kpi-value" id="k_iperf">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP e2e</div><div class="kpi-value" id="k_e2e">—</div></div><div class="kpi-card"><div class="kpi-label">Last SFTP</div><div class="kpi-value" id="k_last">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP goodput</div><div class="kpi-value" id="k_gp">—</div></div></section>
     
     <section class="card">
       <h2>Control</h2>
       <div class="row">
-          <button onclick="stream('start')">Start stream</button>
-          <button class="danger" onclick="stream('stop')">Stop</button>
-          <button class="secondary" onclick="dl()">Download one</button>
+          <button onclick="sftp()">SFTP one</button>
         </div>
-        <p class="kicker">Autostarts: UE pulls the next encrypted zip, shows success, then deletes the local copy.</p>
+        <p class="kicker">Same SFTP 1 MB queue as S1, after server-side encrypt. E2E is generate-start → last byte (S4 &gt; S1).</p>
       <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
         <div class="console-bar">
           <span class="console-dots"><span></span><span></span><span></span></span>
@@ -190,28 +188,24 @@ table.clients a:hover{text-decoration:underline}
       return j;
     }
     
-    document.getElementById('term-title').textContent = 'download / success / delete';
+    document.getElementById('term-title').textContent = 'SFTP encrypted 1 MB / iperf3';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.stream_running ? 'streaming' : (s.ok ? 'idle' : 'down');
-      document.getElementById('k_stream').textContent = s.stream_running ? 'running' : 'stopped';
-      document.getElementById('k_ok').textContent = s.success ?? 0;
-      document.getElementById('k_file').textContent = (s.last && s.last.file_id) || '—';
-      document.getElementById('k_bytes').textContent = (s.last && s.last.bytes) || '—';
-      document.getElementById('k_dt').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
-      document.getElementById('k_del').textContent = s.deleted ?? 0;
+      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
+      document.getElementById('k_srv').textContent = s.server || '—';
+      const ip = s.iperf || {};
+      document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
+      document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
+      document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
+      document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || []);
+      drainLogs(s.log || ip.log || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
-    async function stream(action) {
-      try { paint(await req('stream', {method:'POST', body: JSON.stringify({action})})); }
-      catch(e) { log(e.message); }
-    }
-    async function dl() { try { const s = await req('download', {method:'POST', body:'{}'}); paint(s); } catch(e) { log(e.message); } }
-    stream('start');
+    async function sftp() { try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); log('sftp done'); } catch(e) { log(e.message); } }
     tick(); setInterval(tick, 1000);
         
   </script>

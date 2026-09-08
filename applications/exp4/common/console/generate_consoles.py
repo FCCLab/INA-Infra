@@ -255,18 +255,20 @@ SERVERS = (
         "exp4_s1_iperf_sftp",
         "S1 Server Console: FTP",
         "",
-        kpi("k_iperf", "iperf :5201") + kpi("k_sftp", "SFTP :22") + kpi("k_clients", "Clients") + kpi("k_n6", "N6"),
+        kpi("k_iperf", "iperf :5201") + kpi("k_sftp", "SFTP :22") + kpi("k_q", "FTP queue") + kpi("k_clients", "Clients") + kpi("k_n6", "N6"),
         """<div class="row">
           <button onclick="act('refresh')">Refresh</button>
         </div>
-        <p class="kicker">iperf3 -s and sshd logs stream into the terminal below.</p>""",
+        <p class="kicker">Queues 1 MB files for SFTP. iperf3 -s and sshd logs stream below.</p>""",
         """
-    document.getElementById('term-title').textContent = 'iperf3 -s / sshd';
+    document.getElementById('term-title').textContent = 'SFTP queue / iperf3 -s / sshd';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
       document.getElementById('pill').textContent = s.ok ? 'backend up' : 'backend down';
       document.getElementById('k_iperf').textContent = s.iperf_listen ? 'listen' : 'down';
       document.getElementById('k_sftp').textContent = s.sftp_listen ? 'listen' : 'down';
+      const q = s.sftp || {};
+      document.getElementById('k_q').textContent = (q.ready_q ?? '—') + ' / ' + (q.ready_max ?? '—');
       document.getElementById('k_n6').textContent = s.n6_ip || '—';
       renderClients(s);
       const slim = Object.assign({}, s);
@@ -329,46 +331,34 @@ SERVERS = (
     ),
     (
         "exp4_s4_cpu_offload",
-        "S4 Server Console: file encrypt",
+        "S4 Server Console: FTP + encrypt",
         "",
-        kpi("k_stream", "Stream") + kpi("k_clients", "Clients") + kpi("k_plain", "Generate q") + kpi("k_ready", "Encrypt q")
-        + kpi("k_last", "Last encrypt") + kpi("k_dl", "Downloaded") + kpi("k_del", "Deleted"),
+        kpi("k_iperf", "iperf :5201") + kpi("k_sftp", "SFTP :22") + kpi("k_q", "FTP queue")
+        + kpi("k_enc", "Encrypt") + kpi("k_clients", "Clients") + kpi("k_n6", "N6"),
         """<div class="row">
-          <button onclick="stream('start')">Start stream</button>
-          <button class="danger" onclick="stream('stop')">Stop</button>
-          <button class="secondary" onclick="runOnce()">Enqueue one</button>
+          <button onclick="act('refresh')">Refresh</button>
         </div>
-        <p class="kicker">Autostarts: generate → queue → encrypt → queue → download to UE → delete.</p>""",
+        <p class="kicker">Same 1 MB SFTP queue as S1, plus encrypt before the file is ready. iperf3 -s and sshd logs stream below.</p>""",
         """
-    document.getElementById('term-title').textContent = 'generate / encrypt / delete';
+    document.getElementById('term-title').textContent = 'generate+encrypt / SFTP queue / iperf3 -s / sshd';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.stream_running ? 'streaming' : (s.ok ? 'idle' : 'down');
-      const p = s.pipeline || {};
-      const g = p.generate || {};
-      const e = p.encrypt || {};
-      document.getElementById('k_stream').textContent = s.stream_running ? 'running' : 'stopped';
-      document.getElementById('k_plain').textContent = (g.q ?? '—') + ' / ' + (g.max ?? '—');
-      document.getElementById('k_ready').textContent = (e.q ?? '—') + ' / ' + (e.max ?? '—');
-      document.getElementById('k_last').textContent = (s.last_proc_ms!=null) ? (s.last_proc_ms.toFixed(1)+' ms') : '—';
-      document.getElementById('k_dl').textContent = s.downloaded ?? 0;
-      document.getElementById('k_del').textContent = s.deleted ?? 0;
+      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'backend down';
+      document.getElementById('k_iperf').textContent = s.iperf_listen ? 'listen' : 'down';
+      document.getElementById('k_sftp').textContent = s.sftp_listen ? 'listen' : 'down';
+      const q = s.sftp || {};
+      document.getElementById('k_q').textContent = (q.ready_q ?? '—') + ' / ' + (q.ready_max ?? '—');
+      document.getElementById('k_enc').textContent = (q.last_encrypt_ms != null) ? (Number(q.last_encrypt_ms).toFixed(1) + ' ms') : '—';
+      document.getElementById('k_n6').textContent = s.n6_ip || '—';
       renderClients(s);
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || []);
+      drainLogs(s.log || (s.iperf && s.iperf.log) || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
-    async function stream(action) {
-      try { paint(await req('stream', {method:'POST', body: JSON.stringify({action})})); }
-      catch(e) { log(e.message); }
-    }
-    async function runOnce() {
-      try { const s = await req('run', {method:'POST', body:'{}'}); paint(s); log('enqueued '+ (s.file_id||'') + ' ' + s.last_proc_ms + ' ms'); }
-      catch(e) { log(e.message); }
-    }
-    stream('start');
+    async function act() { await tick(); }
     tick(); setInterval(tick, 1000);
         """,
     ),
@@ -414,20 +404,20 @@ CLIENTS = (
         1,
         "S1 Client Console: FTP",
         "",
-        kpi("k_srv", "Server") + kpi("k_iperf", "iperf DL") + kpi("k_rate", "iperf rate") + kpi("k_last", "Last SFTP") + kpi("k_gp", "SFTP goodput"),
+        kpi("k_srv", "Server") + kpi("k_iperf", "iperf DL") + kpi("k_e2e", "SFTP e2e") + kpi("k_last", "Last SFTP") + kpi("k_gp", "SFTP goodput"),
         """<div class="row">
-          <button onclick="sftp()">SFTP download</button>
+          <button onclick="sftp()">SFTP one</button>
         </div>
-        <p class="kicker">iperf3 -R -P 5 -b 10M -t 0 autostarts; stdout is streamed into the terminal.</p>""",
+        <p class="kicker">Autostarts SFTP of queued 1 MB files (e2e = generate start → last byte). iperf3 -R is optional extra load.</p>""",
         """
-    document.getElementById('term-title').textContent = 'iperf3 -R -P 5 -b 10M -t 0';
+    document.getElementById('term-title').textContent = 'SFTP 1 MB queue / iperf3';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'down';
+      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
       document.getElementById('k_srv').textContent = s.server || '—';
       const ip = s.iperf || {};
       document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
-      document.getElementById('k_rate').textContent = (ip.mbits_per_second != null) ? (Number(ip.mbits_per_second).toFixed(2) + ' Mbit/s') : '—';
+      document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
       document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
       document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
       const slim = Object.assign({}, s);
@@ -444,39 +434,32 @@ CLIENTS = (
     (
         "exp4_s4_cpu_offload",
         4,
-        "S4 Client Console: file encrypt",
+        "S4 Client Console: FTP + encrypt",
         "",
-        kpi("k_stream", "Stream") + kpi("k_ok", "Success") + kpi("k_file", "Last file")
-        + kpi("k_bytes", "Last bytes") + kpi("k_dt", "Transfer") + kpi("k_del", "Deleted"),
+        kpi("k_srv", "Server") + kpi("k_iperf", "iperf DL") + kpi("k_e2e", "SFTP e2e") + kpi("k_last", "Last SFTP") + kpi("k_gp", "SFTP goodput"),
         """<div class="row">
-          <button onclick="stream('start')">Start stream</button>
-          <button class="danger" onclick="stream('stop')">Stop</button>
-          <button class="secondary" onclick="dl()">Download one</button>
+          <button onclick="sftp()">SFTP one</button>
         </div>
-        <p class="kicker">Autostarts: UE pulls the next encrypted zip, shows success, then deletes the local copy.</p>""",
+        <p class="kicker">Same SFTP 1 MB queue as S1, after server-side encrypt. E2E is generate-start → last byte (S4 &gt; S1).</p>""",
         """
-    document.getElementById('term-title').textContent = 'download / success / delete';
+    document.getElementById('term-title').textContent = 'SFTP encrypted 1 MB / iperf3';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.stream_running ? 'streaming' : (s.ok ? 'idle' : 'down');
-      document.getElementById('k_stream').textContent = s.stream_running ? 'running' : 'stopped';
-      document.getElementById('k_ok').textContent = s.success ?? 0;
-      document.getElementById('k_file').textContent = (s.last && s.last.file_id) || '—';
-      document.getElementById('k_bytes').textContent = (s.last && s.last.bytes) || '—';
-      document.getElementById('k_dt').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
-      document.getElementById('k_del').textContent = s.deleted ?? 0;
+      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
+      document.getElementById('k_srv').textContent = s.server || '—';
+      const ip = s.iperf || {};
+      document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
+      document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
+      document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
+      document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || []);
+      drainLogs(s.log || ip.log || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
-    async function stream(action) {
-      try { paint(await req('stream', {method:'POST', body: JSON.stringify({action})})); }
-      catch(e) { log(e.message); }
-    }
-    async function dl() { try { const s = await req('download', {method:'POST', body:'{}'}); paint(s); } catch(e) { log(e.message); } }
-    stream('start');
+    async function sftp() { try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); log('sftp done'); } catch(e) { log(e.message); } }
     tick(); setInterval(tick, 1000);
         """,
     ),

@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Exp4 S1 server backend: multi-client iperf3 -s pool + SFTP status."""
+"""Exp4 S4 server backend: same as S1 (iperf3 -s + queued SFTP) plus encrypt.
+
+t_send is stamped at generate start (filename). Encrypt runs before the 1 MB
+file is queued, so SFTP E2E (last-byte − t_send) is higher than slice 1.
+"""
 
 from __future__ import annotations
 
 import collections
+import hashlib
 import os
 import pwd
 import re
@@ -22,7 +27,7 @@ from pydantic import BaseModel, Field
 from connected_clients import attach as attach_clients
 from connected_clients import snapshot as snapshot_clients
 
-app = FastAPI(title="Exp4 S1 backend", docs_url="/docs")
+app = FastAPI(title="Exp4 S4 backend", docs_url="/docs")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 attach_clients(app)
 
@@ -44,13 +49,20 @@ SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in (
     "off",
 )
 BLOB_BYTES = int(os.environ.get("EXP4_BLOB_BYTES", str(1 * 1024 * 1024)))
+PBKDF2_ITERS = int(os.environ.get("EXP4_PBKDF2_ITERS", "80000"))
 READY_DEPTH = max(1, int(os.environ.get("EXP4_READY_QUEUE_DEPTH", "8")))
 DOWNLOAD_DIR = Path(os.environ.get("EXP4_DOWNLOAD_DIR", "/home/ina/download"))
 FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
 
 _SFTP_WANTED = SFTP_AUTOSTART
 _FILE_SEQ = 0
-_SFTP_STATS: dict[str, Any] = {"generated": 0, "ready": 0, "last_file": "", "last_error": ""}
+_SFTP_STATS: dict[str, Any] = {
+    "generated": 0,
+    "ready": 0,
+    "last_file": "",
+    "last_error": "",
+    "last_encrypt_ms": None,
+}
 
 _LOCK = threading.Lock()
 _LOG: collections.deque[dict[str, Any]] = collections.deque(maxlen=LOG_MAX)
@@ -92,6 +104,16 @@ def _ready_files() -> list[Path]:
     return [p for _, p in items]
 
 
+def _encrypt_blob(plain: bytes) -> bytes:
+    digest = hashlib.sha256(plain).hexdigest()
+    key = hashlib.pbkdf2_hmac("sha256", b"ina-exp4", digest.encode(), PBKDF2_ITERS)
+    klen = len(key)
+    out = bytearray(len(plain))
+    for i, a in enumerate(plain):
+        out[i] = a ^ key[i % klen]
+    return bytes(out)
+
+
 def _generate_one() -> Path:
     global _FILE_SEQ
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,7 +122,10 @@ def _generate_one() -> Path:
         _FILE_SEQ += 1
         seq = _FILE_SEQ
     path = DOWNLOAD_DIR / f"q-{seq:06d}-{t_send:.6f}.bin"
-    path.write_bytes(os.urandom(BLOB_BYTES))
+    plain = os.urandom(BLOB_BYTES)
+    t_enc = time.time()
+    path.write_bytes(_encrypt_blob(plain))
+    encrypt_ms = (time.time() - t_enc) * 1000.0
     uid, gid = _ina_ids()
     os.chown(path, uid, gid)
     os.chmod(path, 0o644)
@@ -108,7 +133,12 @@ def _generate_one() -> Path:
         _SFTP_STATS["generated"] = int(_SFTP_STATS["generated"]) + 1
         _SFTP_STATS["last_file"] = path.name
         _SFTP_STATS["last_error"] = ""
-    _append_log(f"generate {path.name} bytes={BLOB_BYTES} q={len(_ready_files())}/{READY_DEPTH}", "sftp")
+        _SFTP_STATS["last_encrypt_ms"] = encrypt_ms
+    _append_log(
+        f"generate+encrypt {path.name} bytes={BLOB_BYTES} encrypt_ms={encrypt_ms:.1f} "
+        f"q={len(_ready_files())}/{READY_DEPTH}",
+        "sftp",
+    )
     return path
 
 
@@ -338,7 +368,7 @@ def _snapshot() -> dict[str, Any]:
     clients = snapshot_clients()
     return {
         "ok": True,
-        "app": "exp4-s1",
+        "app": "exp4-s4",
         "role": "server-backend",
         "iperf_listen": bool(listening),
         "iperf_ports": [
@@ -375,7 +405,7 @@ def health() -> dict:
 
 @app.get("/api/e2e")
 def e2e() -> dict:
-    """Fallback probe. Native SFTP E2E uses t_send in the queued filename."""
+    """Fallback probe. Native SFTP E2E uses t_send in the queued filename (pre-encrypt)."""
     t_send = time.time()
     ready = _ready_files()
     bind = os.environ.get("SIM5G_IP") or os.environ.get("MULTUS_IP") or "127.0.0.1"
@@ -426,7 +456,8 @@ def _startup() -> None:
     threading.Thread(target=_sftp_generator, daemon=True, name="sftp-generate").start()
     if SFTP_AUTOSTART:
         _append_log(
-            f"sftp queue autostart — {BLOB_BYTES} byte files, depth {READY_DEPTH} in {DOWNLOAD_DIR}",
+            f"sftp queue autostart — {BLOB_BYTES} byte encrypted files, "
+            f"pbkdf2={PBKDF2_ITERS} depth {READY_DEPTH} in {DOWNLOAD_DIR}",
             "sftp",
         )
     if IPERF_AUTOSTART:

@@ -1,156 +1,437 @@
 #!/usr/bin/env python3
-"""Exp4 S4 UE backend: continuous download from the encrypt queue, then delete."""
+"""Exp4 S4 UE backend: same SFTP + iperf3 as S1, of encrypted 1 MB files."""
 
 from __future__ import annotations
 
 import collections
 import os
+import re
+import signal
+import socket
+import subprocess
 import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-SERVER = os.environ.get("TARGET_SERVER_IP") or "10.1.137.214"
-URL = os.environ.get("DOWNLOAD_URL") or f"http://{SERVER}/download"
-WORK_DIR = Path(os.environ.get("EXP4_DOWNLOAD_DIR", "/tmp/exp4-s4-dl"))
-IDLE_SLEEP_S = float(os.environ.get("EXP4_IDLE_SLEEP_S", "0.4"))
-STREAM_AUTOSTART = os.environ.get("EXP4_STREAM_AUTOSTART", "1").strip().lower() not in (
-    "0",
-    "false",
-    "no",
-    "off",
-)
-LOG_MAX = int(os.environ.get("EXP4_LOG_MAX", "400"))
-
-_LOCK = threading.Lock()
-_WANTED = STREAM_AUTOSTART
-_BUSY = False
-_LAST: dict[str, Any] = {}
-_LOG: collections.deque[dict[str, Any]] = collections.deque(maxlen=LOG_MAX)
-_LOG_SEQ = 0
-_STATS: dict[str, Any] = {
-    "success": 0,
-    "failed": 0,
-    "deleted": 0,
-    "running": False,
-    "wanted": STREAM_AUTOSTART,
-    "error": "",
-}
-
 app = FastAPI(title="Exp4 S4 UE backend", docs_url="/docs")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+SERVER = os.environ.get("TARGET_SERVER_IP") or os.environ.get("SFTP_HOST") or "10.140.4.1"
+SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
+IPERF_PORT = int(os.environ.get("IPERF_PORT", "5201"))
+IPERF_PORT_COUNT = max(1, int(os.environ.get("IPERF_PORT_COUNT", "8")))
+IPERF_PARALLEL = int(os.environ.get("IPERF_PARALLEL", "5"))
+IPERF_BANDWIDTH = os.environ.get("IPERF_BANDWIDTH", "10M")
+IPERF_TIME = os.environ.get("IPERF_TIME", "0")
+IPERF_INTERVAL = os.environ.get("IPERF_INTERVAL", "1")
+IPERF_AUTOSTART = os.environ.get("IPERF_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
+SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
+SFTP_REMOTE_DIR = os.environ.get("SFTP_REMOTE_DIR", "download")
+IDLE_SLEEP_S = float(os.environ.get("EXP4_IDLE_SLEEP_S", "0.4"))
+FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
+LOG_MAX = int(os.environ.get("IPERF_LOG_MAX", "400"))
 
-class StreamControl(BaseModel):
-    action: str = Field(..., description="start|stop")
+INTERVAL_RE = re.compile(
+    r"\[(?:\s*\d+|SUM)\]\s+"
+    r"([\d.]+)-([\d.]+)\s+sec\s+"
+    r".*?\s+"
+    r"([\d.]+)\s+([KMG])?bits/sec",
+    re.IGNORECASE,
+)
+SUM_RE = re.compile(r"\[SUM\]", re.IGNORECASE)
+
+_LOCK = threading.Lock()
+_LAST: dict[str, Any] = {}
+_BUSY = False
+_IPERF_LOG: collections.deque[dict[str, Any]] = collections.deque(maxlen=LOG_MAX)
+_IPERF_SEQ = 0
+_IPERF_PROC: Optional[subprocess.Popen[str]] = None
+_IPERF_WANTED = False
+_IPERF_WAKE = threading.Event()
+_IPERF_CFG: dict[str, Any] = {
+    "parallel": IPERF_PARALLEL,
+    "bandwidth": IPERF_BANDWIDTH,
+    "time": IPERF_TIME,
+    "interval": IPERF_INTERVAL,
+    "port": IPERF_PORT,
+}
+_IPERF_STATE: dict[str, Any] = {
+    "running": False,
+    "wanted": False,
+    "autostart": IPERF_AUTOSTART,
+    "pid": None,
+    "cmd": [],
+    "mbits_per_second": None,
+    "error": "",
+    "config": dict(_IPERF_CFG),
+}
+_SFTP_WANTED = SFTP_AUTOSTART
+_SFTP_STATS: dict[str, Any] = {
+    "running": False,
+    "wanted": SFTP_AUTOSTART,
+    "success": 0,
+    "failed": 0,
+    "deleted": 0,
+    "error": "",
+}
 
 
-def _ts() -> str:
-    return time.strftime("%H:%M:%S")
+class IperfControl(BaseModel):
+    action: str = Field(..., description="start|stop|restart")
+    parallel: Optional[int] = Field(None, ge=1, le=32)
+    bandwidth: Optional[str] = None
+    time: Optional[str] = None
 
 
-def _log(line: str, kind: str = "") -> None:
-    global _LOG_SEQ
+def _bind_iface() -> str:
+    iface = os.environ.get("TO_SERVER_IFACE") or os.environ.get("BIND_DEV") or ""
+    if iface:
+        return iface
+    scheme = os.environ.get("SCHEME_ID", "")
+    no5g = scheme == "exp4-no5g" or os.environ.get("EXP4_NO5G", "").lower() in ("1", "true", "yes")
+    return "net1" if no5g else ""
+
+
+def _iperf_cmd(port: Optional[int] = None) -> list[str]:
+    host = os.environ.get("IPERF_HOST") or SERVER
     with _LOCK:
-        _LOG_SEQ += 1
-        _LOG.append({"seq": _LOG_SEQ, "ts": _ts(), "line": line, "kind": kind})
-    print(line, flush=True)
+        cfg = dict(_IPERF_CFG)
+        if port is not None:
+            cfg["port"] = int(port)
+            _IPERF_CFG["port"] = int(port)
+            _IPERF_STATE["config"] = dict(_IPERF_CFG)
+    cmd = [
+        "iperf3",
+        "-c",
+        host,
+        "-p",
+        str(cfg["port"]),
+        "-R",
+        "-P",
+        str(cfg["parallel"]),
+        "-b",
+        str(cfg["bandwidth"]),
+        "-t",
+        str(cfg["time"]),
+        "-i",
+        str(cfg["interval"]),
+        "--forceflush",
+    ]
+    iface = _bind_iface()
+    if iface:
+        cmd.extend(["--bind-dev", iface])
+    return cmd
 
 
-def _download_once() -> dict[str, Any]:
-    WORK_DIR.mkdir(parents=True, exist_ok=True)
-    t0 = time.time()
-    t_first = None
-    n = 0
-    proc = ""
-    file_id = ""
-    tmp = WORK_DIR / f"dl-{time.time_ns()}.zip"
+def _parse_mbps(line: str) -> Optional[float]:
+    m = INTERVAL_RE.search(line)
+    if not m:
+        return None
+    value = float(m.group(3))
+    unit = (m.group(4) or "").upper()
+    bits = value * {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9}.get(unit, 1.0)
+    return bits / 1e6
+
+
+def _append_log(line: str) -> None:
+    global _IPERF_SEQ
+    text = line.rstrip("\n\r")
+    if not text:
+        return
+    mbps = _parse_mbps(text)
+    with _LOCK:
+        _IPERF_SEQ += 1
+        _IPERF_LOG.append(
+            {
+                "seq": _IPERF_SEQ,
+                "ts": time.strftime("%H:%M:%S"),
+                "kind": "iperf",
+                "line": text,
+            }
+        )
+        parallel = int(_IPERF_CFG.get("parallel") or 1)
+        if mbps is not None and (SUM_RE.search(text) or parallel <= 1):
+            _IPERF_STATE["mbits_per_second"] = mbps
+
+
+def _next_iperf_port(port: int) -> int:
+    return IPERF_PORT + ((int(port) - IPERF_PORT + 1) % IPERF_PORT_COUNT)
+
+
+def _kill_iperf() -> None:
+    global _IPERF_PROC
+    with _LOCK:
+        proc = _IPERF_PROC
+    if proc is None:
+        return
     try:
-        with urllib.request.urlopen(URL, timeout=180) as resp:
-            proc = resp.headers.get("X-Proc-Ms", "") or ""
-            file_id = resp.headers.get("X-File-Id", "") or ""
-            with tmp.open("wb") as out:
-                while True:
-                    chunk = resp.read(64 * 1024)
-                    if not chunk:
-                        break
-                    if t_first is None:
-                        t_first = time.time()
-                    n += len(chunk)
-                    out.write(chunk)
-    except urllib.error.HTTPError as exc:
-        tmp.unlink(missing_ok=True)
-        if exc.code == 503:
-            raise TimeoutError("no encrypted file ready") from exc
-        raise
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=3)
     except Exception:
-        tmp.unlink(missing_ok=True)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    with _LOCK:
+        if _IPERF_PROC is proc:
+            _IPERF_PROC = None
+            _IPERF_STATE["running"] = False
+            _IPERF_STATE["pid"] = None
+
+
+def _iperf_supervisor() -> None:
+    global _IPERF_PROC
+    backoff = 2.0
+    while True:
+        with _LOCK:
+            wanted = _IPERF_WANTED
+        if not wanted:
+            _kill_iperf()
+            _IPERF_WAKE.wait(timeout=1.0)
+            _IPERF_WAKE.clear()
+            continue
+
+        cmd = _iperf_cmd()
+        _append_log("starting: " + " ".join(cmd))
+        started = time.time()
+        busy = False
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            _append_log("iperf3 binary not found")
+            with _LOCK:
+                _IPERF_STATE["running"] = False
+                _IPERF_STATE["error"] = "iperf3 not found"
+            time.sleep(10)
+            continue
+        except OSError as exc:
+            _append_log(f"iperf3 spawn failed: {exc}")
+            with _LOCK:
+                _IPERF_STATE["running"] = False
+                _IPERF_STATE["error"] = str(exc)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+            continue
+
+        with _LOCK:
+            _IPERF_PROC = proc
+            _IPERF_STATE["running"] = True
+            _IPERF_STATE["pid"] = proc.pid
+            _IPERF_STATE["cmd"] = cmd
+            _IPERF_STATE["error"] = ""
+            _IPERF_STATE["config"] = dict(_IPERF_CFG)
+
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            with _LOCK:
+                still = _IPERF_WANTED
+            if not still:
+                break
+            low = line.lower()
+            if "busy running a test" in low or "server is busy" in low:
+                busy = True
+            _append_log(line)
+
+        if not _IPERF_WANTED:
+            _kill_iperf()
+            _append_log("iperf3 stopped by control")
+            backoff = 2.0
+            continue
+
+        rc = proc.wait()
+        with _LOCK:
+            _IPERF_PROC = None
+            _IPERF_STATE["running"] = False
+            _IPERF_STATE["pid"] = None
+            cur_port = int(_IPERF_CFG.get("port") or IPERF_PORT)
+        if busy or (rc != 0 and time.time() - started < 3):
+            nxt = _next_iperf_port(cur_port)
+            _append_log(f"iperf3 :{cur_port} busy/failed; trying :{nxt}")
+            _iperf_cmd(nxt)
+            backoff = 0.4
+            if _IPERF_WAKE.wait(timeout=backoff):
+                _IPERF_WAKE.clear()
+            continue
+        if time.time() - started > 5:
+            backoff = 2.0
+        with _LOCK:
+            still = _IPERF_WANTED
+        if not still:
+            continue
+        _append_log(f"iperf3 exited rc={rc}; retry in {backoff:.0f}s")
+        # Wait with wake so Stop/Start can interrupt the backoff
+        if _IPERF_WAKE.wait(timeout=backoff):
+            _IPERF_WAKE.clear()
+        backoff = min(backoff * 2, 30.0)
+
+
+def _set_wanted(wanted: bool) -> None:
+    global _IPERF_WANTED
+    with _LOCK:
+        _IPERF_WANTED = wanted
+        _IPERF_STATE["wanted"] = wanted
+    _IPERF_WAKE.set()
+    if not wanted:
+        _kill_iperf()
+
+
+def _apply_cfg(body: IperfControl) -> None:
+    with _LOCK:
+        if body.parallel is not None:
+            _IPERF_CFG["parallel"] = int(body.parallel)
+        if body.bandwidth:
+            _IPERF_CFG["bandwidth"] = str(body.bandwidth).strip()
+        if body.time is not None and str(body.time).strip() != "":
+            _IPERF_CFG["time"] = str(body.time).strip()
+        _IPERF_STATE["config"] = dict(_IPERF_CFG)
+
+
+def _sftp_once() -> dict:
+    try:
+        import paramiko
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="paramiko missing") from exc
+    host = os.environ.get("SFTP_HOST") or SERVER
+    user = os.environ.get("SFTP_USER", "ina")
+    password = os.environ.get("SFTP_PASS", "ina")
+    local_dir = Path(os.environ.get("SFTP_LOCAL_DIR", "/tmp/exp4-s4-dl"))
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(30)
+    src = os.environ.get("SIM5G_IP") or os.environ.get("MULTUS_IP") or ""
+    if src:
+        sock.bind((src, 0))
+    sock.connect((host, SFTP_PORT))
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            host,
+            port=SFTP_PORT,
+            username=user,
+            password=password,
+            timeout=30,
+            sock=sock,
+        )
+        sftp = client.open_sftp()
+        names = sftp.listdir(SFTP_REMOTE_DIR)
+        queued: list[tuple[int, str, float]] = []
+        for name in names:
+            m = FILE_RE.match(name)
+            if m:
+                queued.append((int(m.group(1)), name, float(m.group(2))))
+        queued.sort(key=lambda x: x[0])
+        if not queued:
+            sftp.close()
+            client.close()
+            raise TimeoutError("no queued file ready")
+        seq, name, t_send = queued[0]
+        remote = f"{SFTP_REMOTE_DIR}/{name}"
+        local = local_dir / name
+        nbytes = 0
+
+        def _cb(transferred: int, _total: int) -> None:
+            nonlocal nbytes
+            nbytes = transferred
+
+        sftp.get(remote, str(local), callback=_cb)
+        t_recv = time.time()
+        try:
+            sftp.remove(remote)
+        except OSError:
+            pass
+        sftp.close()
+        client.close()
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+        sock.close()
         raise
-    t_last = time.time()
-    first = t_first or t0
-    dt = max(t_last - first, 1e-6)
-    tmp.unlink(missing_ok=True)
+    sock.close()
+    local.unlink(missing_ok=True)
+    dt = max(t_recv - t_send, 1e-6)
+    e2e_ms = max(0.0, (t_recv - t_send) * 1000.0)
+    try:
+        Path("/tmp/exp4_e2e_latency_ms").write_text(f"{e2e_ms:.3f}\n", encoding="utf-8")
+    except OSError:
+        pass
     out = {
-        "file_id": file_id,
-        "bytes": n,
+        "kind": "sftp",
+        "host": host,
+        "file_id": name,
+        "bytes": nbytes,
+        "t_send": t_send,
+        "t_recv": t_recv,
+        "e2e_ms": e2e_ms,
         "transfer_s": dt,
-        "x_proc_ms": proc,
-        "url": URL,
+        "goodput_mbit": (nbytes * 8.0) / dt / 1e6,
         "deleted": True,
-        "ok": True,
     }
     with _LOCK:
         _LAST.update(out)
-        _STATS["success"] = int(_STATS["success"]) + 1
-        _STATS["deleted"] = int(_STATS["deleted"]) + 1
-        _STATS["error"] = ""
-    _log(
-        f"[ok] download {file_id or 'file'} bytes={n} transfer_s={dt:.3f} deleted",
-        kind="ok",
+        _SFTP_STATS["success"] = int(_SFTP_STATS["success"]) + 1
+        _SFTP_STATS["deleted"] = int(_SFTP_STATS["deleted"]) + 1
+        _SFTP_STATS["error"] = ""
+    _append_log(
+        f"sftp {name} bytes={nbytes} e2e_ms={e2e_ms:.1f} "
+        f"transfer_s={dt:.3f} goodput_mbit={out['goodput_mbit']:.2f} deleted"
     )
     return out
 
 
-def _supervisor() -> None:
+def _sftp_supervisor() -> None:
     backoff = IDLE_SLEEP_S
     while True:
         with _LOCK:
-            wanted = _WANTED
+            wanted = _SFTP_WANTED
         if not wanted:
             with _LOCK:
-                _STATS["running"] = False
+                _SFTP_STATS["running"] = False
             time.sleep(0.2)
             backoff = IDLE_SLEEP_S
             continue
         with _LOCK:
-            _STATS["running"] = True
+            _SFTP_STATS["running"] = True
         try:
-            _download_once()
+            _sftp_once()
             backoff = IDLE_SLEEP_S
         except TimeoutError:
             time.sleep(backoff)
             backoff = min(backoff * 1.5, 2.0)
+        except HTTPException:
+            time.sleep(min(backoff, 5.0))
         except Exception as exc:
             with _LOCK:
-                _STATS["failed"] = int(_STATS["failed"]) + 1
-                _STATS["error"] = str(exc)
-            _log(f"download failed: {exc}", kind="err")
+                _SFTP_STATS["failed"] = int(_SFTP_STATS["failed"]) + 1
+                _SFTP_STATS["error"] = str(exc)
+            _append_log(f"sftp failed: {exc}")
             time.sleep(min(backoff, 5.0))
             backoff = min(backoff * 2, 10.0)
-
-
-def _set_wanted(wanted: bool) -> None:
-    global _WANTED
-    with _LOCK:
-        _WANTED = wanted
-        _STATS["wanted"] = wanted
-    _log("stream " + ("start" if wanted else "stop"))
 
 
 def _snapshot() -> dict[str, Any]:
@@ -159,17 +440,20 @@ def _snapshot() -> dict[str, Any]:
             "ok": True,
             "app": "exp4-s4",
             "role": "client-backend",
-            "url": URL,
             "server": SERVER,
             "busy": _BUSY,
-            "stream_running": _STATS["running"],
-            "wanted": _WANTED,
-            "success": _STATS["success"],
-            "failed": _STATS["failed"],
-            "deleted": _STATS["deleted"],
             "last": dict(_LAST),
-            "error": _STATS["error"],
-            "log": list(_LOG),
+            "sftp": dict(_SFTP_STATS),
+            "sftp_running": _SFTP_STATS["running"],
+            "success": _SFTP_STATS["success"],
+            "failed": _SFTP_STATS["failed"],
+            "deleted": _SFTP_STATS["deleted"],
+            "log": list(_IPERF_LOG),
+            "iperf": {
+                **dict(_IPERF_STATE),
+                "config": dict(_IPERF_CFG),
+                "log": list(_IPERF_LOG),
+            },
         }
 
 
@@ -183,39 +467,48 @@ def status() -> dict:
     return _snapshot()
 
 
-@app.post("/api/stream")
-def stream(body: StreamControl) -> dict:
-    action = (body.action or "").strip().lower()
-    if action not in ("start", "stop"):
-        raise HTTPException(status_code=400, detail="action must be start|stop")
-    _set_wanted(action == "start")
-    return {"ok": True, **_snapshot()}
-
-
-@app.post("/api/download")
-def download() -> dict:
+@app.post("/api/sftp")
+def sftp() -> dict:
     global _BUSY
     with _LOCK:
         if _BUSY:
             raise HTTPException(status_code=409, detail="busy")
         _BUSY = True
     try:
-        result = _download_once()
+        result = _sftp_once()
         snap = _snapshot()
         snap["last"] = result
         return {"ok": True, **snap}
     except TimeoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         with _LOCK:
             _BUSY = False
 
 
+@app.post("/api/iperf")
+def iperf(body: IperfControl) -> dict:
+    action = (body.action or "").strip().lower()
+    if action not in ("start", "stop", "restart"):
+        raise HTTPException(status_code=400, detail="action must be start|stop|restart")
+    if action in ("start", "restart"):
+        _apply_cfg(body)
+    if action == "stop":
+        _set_wanted(False)
+        _append_log("control: stop")
+    elif action == "start":
+        _set_wanted(True)
+        _append_log("control: start")
+    else:  # restart
+        _set_wanted(False)
+        time.sleep(0.3)
+        _set_wanted(True)
+        _append_log("control: restart")
+    return {"ok": True, **_snapshot()}
+
+
 @app.on_event("startup")
 def _startup() -> None:
-    WORK_DIR.mkdir(parents=True, exist_ok=True)
     try:
         from heartbeat import start as start_heartbeat
     except ImportError:
@@ -223,19 +516,22 @@ def _startup() -> None:
 
     def _hb() -> dict:
         with _LOCK:
-            wanted = _WANTED
-            last = dict(_LAST) if _LAST else {}
-        detail = "streaming" if wanted else "idle"
-        if last.get("file_id"):
-            detail += f" last={last['file_id']}"
-        return {"detail": detail}
+            iperf = dict(_IPERF_STATE)
+        running = bool(iperf.get("running"))
+        port = (iperf.get("config") or {}).get("port") or IPERF_PORT
+        return {
+            "detail": f"iperf {'running' if running else 'idle'} :{port}",
+        }
 
     if start_heartbeat is not None:
         start_heartbeat(payload_fn=_hb)
-    if STREAM_AUTOSTART:
+    threading.Thread(target=_iperf_supervisor, daemon=True, name="iperf-supervisor").start()
+    threading.Thread(target=_sftp_supervisor, daemon=True, name="sftp-download").start()
+    if SFTP_AUTOSTART:
+        _append_log("sftp queue autostart — pull 1 MB files until fully received")
+    if IPERF_AUTOSTART:
         _set_wanted(True)
-        _log("autostart download loop")
-    threading.Thread(target=_supervisor, daemon=True, name="s4-download").start()
+        _append_log("iperf autostart enabled")
 
 
 if __name__ == "__main__":

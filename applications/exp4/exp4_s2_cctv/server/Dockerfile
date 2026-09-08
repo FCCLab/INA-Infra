@@ -102,12 +102,15 @@ COPY ds_configs/config_infer_primary_yoloV8.txt /opt/DeepStream-Yolo/config_infe
 COPY --from=mtx /mediamtx /usr/local/bin/mediamtx
 
 WORKDIR /app
-RUN mkdir -p /data /app/edge /models
+RUN mkdir -p /data /app/edge /models /opt/exp4-s2-engines
+# A40 TensorRT engine (optional). Baked at build if ds_engines/*.engine exists.
+# Not placed under /models: that path is a hostPath mount at runtime.
+COPY ds_engines/ /opt/exp4-s2-engines/
 
 COPY common/ /app/common/
 COPY __init__.py cctv.py yolo_worker.py state.py api.py mtx_publish.py \
      mediamtx.yml entrypoint.sh influx_publish.py \
-     ds_feed.py ds_pipeline.py ds_main.py \
+     ds_feed.py ds_pipeline.py ds_main.py ds_latency.py \
      /app/edge/
 COPY ds_configs/ /app/edge/ds_configs/
 COPY frontend-console/ /app/frontend-console/
@@ -116,6 +119,21 @@ COPY requirements.txt /app/edge/requirements.txt
 RUN chmod +x /app/edge/entrypoint.sh /app/edge/influx_publish.py \
       /app/edge/ds_feed.py /app/edge/ds_pipeline.py /app/edge/ds_main.py \
       /usr/local/bin/mediamtx
+
+# Bake Intel sample clips into /data so boot never hits GitHub (cam3 timed out at runtime).
+RUN mkdir -p /data \
+ && curl -fL --retry 5 --retry-delay 2 -o /data/classroom.mp4 \
+      https://github.com/intel-iot-devkit/sample-videos/raw/master/classroom.mp4 \
+ && curl -fL --retry 5 --retry-delay 2 -o /data/street.mp4 \
+      https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4 \
+ && curl -fL --retry 5 --retry-delay 2 -o /data/walking.mp4 \
+      https://github.com/intel-iot-devkit/sample-videos/raw/master/face-demographics-walking.mp4 \
+ && curl -fL --retry 5 --retry-delay 2 -o /data/car-detection.mp4 \
+      https://github.com/intel-iot-devkit/sample-videos/raw/master/car-detection.mp4 \
+ && test "$(stat -c%s /data/classroom.mp4)" -gt 10000 \
+ && test "$(stat -c%s /data/street.mp4)" -gt 10000 \
+ && test "$(stat -c%s /data/walking.mp4)" -gt 10000 \
+ && test "$(stat -c%s /data/car-detection.mp4)" -gt 10000
 
 EXPOSE 80 8080 8554 8555 8888 8889 9102 9997
 ENTRYPOINT ["/app/edge/entrypoint.sh"]

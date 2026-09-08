@@ -86,7 +86,7 @@ table.clients a:hover{text-decoration:underline}
     </div>
   </header>
   <main>
-    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">iperf :5201</div><div class="kpi-value" id="k_iperf">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP :22</div><div class="kpi-value" id="k_sftp">—</div></div><div class="kpi-card"><div class="kpi-label">Clients</div><div class="kpi-value" id="k_clients">—</div></div><div class="kpi-card"><div class="kpi-label">N6</div><div class="kpi-value" id="k_n6">—</div></div></section>
+    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">iperf :5201</div><div class="kpi-value" id="k_iperf">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP :22</div><div class="kpi-value" id="k_sftp">—</div></div><div class="kpi-card"><div class="kpi-label">FTP queue</div><div class="kpi-value" id="k_q">—</div></div><div class="kpi-card"><div class="kpi-label">Clients</div><div class="kpi-value" id="k_clients">—</div></div><div class="kpi-card"><div class="kpi-label">N6</div><div class="kpi-value" id="k_n6">—</div></div></section>
     
     <section class="card">
       <h2>Connected clients</h2>
@@ -107,7 +107,7 @@ table.clients a:hover{text-decoration:underline}
       <div class="row">
           <button onclick="act('refresh')">Refresh</button>
         </div>
-        <p class="kicker">iperf3 -s and sshd logs stream into the terminal below.</p>
+        <p class="kicker">Queues 1 MB files for SFTP. iperf3 -s and sshd logs stream below.</p>
       <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
         <div class="console-bar">
           <span class="console-dots"><span></span><span></span><span></span></span>
@@ -202,12 +202,14 @@ table.clients a:hover{text-decoration:underline}
       return j;
     }
     
-    document.getElementById('term-title').textContent = 'iperf3 -s / sshd';
+    document.getElementById('term-title').textContent = 'SFTP queue / iperf3 -s / sshd';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
       document.getElementById('pill').textContent = s.ok ? 'backend up' : 'backend down';
       document.getElementById('k_iperf').textContent = s.iperf_listen ? 'listen' : 'down';
       document.getElementById('k_sftp').textContent = s.sftp_listen ? 'listen' : 'down';
+      const q = s.sftp || {};
+      document.getElementById('k_q').textContent = (q.ready_q ?? '—') + ' / ' + (q.ready_max ?? '—');
       document.getElementById('k_n6').textContent = s.n6_ip || '—';
       renderClients(s);
       const slim = Object.assign({}, s);

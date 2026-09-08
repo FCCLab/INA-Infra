@@ -267,6 +267,11 @@ _state: Dict[str, Any] = {
     "uptime_seconds": 0,
     "started_at": None,
     "last_error": None,
+    "e2e_ms": 0.0,
+    "camera_ms": 0.0,
+    "yolo_ms": 0.0,
+    "encode_ms": 0.0,
+    "rtsp_hls_ms": 0.0,
 }
 
 
@@ -734,6 +739,32 @@ def on_startup() -> None:
 
     if _state["streaming_enabled"]:
         STREAMER.start()
+
+    def _on_video_e2e(sample: dict) -> None:
+        with _lock:
+            _state["e2e_ms"] = sample.get("e2e_ms") or 0.0
+            _state["camera_ms"] = sample.get("camera_ms") or 0.0
+            _state["yolo_ms"] = sample.get("yolo_ms") or 0.0
+            _state["encode_ms"] = sample.get("encode_ms") or 0.0
+            _state["rtsp_hls_ms"] = sample.get("rtsp_hls_ms") or 0.0
+            _state["e2e_n_streams"] = sample.get("n_streams") or 0.0
+        if APP_LATENCY_MS is not None:
+            APP_LATENCY_MS.set(float(sample.get("e2e_ms") or 0.0))
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(float(sample.get("e2e_ms") or 0.0))
+
+    try:
+        from e2e_video import start as start_video_e2e
+
+        start_video_e2e(
+            SERVER_URL,
+            "|".join(
+                f"rtsp://127.0.0.1:{MTX_SOURCE_RTSP_PORT}/annotated{i}"
+                for i in range(1, DS_NUM_STREAMS + 1)
+            ),
+            on_sample=_on_video_e2e,
+        )
+    except Exception as exc:
+        logger.warning("slice-2 video E2E not started: %s", exc)
 
 
 @app.get("/healthz")

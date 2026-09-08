@@ -31,10 +31,7 @@ if ip link show dev "$TO_CLIENT_IFACE" >/dev/null 2>&1; then
 fi
 
 mkdir -p /var/run/sshd /home/ina/download
-if [ ! -f /home/ina/download/exp4-5mb.bin ]; then
-  /usr/local/bin/make_payload.sh /home/ina/download/exp4-5mb.bin
-  chown ina:ina /home/ina/download/exp4-5mb.bin || true
-fi
+chown ina:ina /home/ina/download || true
 export EXP4_APP_TYPE="${EXP4_APP_TYPE:-exp4-s1}"
 export SLICE_ID="${SLICE_ID:-1}"
 export TO_CLIENT_IFACE

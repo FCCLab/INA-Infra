@@ -696,10 +696,10 @@ def _video_stream_loop():
 
 
 def _latency_probe_loop() -> None:
-    """Indirect OTT latency: small HTTP echo over the PDU.
+    """Application E2E OWD: GET /api/e2e (t_send before server work) over the PDU.
 
-    Chromium/YouTube fills the 5G downlink; this probe's RTT rises with queueing
-    even though YouTube itself has no timestamp metadata.
+    YouTube itself has no timestamp metadata; this probe uses the same t_send
+    path as Influx latency_ms (server stamp → client recv).
     """
     if not LATENCY_PROBE_ENABLED:
         logger.info("Latency probe disabled (LATENCY_PROBE_ENABLED=0)")
@@ -713,31 +713,28 @@ def _latency_probe_loop() -> None:
             time.sleep(1.0)
             continue
         try:
-            res = subprocess.run(
-                ["ping", "-c", "1", "-W", "1", "10.1.137.1"],
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-            if res.returncode == 0:
-                m = re.search(r"time=([0-9.]+)", res.stdout)
-                if m:
-                    rtt_ms = float(m.group(1))
-                    with _lock:
-                        _probe_rtts.append(rtt_ms)
-                        avg = sum(_probe_rtts) / len(_probe_rtts)
-                        _state["last_delay_ms"] = round(avg, 2)
-                        _state["probe_rtt_ms"] = round(avg, 2)
-                        _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
-                    _set_slo_gauges()
-
+            data = _http_json("GET", "/api/e2e", timeout=2.0)
+            t_send = float(data.get("t_send") or 0.0)
+            if t_send > 0:
+                e2e_ms = max(0.0, (time.time() - t_send) * 1000.0)
+                try:
+                    open("/tmp/exp4_e2e_latency_ms", "w", encoding="utf-8").write(f"{e2e_ms:.3f}\n")
+                except OSError:
+                    pass
+                with _lock:
+                    _probe_rtts.append(e2e_ms)
+                    avg = sum(_probe_rtts) / len(_probe_rtts)
+                    _state["last_delay_ms"] = round(avg, 2)
+                    _state["probe_rtt_ms"] = round(avg, 2)
+                    _state["probe_ok"] = int(_state.get("probe_ok") or 0) + 1
+                _set_slo_gauges()
             else:
                 with _lock:
                     _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
         except Exception as exc:
             with _lock:
                 _state["probe_fail"] = int(_state.get("probe_fail") or 0) + 1
-            logger.debug("ping probe failed: %s", exc)
+            logger.debug("app e2e probe failed: %s", exc)
         time.sleep(period)
 
 

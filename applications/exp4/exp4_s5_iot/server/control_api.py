@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import socket
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,14 @@ class PublishIn(BaseModel):
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/api/e2e")
+def e2e() -> dict:
+    """t_send is stamped before the broker listen check."""
+    t_send = time.time()
+    broker_ok = _listening(MQTT_HOST, MQTT_PORT) or _listening("127.0.0.1", OTA_PORT)
+    return {"ok": True, "t_send": t_send, "broker_ok": broker_ok}
 
 
 @app.get("/api/status")

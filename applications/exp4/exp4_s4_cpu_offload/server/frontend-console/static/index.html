@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>S4 Server Console: file encrypt</title>
+  <title>S4 Server Console: FTP + encrypt</title>
   <link rel="icon" type="image/png" href="/static/logos/NeuroRAN.png"/>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet"/>
   <style>
@@ -77,7 +77,7 @@ table.clients a:hover{text-decoration:underline}
       <img src="/static/logos/NeuroRAN.png" alt="NeuroRAN"/>
       <div>
         <div class="kicker"></div>
-        <h1>S4 Server Console: file encrypt</h1>
+        <h1>S4 Server Console: FTP + encrypt</h1>
       </div>
     </div>
     <div class="hdr-actions">
@@ -86,7 +86,7 @@ table.clients a:hover{text-decoration:underline}
     </div>
   </header>
   <main>
-    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">Stream</div><div class="kpi-value" id="k_stream">—</div></div><div class="kpi-card"><div class="kpi-label">Clients</div><div class="kpi-value" id="k_clients">—</div></div><div class="kpi-card"><div class="kpi-label">Generate q</div><div class="kpi-value" id="k_plain">—</div></div><div class="kpi-card"><div class="kpi-label">Encrypt q</div><div class="kpi-value" id="k_ready">—</div></div><div class="kpi-card"><div class="kpi-label">Last encrypt</div><div class="kpi-value" id="k_last">—</div></div><div class="kpi-card"><div class="kpi-label">Downloaded</div><div class="kpi-value" id="k_dl">—</div></div><div class="kpi-card"><div class="kpi-label">Deleted</div><div class="kpi-value" id="k_del">—</div></div></section>
+    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">iperf :5201</div><div class="kpi-value" id="k_iperf">—</div></div><div class="kpi-card"><div class="kpi-label">SFTP :22</div><div class="kpi-value" id="k_sftp">—</div></div><div class="kpi-card"><div class="kpi-label">FTP queue</div><div class="kpi-value" id="k_q">—</div></div><div class="kpi-card"><div class="kpi-label">Encrypt</div><div class="kpi-value" id="k_enc">—</div></div><div class="kpi-card"><div class="kpi-label">Clients</div><div class="kpi-value" id="k_clients">—</div></div><div class="kpi-card"><div class="kpi-label">N6</div><div class="kpi-value" id="k_n6">—</div></div></section>
     
     <section class="card">
       <h2>Connected clients</h2>
@@ -105,11 +105,9 @@ table.clients a:hover{text-decoration:underline}
     <section class="card">
       <h2>Control</h2>
       <div class="row">
-          <button onclick="stream('start')">Start stream</button>
-          <button class="danger" onclick="stream('stop')">Stop</button>
-          <button class="secondary" onclick="runOnce()">Enqueue one</button>
+          <button onclick="act('refresh')">Refresh</button>
         </div>
-        <p class="kicker">Autostarts: generate → queue → encrypt → queue → download to UE → delete.</p>
+        <p class="kicker">Same 1 MB SFTP queue as S1, plus encrypt before the file is ready. iperf3 -s and sshd logs stream below.</p>
       <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
         <div class="console-bar">
           <span class="console-dots"><span></span><span></span><span></span></span>
@@ -204,35 +202,25 @@ table.clients a:hover{text-decoration:underline}
       return j;
     }
     
-    document.getElementById('term-title').textContent = 'generate / encrypt / delete';
+    document.getElementById('term-title').textContent = 'generate+encrypt / SFTP queue / iperf3 -s / sshd';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.stream_running ? 'streaming' : (s.ok ? 'idle' : 'down');
-      const p = s.pipeline || {};
-      const g = p.generate || {};
-      const e = p.encrypt || {};
-      document.getElementById('k_stream').textContent = s.stream_running ? 'running' : 'stopped';
-      document.getElementById('k_plain').textContent = (g.q ?? '—') + ' / ' + (g.max ?? '—');
-      document.getElementById('k_ready').textContent = (e.q ?? '—') + ' / ' + (e.max ?? '—');
-      document.getElementById('k_last').textContent = (s.last_proc_ms!=null) ? (s.last_proc_ms.toFixed(1)+' ms') : '—';
-      document.getElementById('k_dl').textContent = s.downloaded ?? 0;
-      document.getElementById('k_del').textContent = s.deleted ?? 0;
+      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'backend down';
+      document.getElementById('k_iperf').textContent = s.iperf_listen ? 'listen' : 'down';
+      document.getElementById('k_sftp').textContent = s.sftp_listen ? 'listen' : 'down';
+      const q = s.sftp || {};
+      document.getElementById('k_q').textContent = (q.ready_q ?? '—') + ' / ' + (q.ready_max ?? '—');
+      document.getElementById('k_enc').textContent = (q.last_encrypt_ms != null) ? (Number(q.last_encrypt_ms).toFixed(1) + ' ms') : '—';
+      document.getElementById('k_n6').textContent = s.n6_ip || '—';
       renderClients(s);
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || []);
+      drainLogs(s.log || (s.iperf && s.iperf.log) || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
-    async function stream(action) {
-      try { paint(await req('stream', {method:'POST', body: JSON.stringify({action})})); }
-      catch(e) { log(e.message); }
-    }
-    async function runOnce() {
-      try { const s = await req('run', {method:'POST', body:'{}'}); paint(s); log('enqueued '+ (s.file_id||'') + ' ' + s.last_proc_ms + ' ms'); }
-      catch(e) { log(e.message); }
-    }
-    stream('start');
+    async function act() { await tick(); }
     tick(); setInterval(tick, 1000);
         
   </script>

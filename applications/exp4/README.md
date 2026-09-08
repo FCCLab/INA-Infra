@@ -22,16 +22,16 @@ Two images per app: `exp4-s<N>-<name>-server` and `exp4-s<N>-<name>-client`. Bac
 
 Two Multus macvlans on the site parent NIC. No `oaitun`. Data is `net1` `10.140.<N>.0/24`; consoles stay on `net2` `10.1.137.0/24`.
 
-Default cluster is **edge** (`gpu-a40` / Multus `ens12f0`), namespace **`exp4-apps`**. Images: **`nws-v0.4-amd64`** (s1/s3/s4/s5), **`nws-v0.6-amd64`** (s2 CCTV). Slice 2 requests the A40.
+Default cluster is **edge** (`gpu-a40` / Multus `ens12f0`), namespace **`exp4-apps`**. Images: **`nws-v0.14-amd64`** (s1/s3/s5), **`nws-v0.15-amd64`** (s4), **`nws-v0.21-amd64`** (s2 CCTV). Slice 2 requests the A40.
 
 ### 1. Build and push
 
 ```bash
 # all five slices → 10.1.132.30:5000
-IMAGE_TAG=nws-v0.4-amd64 ./applications/exp4/build_images.sh --push
+IMAGE_TAG=nws-v0.14-amd64 ./applications/exp4/build_images.sh --push
 
 # subset
-IMAGE_TAG=nws-v0.4-amd64 ./applications/exp4/build_images.sh --push s1 s4
+IMAGE_TAG=nws-v0.14-amd64 ./applications/exp4/build_images.sh --push s1 s4
 ```
 
 If Docker rejects the registry cert:
@@ -63,7 +63,7 @@ Wipe the namespace and bring everything back (self-contained: sim5G NAT, routes,
 ./applications/exp4/exp4_deploy.sh s2 s3 s5
 
 # pin one tag for every slice
-IMAGE_TAG=nws-v0.4-amd64 ./applications/exp4/exp4_deploy.sh s1
+IMAGE_TAG=nws-v0.14-amd64 ./applications/exp4/exp4_deploy.sh s1
 
 # another cluster (VMs, Multus enp7s0)
 CLUSTER=central ./applications/exp4/exp4_deploy.sh s4
@@ -87,7 +87,7 @@ Open the console URLs in the table (port 80 on the **137** address, `net2`). App
 | 1 | Client: SFTP download / `iperf3 -R` |
 | 2 | Server: DeepStream YOLO ×N MediaMTX; client: 2×2 annotated DL |
 | 3 | Server: channels / UEs; client: watch DL |
-| 4 | Server: generate→encrypt queues; client: continuous download / delete |
+| 4 | Same as slice 1 (SFTP 1 MB + iperf) plus server-side encrypt |
 | 5 | Server: Publish DL MQTT (~2 Mbps); client: subscribe only (no UL) |
 
 ### 5. Tear down
@@ -98,7 +98,7 @@ Open the console URLs in the table (port 80 on the **137** address, `net2`). App
 CLUSTER=edge NAMESPACE=exp4-apps ./applications/exp4/exp4_deploy.sh --undeploy
 ```
 
-`--undeploy` deletes namespace `exp4-apps`. CCTV TensorRT engines stay on the node at `/var/lib/ina-infra/exp4-s2-models` so the next deploy does not rebuild them.
+`--undeploy` deletes namespace `exp4-apps`. CCTV TensorRT engines stay on the node at `/var/lib/ina-infra/exp4-s2-models` so the next deploy does not rebuild them. `build_images.sh --push s2` also bakes that engine into the server image when it can scp it from `gpu-a40`.
 
 ### Deploy flags and env
 
@@ -108,7 +108,7 @@ CLUSTER=edge NAMESPACE=exp4-apps ./applications/exp4/exp4_deploy.sh --undeploy
 | `--plan` | Print IP table only | |
 | `--status` | Plan + pods/NADs | |
 | `--undeploy` | Delete namespace | |
-| `IMAGE_TAG` | Override tag for every slice | s1/s3/s4/s5 `nws-v0.4-amd64`, s2 `nws-v0.6-amd64` |
+| `IMAGE_TAG` | Override tag for every slice | default `nws-v0.14-amd64` |
 | `CLUSTER` | `edge` / `central` / `regional` | `edge` |
 | `NODE_NAME` | Pin hostname | `gpu-a40` on edge |
 | `MULTUS_MASTER` | Multus parent NIC | `ens12f0` on edge, `enp7s0` elsewhere |
@@ -129,7 +129,7 @@ CLUSTER=edge NAMESPACE=exp4-apps ./applications/exp4/exp4_deploy.sh --undeploy
 
 Slice 5 server includes Mosquitto (`:1883` OTA, `:1884` local).
 
-Build without push: `./applications/exp4/build_images.sh` (default tag `nws-v0.4-amd64` unless `IMAGE_TAG` is set).
+Build without push: `./applications/exp4/build_images.sh` (default tag `nws-v0.14-amd64` unless `IMAGE_TAG` is set).
 
 ---
 
@@ -155,8 +155,14 @@ Same image, two processes:
 
 Each **server** publishes absolute **CPU millicores / RAM MB / GPU % / VRAM MB**
 (`origin=server`; `1000m` = one full CPU; `gpu_pct` = 0–100% of one GPU).
-Each **client** publishes **DL throughput** (RX on `TO_SERVER_IFACE` / `net1`) and **latency**
-(ping to server sim5G IP `10.140.<N>.1` via `TO_SERVER_IFACE`, `origin=client`).
+Each **client** publishes **DL throughput** (RX on `TO_SERVER_IFACE` / `net1`) and **E2E latency**
+(`t_recv - t_send` over sim5G `net1`, `origin=client`):
+
+- **s1** SFTP: queued **1 MB** files; `t_send` at generate start (in the filename); `t_recv` when the file is **fully received**.
+- **s4** same SFTP + iperf path as s1, **plus encrypt** before the file is queued (same size, still 1 MB); `t_send` at generate start; `t_recv` when fully received (so s4 latency is higher than s1).
+- **s5** MQTT `t_send` in the DL payload.
+- **s3** OTT: `GET /api/e2e` (YouTube has no file timestamp).
+- **s2** CCTV: camera + YOLO + RTSP/HLS only (`e2e_ms = camera_ms + yolo_ms + rtsp_hls_ms`). Never HTTP probe OWD.
 
 Influx in-cluster `http://influxdb.influxdb.svc:8086`, measurement `application_metrics`.
 

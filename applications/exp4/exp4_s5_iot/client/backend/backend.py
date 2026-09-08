@@ -684,6 +684,10 @@ def _mqtt_on_message(_client, _userdata, msg):
     lat = None
     if isinstance(t_send, (int, float)) and t_send > 0:
         lat = max(0.0, (recv - float(t_send)) * 1000.0)
+        try:
+            open("/tmp/exp4_e2e_latency_ms", "w", encoding="utf-8").write(f"{lat:.3f}\n")
+        except OSError:
+            pass
     _record(
         {
             "ts": _now(),

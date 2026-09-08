@@ -107,22 +107,22 @@ def build_payload(
 ) -> bytes:
     """Build a JSON payload padded to exactly ``size_bytes`` (when it fits).
 
-    ``t_send`` is stamped just before serialization so it reflects the wall
-    clock as close to publish as possible. ``pad`` is sized last to hit the
-    requested byte count; if the fixed fields already exceed ``size_bytes`` the
-    payload is emitted unpadded (never truncated -- correctness over size).
+    ``t_send`` is stamped before pad/serialize work so E2E includes application
+    processing plus path delay. ``pad`` is sized last to hit the requested byte
+    count; if the fixed fields already exceed ``size_bytes`` the payload is
+    emitted unpadded (never truncated -- correctness over size).
     """
+    t_send = time.time()
     payload: dict = {
         "device_id": device_id,
         "seq": seq,
-        "t_send": 0.0,
+        "t_send": t_send,
         "tier": tier,
     }
     if sensor is not None:
         payload["sensor"] = sensor
     payload["pad"] = ""
 
-    payload["t_send"] = time.time()
     without_pad = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     pad_len = max(0, size_bytes - len(without_pad))
     payload["pad"] = "x" * pad_len

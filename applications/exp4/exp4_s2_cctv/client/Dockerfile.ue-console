@@ -23,6 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gstreamer1.0-plugins-ugly \
       gstreamer1.0-libav \
       gstreamer1.0-rtsp \
+      python3-gi \
+      python3-gst-1.0 \
+      gir1.2-gstreamer-1.0 \
+      gir1.2-gst-plugins-base-1.0 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \

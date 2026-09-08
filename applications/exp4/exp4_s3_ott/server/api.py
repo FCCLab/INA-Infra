@@ -279,6 +279,16 @@ class ProbeRequest(BaseModel):
     t_send: float = 0.0
 
 
+@app.get("/api/e2e")
+@app.get("/api/v1/e2e", tags=["Clients"])
+def e2e() -> Dict[str, Any]:
+    """t_send is stamped before channel/client list work."""
+    t_send = time.time()
+    n_ch = len(list_channels())
+    n_ue = len(list_clients(alive_only=True))
+    return {"ok": True, "t_send": t_send, "channels": n_ch, "clients": n_ue}
+
+
 @app.post("/api/v1/probe", tags=["Clients"])
 def latency_probe(req: ProbeRequest):
     """Tiny echo for UE probe thread. RTT rises when YouTube saturates the PDU."""

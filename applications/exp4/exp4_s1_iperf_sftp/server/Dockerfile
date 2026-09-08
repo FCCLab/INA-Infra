@@ -1,4 +1,4 @@
-# Exp4 slice 1 server: iperf3 + OpenSSH SFTP (5 MB payload).
+# Exp4 slice 1 server: iperf3 + OpenSSH SFTP (queued 1 MB files).
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -26,9 +26,7 @@ COPY influx_publish.py /usr/local/bin/exp4_influx_publish.py
 COPY control_api.py connected_clients.py /app/
 COPY frontend-console/ /app/frontend-console/
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /usr/local/bin/make_payload.sh /usr/local/bin/exp4_influx_publish.py /entrypoint.sh \
-    && /usr/local/bin/make_payload.sh /home/ina/download/exp4-5mb.bin \
-    && chown ina:ina /home/ina/download/exp4-5mb.bin
+RUN chmod +x /usr/local/bin/make_payload.sh /usr/local/bin/exp4_influx_publish.py /entrypoint.sh
 
 EXPOSE 22 80 5201 8080
 ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,27 @@
+---
+description: After Exp4 app changes, always build and push images (then deploy).
+globs: applications/exp4/**
+alwaysApply: false
+---
+
+# Exp4: always build and push
+
+Do not stop at source edits. After changing `applications/exp4/`:
+
+1. Read `DEFAULT_IMAGE_TAG` / `DEFAULT_IMAGE_TAG_S2` in `applications/exp4/exp4_deploy.sh`.
+2. Build and push (lab registry `10.1.132.30:5000`):
+
+```bash
+IMAGE_TAG=<s1/s3/s4/s5 tag> ./applications/exp4/build_images.sh --push s1 s3 s4 s5
+IMAGE_TAG=<s2 tag> ./applications/exp4/build_images.sh --push s2
+```
+
+If both tags match: `IMAGE_TAG=<tag> ./applications/exp4/build_images.sh --push`
+
+3. Deploy so pods pull the new tag (`imagePullPolicy: Always`):
+
+```bash
+./applications/exp4/exp4_deploy.sh
+```
+
+Or only the slices that changed: `./applications/exp4/exp4_deploy.sh s2`

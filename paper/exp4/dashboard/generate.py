@@ -204,7 +204,7 @@ def slice_detail_panels(base_id: int, app_type: str, y: int) -> list[dict]:
         ),
         timeseries(
             base_id + 6,
-            "Client latency (ping → server)",
+            "Client E2E latency (app t_send → client)",
             12,
             y + 8,
             12,
@@ -234,7 +234,7 @@ def dashboard() -> dict:
         ),
         timeseries(
             6,
-            "Client latency (ping → server)",
+            "Client E2E latency (app t_send → client)",
             12,
             8,
             12,
@@ -311,7 +311,7 @@ def write_json() -> Path:
         "`profile_name=exp4`.\n\n"
         "| Slice | `app_type` | Server | Client |\n"
         "| :---: | :--- | :--- | :--- |\n"
-        "| 1 | `exp4-s1` | CPU / RAM / GPU / VRAM | DL throughput, latency |\n"
+        "| 1 | `exp4-s1` | CPU / RAM / GPU / VRAM | DL throughput, E2E latency |\n"
         "| 2 | `exp4-s2` | same | same |\n"
         "| 3 | `exp4-s3` | same | same |\n"
         "| 4 | `exp4-s4` | same | same |\n"
@@ -319,7 +319,8 @@ def write_json() -> Path:
         "**Scheme** dropdown filters `scheme` (`exp4-s0` … `exp4-s3`, `exp4-no5g`). "
         "One scheme is live at a time; All overlays history.\n\n"
         "Top group: same 4+2 layout as the per-app boards, all five slices "
-        "overlaid on each graph. Expand a slice row for that app only.\n\n"
+        "overlaid on each graph. Expand a slice row for that app only. "
+        "Client latency is application E2E (`t_send` → client), not ICMP ping.\n\n"
         "Regenerate:\n\n"
         "```bash\n"
         "python3 paper/exp4/dashboard/generate.py\n"

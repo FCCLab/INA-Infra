@@ -15,6 +15,8 @@ import sys
 import time
 from typing import List, Optional
 
+import ds_latency
+
 LOG = logging.getLogger("ds_pipeline")
 
 DS_NUM_STREAMS = max(1, int(os.environ.get("DS_NUM_STREAMS", "4")))
@@ -104,6 +106,28 @@ def _make_encoder(Gst, i: int):
     return capsfilter, enc, enc_name
 
 
+def _add_buffer_probe(Gst, pad, cb, stream_idx: int) -> None:
+    if pad is None or getattr(pad, "_exp4_e2e_probe", False):
+        return
+
+    def _probe(_pad, _info, idx=stream_idx, hook=cb):
+        try:
+            hook(idx)
+        except Exception:  # noqa: BLE001
+            pass
+        return Gst.PadProbeReturn.OK
+
+    pad.add_probe(Gst.PadProbeType.BUFFER, _probe)
+    setattr(pad, "_exp4_e2e_probe", True)
+
+
+def _wire_stage_probes(Gst, stream_idx: int, mux_sink, pgie, sink) -> None:
+    _add_buffer_probe(Gst, mux_sink, ds_latency.mark_mux, stream_idx)
+    _add_buffer_probe(Gst, pgie.get_static_pad("sink"), ds_latency.mark_pgie_in, stream_idx)
+    _add_buffer_probe(Gst, pgie.get_static_pad("src"), ds_latency.mark_pgie_out, stream_idx)
+    _add_buffer_probe(Gst, sink.get_static_pad("sink"), ds_latency.mark_encoded, stream_idx)
+
+
 def _add_dedicated_branch(pipeline, Gst, i: int) -> None:
     """Stream index i is 0-based; MediaMTX paths use cam{i+1}."""
     cam = i + 1
@@ -169,7 +193,7 @@ def _add_dedicated_branch(pipeline, Gst, i: int) -> None:
     ):
         pipeline.add(el)
 
-    def _on_pad_added(element, pad, mux=streammux):
+    def _on_pad_added(element, pad, mux=streammux, pgie_el=pgie, sink_el=sink, idx=i):
         caps = pad.get_current_caps() or pad.query_caps(None)
         name = caps.to_string() if caps else ""
         if caps and caps.get_structure(0):
@@ -179,14 +203,17 @@ def _add_dedicated_branch(pipeline, Gst, i: int) -> None:
         sink_pad = mux.get_request_pad("sink_0")
         if sink_pad and not sink_pad.is_linked():
             pad.link(sink_pad)
+        if sink_pad:
+            _wire_stage_probes(Gst, idx, sink_pad, pgie_el, sink_el)
 
     src.connect("pad-added", _on_pad_added)
+    mux_sink = None
     try:
         src_pad = src.get_static_pad("vsrc_0") or src.get_static_pad("src")
         if src_pad is not None:
-            sink_pad = streammux.get_request_pad("sink_0")
-            if sink_pad and not sink_pad.is_linked():
-                src_pad.link(sink_pad)
+            mux_sink = streammux.get_request_pad("sink_0")
+            if mux_sink and not mux_sink.is_linked():
+                src_pad.link(mux_sink)
     except Exception:  # noqa: BLE001
         pass
 
@@ -199,6 +226,7 @@ def _add_dedicated_branch(pipeline, Gst, i: int) -> None:
     capsfilter.link(enc)
     enc.link(parse)
     parse.link(sink)
+    _wire_stage_probes(Gst, i, mux_sink, pgie, sink)
 
     LOG.info(
         "dedicated YOLO cam%d pgie=%s enc=%s -> %s",

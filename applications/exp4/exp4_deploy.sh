@@ -7,7 +7,7 @@
 #   ./applications/exp4/exp4_deploy.sh --undeploy && ./applications/exp4/exp4_deploy.sh
 #   ./applications/exp4/exp4_deploy.sh                 # all slices on edge gpu-a40
 #   ./applications/exp4/exp4_deploy.sh s1 s4
-#   IMAGE_TAG=nws-v0.4-amd64 ./applications/exp4/exp4_deploy.sh
+#   IMAGE_TAG=nws-v0.15-amd64 ./applications/exp4/exp4_deploy.sh
 #   CLUSTER=central ./applications/exp4/exp4_deploy.sh s5
 #   ./applications/exp4/exp4_deploy.sh --status
 #   ./applications/exp4/exp4_deploy.sh --undeploy
@@ -20,10 +20,10 @@ REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
 source "${REPO_ROOT}/scripts/cluster_lib.sh"
 
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-# Newest in the lab registry. IMAGE_TAG=... overrides every slice.
-# s2 CCTV is ahead (DeepStream/ffmpeg) at nws-v0.6-amd64.
-DEFAULT_IMAGE_TAG="nws-v0.4-amd64"
-DEFAULT_IMAGE_TAG_S2="nws-v0.6-amd64"
+# Newest tags. IMAGE_TAG=... overrides every slice.
+DEFAULT_IMAGE_TAG="nws-v0.14-amd64"
+DEFAULT_IMAGE_TAG_S2="nws-v0.21-amd64"
+DEFAULT_IMAGE_TAG_S4="nws-v0.15-amd64"
 CLUSTER="${CLUSTER:-edge}"
 NAMESPACE="${NAMESPACE:-exp4-apps}"
 GW="${GW:-10.1.137.1}"
@@ -52,7 +52,7 @@ SLICES_DEF=(
   "1|iperf-sftp|10.1.137.211|02:0a:89:a0:00:01|10.1.137.221|02:0a:40:01:00:01|500m|512Mi|200m|256Mi|exp4-s1-iperf-sftp"
   "2|cctv|10.1.137.212|02:0a:89:a0:00:02|10.1.137.222|02:0a:40:02:00:01|4|12Gi|1|2Gi|exp4-s2-cctv"
   "3|ott|10.1.137.213|02:0a:89:a0:00:03|10.1.137.223|02:0a:40:03:00:01|1|1Gi|1|1Gi|exp4-s3-ott"
-  "4|cpu-offload|10.1.137.214|02:0a:89:a0:00:04|10.1.137.224|02:0a:40:04:00:01|2|1Gi|200m|256Mi|exp4-s4-cpu-offload"
+  "4|cpu-offload|10.1.137.214|02:0a:89:a0:00:04|10.1.137.224|02:0a:40:04:00:01|500m|512Mi|200m|256Mi|exp4-s4-cpu-offload"
   "5|iot|10.1.137.215|02:0a:89:a0:00:05|10.1.137.225|02:0a:40:05:00:01|500m|512Mi|500m|512Mi|exp4-s5-iot"
 )
 
@@ -91,6 +91,7 @@ image_tag_for() {
   fi
   case "${sid}" in
     2) printf '%s' "${DEFAULT_IMAGE_TAG_S2}" ;;
+    4) printf '%s' "${DEFAULT_IMAGE_TAG_S4}" ;;
     *) printf '%s' "${DEFAULT_IMAGE_TAG}" ;;
   esac
 }
@@ -100,7 +101,7 @@ print_plan() {
   if [[ -n "${IMAGE_TAG:-}" ]]; then
     tag_note="tag=${IMAGE_TAG} (all slices)"
   else
-    tag_note="tags s1/s3/s4/s5=${DEFAULT_IMAGE_TAG}  s2=${DEFAULT_IMAGE_TAG_S2}"
+    tag_note="tags s1/s3/s5=${DEFAULT_IMAGE_TAG}  s2=${DEFAULT_IMAGE_TAG_S2}  s4=${DEFAULT_IMAGE_TAG_S4}"
   fi
   cat <<EOF
 Exp4 dual-Multus plan  (master ${MASTER}  console gw ${GW})
@@ -211,8 +212,14 @@ Y
       ;;
     4)
       cat <<'Y'
-        - name: EXP4_STREAM_AUTOSTART
+        - name: IPERF_AUTOSTART
           value: "1"
+        - name: IPERF_PORT_COUNT
+          value: "8"
+        - name: SFTP_AUTOSTART
+          value: "1"
+        - name: EXP4_PBKDF2_ITERS
+          value: "80000"
 Y
       ;;
     5)
@@ -358,6 +365,8 @@ Y
           value: "8555"
         - name: PDU_WAIT_TIMEOUT
           value: "5"
+        - name: EXP4_LATENCY_HTTP
+          value: "0"
 Y
       ;;
     3)
@@ -400,10 +409,22 @@ Y
       ;;
     4)
       cat <<Y
-        - name: DOWNLOAD_URL
-          value: "http://${sip}/download"
-        - name: EXP4_STREAM_AUTOSTART
+        - name: SFTP_HOST
+          value: "${sip}"
+        - name: IPERF_HOST
+          value: "${sip}"
+        - name: BIND_DEV
+          value: "net1"
+        - name: IPERF_PARALLEL
+          value: "5"
+        - name: IPERF_BANDWIDTH
+          value: "10M"
+        - name: IPERF_TIME
+          value: "0"
+        - name: IPERF_AUTOSTART
           value: "1"
+        - name: IPERF_PORT_COUNT
+          value: "8"
 Y
       ;;
     5)

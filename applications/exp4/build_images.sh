@@ -4,12 +4,12 @@
 #   ./applications/exp4/build_images.sh
 #   ./applications/exp4/build_images.sh --push
 #   ./applications/exp4/build_images.sh s1 s4
-#   IMAGE_TAG=nws-v0.4-amd64 ./applications/exp4/build_images.sh --push
+#   IMAGE_TAG=nws-v0.14-amd64 ./applications/exp4/build_images.sh --push
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-nws-v0.4-amd64}"
+IMAGE_TAG="${IMAGE_TAG:-nws-v0.14-amd64}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 PUSH=0
 export DOCKER_BUILDKIT=1
@@ -72,11 +72,58 @@ if [[ "${PUSH}" == "1" ]]; then
   ensure_insecure_registry
 fi
 
+stage_s2_trt_engine() {
+  # TensorRT engines are GPU/TRT-version specific (A40 + DeepStream 7.1).
+  # They cannot be compiled in a CPU docker build; harvest a file already
+  # built on gpu-a40 and COPY it into the image.
+  local dest="${HERE}/exp4_s2_cctv/server/ds_engines"
+  local name="model_b1_gpu0_fp16.engine"
+  local ssh_cfg="${HERE}/../../utils/ssh_config/config"
+  local host="${EXP4_S2_ENGINE_HOST:-gpu-a40}"
+  mkdir -p "${dest}"
+  if [[ -f "${dest}/${name}" ]]; then
+    local sz
+    sz="$(wc -c < "${dest}/${name}" | tr -d ' ')"
+    if [[ "${sz}" -gt 1000000 ]]; then
+      cp -f "${dest}/${name}" "${dest}/model.bin"
+      echo "s2: baking TensorRT engine ${dest}/${name} (${sz} bytes)"
+      return 0
+    fi
+  fi
+  local src_dir="${EXP4_S2_ENGINE_DIR:-}"
+  if [[ -z "${src_dir}" && -f "/var/lib/ina-infra/exp4-s2-models/${name}" ]]; then
+    src_dir="/var/lib/ina-infra/exp4-s2-models"
+  fi
+  if [[ -n "${src_dir}" && -f "${src_dir}/${name}" ]]; then
+    cp -f "${src_dir}/${name}" "${dest}/${name}"
+    cp -f "${src_dir}/${name}" "${dest}/model.bin"
+    echo "s2: staged TensorRT engine from ${src_dir}/${name}"
+    return 0
+  fi
+  if [[ -f "${ssh_cfg}" ]] && command -v scp >/dev/null 2>&1; then
+    echo "s2: fetching TensorRT engine from ${host}:/var/lib/ina-infra/exp4-s2-models/${name}"
+    if scp -F "${ssh_cfg}" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+      "${host}:/var/lib/ina-infra/exp4-s2-models/${name}" \
+      "${dest}/${name}"; then
+      cp -f "${dest}/${name}" "${dest}/model.bin"
+      echo "s2: staged TensorRT engine from ${host}"
+      return 0
+    fi
+    rm -f "${dest}/${name}"
+  fi
+  echo "WARN: no prebuilt TensorRT engine in image; first A40 boot still ~20 min."
+  echo "  scp ${host}:/var/lib/ina-infra/exp4-s2-models/${name} ${dest}/"
+  echo "  then re-run: IMAGE_TAG=${IMAGE_TAG} $0 --push s2"
+}
+
 install_shared() {
   local dest="$1" kind="$2"
   case "${kind}" in
     server)
       cp -f "${HERE}/common/connected_clients.py" "${dest}/connected_clients.py"
+      if [[ -f "${dest}/influx_publish.py" ]]; then
+        cp -f "${HERE}/common/influx_publish.py" "${dest}/influx_publish.py"
+      fi
       ;;
     client)
       mkdir -p "${dest}/backend"
@@ -100,6 +147,8 @@ for sid in "${SLICES[@]}"; do
       ;;
     s2)
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s2_cctv/client/influx_publish.py"
+      cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s2_cctv/server/influx_publish.py"
+      stage_s2_trt_engine
       build_one exp4-s2-cctv-server \
         "${HERE}/exp4_s2_cctv/server" \
         "${HERE}/exp4_s2_cctv/server/Dockerfile"
@@ -109,6 +158,7 @@ for sid in "${SLICES[@]}"; do
       ;;
     s3)
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s3_ott/client/influx_publish.py"
+      cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s3_ott/server/influx_publish.py"
       build_one exp4-s3-ott-server \
         "${HERE}/exp4_s3_ott/server" \
         "${HERE}/exp4_s3_ott/server/Dockerfile"

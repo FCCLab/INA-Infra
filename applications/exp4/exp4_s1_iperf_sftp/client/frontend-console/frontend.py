@@ -76,7 +76,7 @@ def proxy_download() -> Response:
             resp.close()
 
     headers = {}
-    for key in ("X-Proc-Ms", "X-File-Id", "X-Plain-Bytes", "Content-Length", "Content-Disposition"):
+    for key in ("X-Proc-Ms", "X-File-Id", "X-Exp4-T-Send", "X-Plain-Bytes", "Content-Length", "Content-Disposition"):
         val = resp.headers.get(key)
         if val:
             headers[key] = val

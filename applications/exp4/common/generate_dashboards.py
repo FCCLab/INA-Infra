@@ -96,7 +96,7 @@ def dashboard(uid: str, title: str, app_type: str) -> dict:
         ),
         timeseries(
             6,
-            "Client latency (ping → server)",
+            "Client E2E latency (app t_send → client)",
             12,
             8,
             12,
@@ -140,7 +140,8 @@ def main() -> None:
             f"**Server** (`origin=server`): CPU m, RAM MB, GPU %, VRAM MB "
             f"(1000m = 1 full CPU; gpu_pct = 0–100%).\n\n"
             f"**Client** (`origin=client`): DL throughput (RX on `TO_SERVER_IFACE`), "
-            f"latency (ping to server Multus IP via `TO_SERVER_IFACE`).\n\n"
+            f"latency (application E2E). s2 is `camera_ms + yolo_ms + rtsp_hls_ms`; "
+            f"other slices use `t_send` before app work then `t_recv - t_send`.\n\n"
             f"Import `{path.name}` into Grafana (`10.1.137.105:3000`).\n",
             encoding="utf-8",
         )

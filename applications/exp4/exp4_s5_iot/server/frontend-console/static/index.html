@@ -42,8 +42,10 @@ button.secondary{background:var(--surface);color:var(--text);border:1px solid va
 button.danger{background:var(--bad-bg);color:var(--bad);border:1px solid rgba(255,90,110,.35)}
 label{font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px}
 input,textarea,select{background:#05080f;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font:inherit}
+.log{background:#05080f;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12px;max-height:420px;overflow:auto;white-space:pre-wrap}
 pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
-.console{background:#05080f;overflow:hidden;border:1px solid var(--border);border-radius:10px}
+.card.term{padding:0;overflow:hidden}
+.console{background:#05080f;overflow:hidden}
 .console-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:11px}
 .console-dots{display:flex;gap:5px}
 .console-dots span{width:8px;height:8px;border-radius:50%;background:#3a455c}
@@ -59,10 +61,15 @@ pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
 .console-line.sum{color:var(--accent)}
 .console-line.err{color:var(--bad)}
 .console-line.sshd{color:var(--accent2)}
-.divider{height:1px;background:var(--border);margin:2px 0}
-details.raw{border-top:1px solid var(--border);padding-top:10px}
-details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600}
-  </style>
+.table-wrap{overflow:auto}
+table.clients{width:100%;border-collapse:collapse;font-size:13px}
+table.clients th,table.clients td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.clients th{color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+table.clients td.empty{color:var(--text-faint);text-align:center;padding:18px}
+table.clients a{color:var(--accent2);text-decoration:none}
+table.clients a:hover{text-decoration:underline}
+.muted{color:var(--text-faint);font-size:12px;margin-top:2px}
+</style>
 </head>
 <body>
   <header>
@@ -74,40 +81,46 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
       </div>
     </div>
     <div class="hdr-actions">
-      <a class="pill" href="http://10.1.137.105:3000/d/ina-exp4-s5/ina-exp4-s5?orgId=1&refresh=5s" target="_blank" rel="noopener">Grafana dashboard</a>
+      
       <span id="pill" class="pill">connecting</span>
     </div>
   </header>
   <main>
-    <section class="kpi" id="kpis">
-      <div class="kpi-card"><div class="kpi-label">Broker</div><div class="kpi-value" id="k_br">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">Devices</div><div class="kpi-value" id="k_dev">—</div></div>
-      <div class="kpi-card"><div class="kpi-label">DL period</div><div class="kpi-value" id="k_dl">—</div></div>
-    </section>
-
+    <section class="kpi" id="kpis"><div class="kpi-card"><div class="kpi-label">Broker</div><div class="kpi-value" id="k_br">—</div></div><div class="kpi-card"><div class="kpi-label">Devices</div><div class="kpi-value" id="k_dev">—</div></div><div class="kpi-card"><div class="kpi-label">DL period</div><div class="kpi-value" id="k_dl">—</div></div></section>
+    
     <section class="card">
-      <h2>MQTT control</h2>
-      <div class="row">
-        <input id="topic" value="slice_5/dl/ue1" style="min-width:220px"/>
-        <input id="payload" value="ping" style="min-width:160px"/>
-        <button onclick="pub()">Publish DL</button>
-        <button class="secondary" onclick="act()">Refresh</button>
+      <h2>Connected clients</h2>
+      <p class="kicker">UEs currently attached to this server. Multiple clients may share the same backend.</p>
+      <div class="table-wrap">
+        <table class="clients">
+          <thead>
+            <tr><th>Client</th><th>Console IP</th><th>Console</th><th>Status</th><th>Detail</th></tr>
+          </thead>
+          <tbody id="clients-body">
+            <tr><td colspan="5" class="empty">waiting…</td></tr>
+          </tbody>
+        </table>
       </div>
-      <p class="kicker">Mosquitto + downlink controller. Publish logs stream below.</p>
-
-      <div class="divider"></div>
-
-      <div class="console">
+    </section>
+    <section class="card">
+      <h2>Control</h2>
+      <div class="row">
+          <input id="topic" value="slice_5/dl/ue1" style="min-width:220px"/>
+          <input id="payload" value="ping" style="min-width:160px"/>
+          <button onclick="pub()">Publish DL</button>
+          <button class="secondary" onclick="act()">Refresh</button>
+        </div>
+        <p class="kicker">Mosquitto + downlink controller. Publish logs stream below.</p>
+      <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
         <div class="console-bar">
           <span class="console-dots"><span></span><span></span><span></span></span>
-          <span class="console-title" id="term-title">MQTT log</span>
+          <span class="console-title" id="term-title">backend log</span>
           <span class="console-meta" id="term-meta">0 lines</span>
         </div>
         <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
       </div>
-
-      <details class="raw">
-        <summary>Backend status</summary>
+      <details style="border-top:1px solid var(--border);padding-top:10px;margin-top:8px">
+        <summary style="cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600">Backend status</summary>
         <pre id="raw" style="margin-top:10px">waiting…</pre>
       </details>
     </section>
@@ -130,7 +143,7 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
       const kind = String(e.kind || '');
       const low = line.toLowerCase();
       if (/error|fail|denied|refused/.test(low)) div.classList.add('err');
-      else if (/\[sum\]/i.test(line)) div.classList.add('sum');
+      else if (/\[sum\]|\[ok\]/i.test(line)) div.classList.add('sum');
       else if (kind === 'sshd') div.classList.add('sshd');
       div.innerHTML = '<span class="ts">' + esc(e.ts || '') + '</span>' + esc(line);
       logEl.appendChild(div);
@@ -144,6 +157,46 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
     function log(msg) {
       appendTerm({seq: lastSeq + 1, ts: new Date().toISOString().slice(11,19), line: msg});
     }
+    function clientStatus(c) {
+      if (c.connection_status) return String(c.connection_status);
+      if (c.active === true) return 'Connected';
+      if (c.active === false) return 'Stale';
+      if (c.is_alive === true) return 'Connected';
+      if (c.is_alive === false) return 'Disconnected';
+      return 'Connected';
+    }
+    function renderClients(s) {
+      const rows = s.clients || [];
+      const kc = document.getElementById('k_clients');
+      if (kc) kc.textContent = String(rows.length);
+      const body = document.getElementById('clients-body');
+      if (!body) return;
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="5" class="empty">no clients connected</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(c => {
+        const id = esc(c.id || c.client_id || '');
+        const name = esc(c.name || '');
+        const ip = esc(c.console_ip || c.ip || c.to_server_ip || '');
+        const url = c.console_url || (ip ? ('http://' + ip) : '');
+        const st = clientStatus(c);
+        const extra = esc(
+          c.detail || c.state ||
+          (c.fps != null && c.fps !== '' ? (Number(c.fps).toFixed(1) + ' fps') : '') ||
+          (c.last_heartbeat_ago != null ? (c.last_heartbeat_ago + 's ago') : '')
+        );
+        const stClass = /disc|stale|off/i.test(st) ? 'bad' : (/unstable/i.test(st) ? '' : 'ok');
+        const link = url
+          ? ('<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>')
+          : '—';
+        return '<tr><td><div>' + id + '</div>' +
+          (name && name !== id ? '<div class="muted">' + name + '</div>' : '') +
+          '</td><td>' + (ip || '—') + '</td><td>' + link +
+          '</td><td><span class="pill ' + stClass + '">' + esc(st) + '</span></td><td>' +
+          (extra || '—') + '</td></tr>';
+      }).join('');
+    }
     async function req(path, opts) {
       const r = await fetch('/api/' + path, Object.assign({headers:{'Content-Type':'application/json'}}, opts||{}));
       const t = await r.text();
@@ -151,29 +204,27 @@ details.raw summary{cursor:pointer;color:var(--text-dim);font-size:13px;font-wei
       if (!r.ok) throw new Error(j.detail || t || r.status);
       return j;
     }
+    
+    document.getElementById('term-title').textContent = 'MQTT log';
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
       document.getElementById('pill').textContent = s.ok ? 'backend up' : 'down';
       document.getElementById('k_br').textContent = s.broker_ok ? 'up' : 'down';
-      document.getElementById('k_dev').textContent = s.device_count ?? '—';
+      document.getElementById('k_dev').textContent = s.device_count ?? (s.clients||[]).length;
       document.getElementById('k_dl').textContent = (s.dl_fast_period_s||'—') + ' s';
+      renderClients(s);
       document.getElementById('raw').textContent = JSON.stringify(s, null, 2);
       drainLogs(s.log || []);
     }
-    async function tick() {
-      try { paint(await req('status')); }
-      catch (e) { document.getElementById('pill').className = 'pill bad'; log(e.message); }
-    }
+    async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
     async function act() { await tick(); }
     async function pub() {
-      const body = JSON.stringify({
-        topic: document.getElementById('topic').value,
-        payload: document.getElementById('payload').value,
-      });
+      const body = JSON.stringify({topic: document.getElementById('topic').value, payload: document.getElementById('payload').value});
       try { await req('publish', {method:'POST', body}); log('published'); }
-      catch (e) { log(e.message); }
+      catch(e) { log(e.message); }
     }
     tick(); setInterval(tick, 2000);
+        
   </script>
 </body>
 </html>

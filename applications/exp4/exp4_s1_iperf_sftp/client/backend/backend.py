@@ -7,6 +7,7 @@ import collections
 import os
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -29,6 +30,10 @@ IPERF_BANDWIDTH = os.environ.get("IPERF_BANDWIDTH", "10M")
 IPERF_TIME = os.environ.get("IPERF_TIME", "0")
 IPERF_INTERVAL = os.environ.get("IPERF_INTERVAL", "1")
 IPERF_AUTOSTART = os.environ.get("IPERF_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
+SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
+SFTP_REMOTE_DIR = os.environ.get("SFTP_REMOTE_DIR", "download")
+IDLE_SLEEP_S = float(os.environ.get("EXP4_IDLE_SLEEP_S", "0.4"))
+FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
 LOG_MAX = int(os.environ.get("IPERF_LOG_MAX", "400"))
 
 INTERVAL_RE = re.compile(
@@ -64,6 +69,15 @@ _IPERF_STATE: dict[str, Any] = {
     "mbits_per_second": None,
     "error": "",
     "config": dict(_IPERF_CFG),
+}
+_SFTP_WANTED = SFTP_AUTOSTART
+_SFTP_STATS: dict[str, Any] = {
+    "running": False,
+    "wanted": SFTP_AUTOSTART,
+    "success": 0,
+    "failed": 0,
+    "deleted": 0,
+    "error": "",
 }
 
 
@@ -301,43 +315,123 @@ def _sftp_once() -> dict:
     host = os.environ.get("SFTP_HOST") or SERVER
     user = os.environ.get("SFTP_USER", "ina")
     password = os.environ.get("SFTP_PASS", "ina")
-    remote = os.environ.get("SFTP_REMOTE", "download/exp4-5mb.bin")
-    local = Path(os.environ.get("SFTP_LOCAL", "/tmp/exp4-5mb.bin"))
-    t_connect = time.time()
+    local_dir = Path(os.environ.get("SFTP_LOCAL_DIR", "/tmp/exp4-s1-dl"))
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(30)
+    src = os.environ.get("SIM5G_IP") or os.environ.get("MULTUS_IP") or ""
+    if src:
+        sock.bind((src, 0))
+    sock.connect((host, SFTP_PORT))
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, port=SFTP_PORT, username=user, password=password, timeout=30)
-    sftp = client.open_sftp()
-    t_first = None
-    nbytes = 0
+    try:
+        client.connect(
+            host,
+            port=SFTP_PORT,
+            username=user,
+            password=password,
+            timeout=30,
+            sock=sock,
+        )
+        sftp = client.open_sftp()
+        names = sftp.listdir(SFTP_REMOTE_DIR)
+        queued: list[tuple[int, str, float]] = []
+        for name in names:
+            m = FILE_RE.match(name)
+            if m:
+                queued.append((int(m.group(1)), name, float(m.group(2))))
+        queued.sort(key=lambda x: x[0])
+        if not queued:
+            sftp.close()
+            client.close()
+            raise TimeoutError("no queued file ready")
+        seq, name, t_send = queued[0]
+        remote = f"{SFTP_REMOTE_DIR}/{name}"
+        local = local_dir / name
+        nbytes = 0
 
-    def _cb(transferred: int, _total: int) -> None:
-        nonlocal t_first, nbytes
-        if t_first is None:
-            t_first = time.time()
-        nbytes = transferred
+        def _cb(transferred: int, _total: int) -> None:
+            nonlocal nbytes
+            nbytes = transferred
 
-    local.parent.mkdir(parents=True, exist_ok=True)
-    sftp.get(remote, str(local), callback=_cb)
-    t_last = time.time()
-    sftp.close()
-    client.close()
-    first = t_first or t_connect
-    dt = max(t_last - first, 1e-6)
+        sftp.get(remote, str(local), callback=_cb)
+        t_recv = time.time()
+        try:
+            sftp.remove(remote)
+        except OSError:
+            pass
+        sftp.close()
+        client.close()
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+        sock.close()
+        raise
+    sock.close()
+    local.unlink(missing_ok=True)
+    dt = max(t_recv - t_send, 1e-6)
+    e2e_ms = max(0.0, (t_recv - t_send) * 1000.0)
+    try:
+        Path("/tmp/exp4_e2e_latency_ms").write_text(f"{e2e_ms:.3f}\n", encoding="utf-8")
+    except OSError:
+        pass
     out = {
         "kind": "sftp",
         "host": host,
+        "file_id": name,
         "bytes": nbytes,
+        "t_send": t_send,
+        "t_recv": t_recv,
+        "e2e_ms": e2e_ms,
         "transfer_s": dt,
         "goodput_mbit": (nbytes * 8.0) / dt / 1e6,
+        "deleted": True,
     }
     with _LOCK:
         _LAST.update(out)
+        _SFTP_STATS["success"] = int(_SFTP_STATS["success"]) + 1
+        _SFTP_STATS["deleted"] = int(_SFTP_STATS["deleted"]) + 1
+        _SFTP_STATS["error"] = ""
     _append_log(
-        f"sftp done host={host} bytes={nbytes} "
-        f"transfer_s={dt:.3f} goodput_mbit={out['goodput_mbit']:.2f}"
+        f"sftp {name} bytes={nbytes} e2e_ms={e2e_ms:.1f} "
+        f"transfer_s={dt:.3f} goodput_mbit={out['goodput_mbit']:.2f} deleted"
     )
     return out
+
+
+def _sftp_supervisor() -> None:
+    backoff = IDLE_SLEEP_S
+    while True:
+        with _LOCK:
+            wanted = _SFTP_WANTED
+        if not wanted:
+            with _LOCK:
+                _SFTP_STATS["running"] = False
+            time.sleep(0.2)
+            backoff = IDLE_SLEEP_S
+            continue
+        with _LOCK:
+            _SFTP_STATS["running"] = True
+        try:
+            _sftp_once()
+            backoff = IDLE_SLEEP_S
+        except TimeoutError:
+            time.sleep(backoff)
+            backoff = min(backoff * 1.5, 2.0)
+        except HTTPException:
+            time.sleep(min(backoff, 5.0))
+        except Exception as exc:
+            with _LOCK:
+                _SFTP_STATS["failed"] = int(_SFTP_STATS["failed"]) + 1
+                _SFTP_STATS["error"] = str(exc)
+            _append_log(f"sftp failed: {exc}")
+            time.sleep(min(backoff, 5.0))
+            backoff = min(backoff * 2, 10.0)
 
 
 def _snapshot() -> dict[str, Any]:
@@ -349,6 +443,11 @@ def _snapshot() -> dict[str, Any]:
             "server": SERVER,
             "busy": _BUSY,
             "last": dict(_LAST),
+            "sftp": dict(_SFTP_STATS),
+            "sftp_running": _SFTP_STATS["running"],
+            "success": _SFTP_STATS["success"],
+            "failed": _SFTP_STATS["failed"],
+            "deleted": _SFTP_STATS["deleted"],
             "log": list(_IPERF_LOG),
             "iperf": {
                 **dict(_IPERF_STATE),
@@ -380,6 +479,8 @@ def sftp() -> dict:
         snap = _snapshot()
         snap["last"] = result
         return {"ok": True, **snap}
+    except TimeoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     finally:
         with _LOCK:
             _BUSY = False
@@ -425,9 +526,12 @@ def _startup() -> None:
     if start_heartbeat is not None:
         start_heartbeat(payload_fn=_hb)
     threading.Thread(target=_iperf_supervisor, daemon=True, name="iperf-supervisor").start()
+    threading.Thread(target=_sftp_supervisor, daemon=True, name="sftp-download").start()
+    if SFTP_AUTOSTART:
+        _append_log("sftp queue autostart — pull 1 MB files until fully received")
     if IPERF_AUTOSTART:
         _set_wanted(True)
-        _append_log("autostart enabled")
+        _append_log("iperf autostart enabled")
 
 
 if __name__ == "__main__":
