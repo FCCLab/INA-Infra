@@ -6,11 +6,13 @@ from __future__ import annotations
 import os
 import socket
 import time
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import dl_runtime
 from connected_clients import attach as attach_clients
 from connected_clients import snapshot as snapshot_clients
 
@@ -31,10 +33,34 @@ def _listening(host: str, port: int) -> bool:
         return False
 
 
+def _device_count(clients: list) -> int:
+    n = len(clients)
+    if n > 0:
+        return n
+    # Static DL targets when no heartbeats yet (matches controller DL_DEVICE_IDS).
+    static = [
+        d.strip()
+        for d in os.environ.get("DL_DEVICE_IDS", "ue1").split(",")
+        if d.strip()
+    ]
+    return max(1, len(static))
+
+
 class PublishIn(BaseModel):
     topic: str = Field(..., min_length=1)
     payload: str = ""
     qos: int = Field(0, ge=0, le=2)
+
+
+class DlConfigIn(BaseModel):
+    msgs_per_s: Optional[float] = Field(
+        None, ge=0, description="Messages per second per device; 0 = max rate"
+    )
+    payload_bytes: Optional[int] = Field(None, ge=64)
+    running: Optional[bool] = None
+    period_s: Optional[float] = Field(
+        None, ge=0, description="Alternate to msgs_per_s; 0 = max rate"
+    )
 
 
 @app.get("/api/health")
@@ -54,7 +80,8 @@ def e2e() -> dict:
 def status() -> dict:
     broker_ok = _listening(MQTT_HOST, MQTT_PORT) or _listening("127.0.0.1", OTA_PORT)
     clients = snapshot_clients()
-    return {
+    ndev = _device_count(clients)
+    out = {
         "ok": True,
         "app": "exp4-s5",
         "role": "server-backend",
@@ -62,13 +89,40 @@ def status() -> dict:
         "local_broker": f"{MQTT_HOST}:{MQTT_PORT}",
         "ota_port": OTA_PORT,
         "n6_ip": os.environ.get("MULTUS_IP") or "",
-        "dl_fast_period_s": float(os.environ.get("DL_FAST_PERIOD_S", "0.05")),
         "dl_slow_period_s": float(os.environ.get("DL_SLOW_PERIOD_S", "1.0")),
-        "device_count": len(clients),
+        "device_count": ndev,
         "clients": clients,
         "clients_count": len(clients),
         "topic_prefix": os.environ.get("MQTT_TOPIC_PREFIX", "slice_5"),
     }
+    out.update(dl_runtime.status_fields(ndev))
+    return out
+
+
+@app.post("/api/dl/start")
+def dl_start() -> dict:
+    dl_runtime.update(running=True)
+    return {"ok": True, **dl_runtime.status_fields(_device_count(snapshot_clients()))}
+
+
+@app.post("/api/dl/stop")
+def dl_stop() -> dict:
+    dl_runtime.update(running=False)
+    return {"ok": True, **dl_runtime.status_fields(_device_count(snapshot_clients()))}
+
+
+@app.post("/api/dl/config")
+def dl_config(body: DlConfigIn) -> dict:
+    kwargs = body.model_dump(exclude_none=True)
+    if not kwargs:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    if "msgs_per_s" in kwargs and "period_s" in kwargs:
+        raise HTTPException(status_code=400, detail="set msgs_per_s or period_s, not both")
+    try:
+        dl_runtime.update(**kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **dl_runtime.status_fields(_device_count(snapshot_clients()))}
 
 
 @app.post("/api/publish")

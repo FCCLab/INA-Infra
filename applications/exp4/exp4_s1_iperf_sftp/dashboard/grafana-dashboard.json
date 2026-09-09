@@ -263,7 +263,7 @@
         },
         "gridPos": {
           "h": 8,
-          "w": 12,
+          "w": 6,
           "x": 0,
           "y": 8
         },
@@ -322,8 +322,8 @@
         },
         "gridPos": {
           "h": 8,
-          "w": 12,
-          "x": 12,
+          "w": 6,
+          "x": 6,
           "y": 8
         },
         "id": 6,
@@ -355,7 +355,302 @@
             "resultFormat": "time_series"
           }
         ],
-        "title": "Client E2E latency (app t_send \u2192 client)",
+        "title": "Client application latency",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 8
+        },
+        "id": 7,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client transmission latency",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 8
+        },
+        "id": 8,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client E2E latency (app + tx)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        },
+        "id": 9,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server DL TCP Send-Q / notsent / retrans (TO_CLIENT_IFACE)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        },
+        "id": 10,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Server DL TCP cwnd / rwnd (TO_CLIENT_IFACE)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 24
+        },
+        "id": 11,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client DL TCP Recv-Q / rwnd (TO_SERVER_IFACE)",
         "type": "timeseries",
         "interval": "1s"
       }
@@ -388,5 +683,5 @@
     "version": 1
   },
   "overwrite": true,
-  "message": "Exp4 exp4-s1: 4 server + 2 client metrics"
+  "message": "Exp4 exp4-s1: 4+4 plus Send-Q/notsent and Recv-Q/rwnd"
 }

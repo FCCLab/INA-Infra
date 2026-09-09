@@ -1,411 +1,260 @@
 #!/usr/bin/env python3
-"""Exp4 S1 UE backend: SFTP + controllable iperf3 DL, logs forwarded to the console."""
+"""Exp4 S1 UE backend: SFTP + controllable iperf3 DL, logs forwarded to the console.
+
+List the server queue every 1s and download every file that is not already in
+flight. Application latency is generate-random time from the filename; E2E is
+app + ICMP tx, smoothed with EMA 0.5.
+"""
 
 from __future__ import annotations
 
-import collections
 import os
 import re
-import signal
 import socket
 import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+
+import sys
+
+for _p in ("/usr/local/bin", "/app/backend", "/app"):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    from to_server import (
+        connect_tcp,
+        detect_to_server_iface,
+        ensure_pin_watch,
+        pin_to_server,
+    )
+except ImportError:
+    connect_tcp = None  # type: ignore
+    detect_to_server_iface = None  # type: ignore
+    ensure_pin_watch = None  # type: ignore
+    pin_to_server = None  # type: ignore
+from ue_control import (
+    Iperf3Client,
+    LogBuffer,
+    app_fields,
+    attach_app_routes,
+    attach_iperf_routes,
+)
 
 app = FastAPI(title="Exp4 S1 UE backend", docs_url="/docs")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 SERVER = os.environ.get("TARGET_SERVER_IP") or os.environ.get("SFTP_HOST") or "10.1.137.211"
 SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
-IPERF_PORT = int(os.environ.get("IPERF_PORT", "5201"))
-IPERF_PORT_COUNT = max(1, int(os.environ.get("IPERF_PORT_COUNT", "8")))
-IPERF_PARALLEL = int(os.environ.get("IPERF_PARALLEL", "5"))
-IPERF_BANDWIDTH = os.environ.get("IPERF_BANDWIDTH", "10M")
-IPERF_TIME = os.environ.get("IPERF_TIME", "0")
-IPERF_INTERVAL = os.environ.get("IPERF_INTERVAL", "1")
-IPERF_AUTOSTART = os.environ.get("IPERF_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
 SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
 SFTP_REMOTE_DIR = os.environ.get("SFTP_REMOTE_DIR", "download")
-IDLE_SLEEP_S = float(os.environ.get("EXP4_IDLE_SLEEP_S", "0.4"))
-FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
-LOG_MAX = int(os.environ.get("IPERF_LOG_MAX", "400"))
-
-INTERVAL_RE = re.compile(
-    r"\[(?:\s*\d+|SUM)\]\s+"
-    r"([\d.]+)-([\d.]+)\s+sec\s+"
-    r".*?\s+"
-    r"([\d.]+)\s+([KMG])?bits/sec",
-    re.IGNORECASE,
+LIST_PERIOD_S = float(os.environ.get("EXP4_LIST_PERIOD_S", "1.0"))
+EMA_ALPHA = float(os.environ.get("EXP4_EMA_ALPHA", "0.5"))
+FILE_RE = re.compile(
+    r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?\.bin$"
 )
-SUM_RE = re.compile(r"\[SUM\]", re.IGNORECASE)
+APP_LAT_FILE = Path(os.environ.get("EXP4_APP_LATENCY_FILE") or "/tmp/exp4_app_latency_ms")
+E2E_LAT_FILE = Path(os.environ.get("EXP4_E2E_LATENCY_FILE") or "/tmp/exp4_e2e_latency_ms")
+COMBO_LAT_FILE = Path(os.environ.get("EXP4_COMBO_E2E_FILE") or "/tmp/exp4_combo_e2e_latency_ms")
 
 _LOCK = threading.Lock()
 _LAST: dict[str, Any] = {}
 _BUSY = False
-_IPERF_LOG: collections.deque[dict[str, Any]] = collections.deque(maxlen=LOG_MAX)
-_IPERF_SEQ = 0
-_IPERF_PROC: Optional[subprocess.Popen[str]] = None
-_IPERF_WANTED = False
-_IPERF_WAKE = threading.Event()
-_IPERF_CFG: dict[str, Any] = {
-    "parallel": IPERF_PARALLEL,
-    "bandwidth": IPERF_BANDWIDTH,
-    "time": IPERF_TIME,
-    "interval": IPERF_INTERVAL,
-    "port": IPERF_PORT,
-}
-_IPERF_STATE: dict[str, Any] = {
-    "running": False,
-    "wanted": False,
-    "autostart": IPERF_AUTOSTART,
-    "pid": None,
-    "cmd": [],
-    "mbits_per_second": None,
-    "error": "",
-    "config": dict(_IPERF_CFG),
-}
+APP_LOG = LogBuffer(kind="sftp")
+IPERF = Iperf3Client()
 _SFTP_WANTED = SFTP_AUTOSTART
+_IN_FLIGHT: set[str] = set()
+_EMA_APP: float | None = None
+_EMA_E2E: float | None = None
 _SFTP_STATS: dict[str, Any] = {
     "running": False,
     "wanted": SFTP_AUTOSTART,
     "success": 0,
     "failed": 0,
     "deleted": 0,
+    "in_flight": 0,
+    "ema_app_ms": None,
+    "ema_e2e_ms": None,
     "error": "",
 }
 
 
-class IperfControl(BaseModel):
-    action: str = Field(..., description="start|stop|restart")
-    parallel: Optional[int] = Field(None, ge=1, le=32)
-    bandwidth: Optional[str] = None
-    time: Optional[str] = None
+def _append_app(line: str) -> None:
+    APP_LOG.append(line)
 
 
-def _bind_iface() -> str:
-    iface = os.environ.get("TO_SERVER_IFACE") or os.environ.get("BIND_DEV") or ""
+def _tx_ms() -> float | None:
+    host = os.environ.get("SFTP_HOST") or SERVER
+    iface = detect_to_server_iface() if detect_to_server_iface is not None else None
+    cmd = ["ping", "-c", "1", "-W", "1"]
     if iface:
-        return iface
-    scheme = os.environ.get("SCHEME_ID", "")
-    no5g = scheme == "exp4-no5g" or os.environ.get("EXP4_NO5G", "").lower() in ("1", "true", "yes")
-    return "net1" if no5g else ""
-
-
-def _iperf_cmd(port: Optional[int] = None) -> list[str]:
-    host = os.environ.get("IPERF_HOST") or SERVER
-    with _LOCK:
-        cfg = dict(_IPERF_CFG)
-        if port is not None:
-            cfg["port"] = int(port)
-            _IPERF_CFG["port"] = int(port)
-            _IPERF_STATE["config"] = dict(_IPERF_CFG)
-    cmd = [
-        "iperf3",
-        "-c",
-        host,
-        "-p",
-        str(cfg["port"]),
-        "-R",
-        "-P",
-        str(cfg["parallel"]),
-        "-b",
-        str(cfg["bandwidth"]),
-        "-t",
-        str(cfg["time"]),
-        "-i",
-        str(cfg["interval"]),
-        "--forceflush",
-    ]
-    iface = _bind_iface()
-    if iface:
-        cmd.extend(["--bind-dev", iface])
-    return cmd
-
-
-def _parse_mbps(line: str) -> Optional[float]:
-    m = INTERVAL_RE.search(line)
-    if not m:
+        cmd.extend(["-I", iface])
+    cmd.append(host)
+    try:
+        out = subprocess.check_output(cmd, text=True, timeout=2, stderr=subprocess.STDOUT)
+    except Exception:
         return None
-    value = float(m.group(3))
-    unit = (m.group(4) or "").upper()
-    bits = value * {"": 1.0, "K": 1e3, "M": 1e6, "G": 1e9}.get(unit, 1.0)
-    return bits / 1e6
+    m = re.search(r"time[=<]([\d.]+)\s*ms", out)
+    return float(m.group(1)) if m else None
 
 
-def _append_log(line: str) -> None:
-    global _IPERF_SEQ
-    text = line.rstrip("\n\r")
-    if not text:
-        return
-    mbps = _parse_mbps(text)
+def _write_ms(path: Path, ms: float) -> None:
+    try:
+        path.write_text(f"{ms:.3f}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _on_file_done(name: str, app_ms: float | None, nbytes: int, transfer_s: float) -> None:
+    global _EMA_APP, _EMA_E2E
+    tx = _tx_ms()
     with _LOCK:
-        _IPERF_SEQ += 1
-        _IPERF_LOG.append(
+        _IN_FLIGHT.discard(name)
+        if app_ms is not None:
+            _EMA_APP = app_ms if _EMA_APP is None else (EMA_ALPHA * _EMA_APP + (1.0 - EMA_ALPHA) * app_ms)
+            _write_ms(APP_LAT_FILE, _EMA_APP)
+            _write_ms(E2E_LAT_FILE, _EMA_APP)
+            if tx is not None:
+                sample = app_ms + tx
+                _EMA_E2E = sample if _EMA_E2E is None else (EMA_ALPHA * _EMA_E2E + (1.0 - EMA_ALPHA) * sample)
+                _write_ms(COMBO_LAT_FILE, _EMA_E2E)
+        _SFTP_STATS["success"] = int(_SFTP_STATS["success"]) + 1
+        _SFTP_STATS["deleted"] = int(_SFTP_STATS["deleted"]) + 1
+        _SFTP_STATS["in_flight"] = len(_IN_FLIGHT)
+        _SFTP_STATS["ema_app_ms"] = _EMA_APP
+        _SFTP_STATS["ema_e2e_ms"] = _EMA_E2E
+        _SFTP_STATS["error"] = ""
+        _LAST.update(
             {
-                "seq": _IPERF_SEQ,
-                "ts": time.strftime("%H:%M:%S"),
-                "kind": "iperf",
-                "line": text,
+                "kind": "sftp",
+                "file_id": name,
+                "bytes": nbytes,
+                "app_ms": app_ms,
+                "tx_ms": tx,
+                "e2e_ms": (app_ms + tx) if (app_ms is not None and tx is not None) else app_ms,
+                "ema_app_ms": _EMA_APP,
+                "ema_e2e_ms": _EMA_E2E,
+                "transfer_s": transfer_s,
+                "goodput_mbit": (nbytes * 8.0) / max(transfer_s, 1e-6) / 1e6,
+                "deleted": True,
             }
         )
-        parallel = int(_IPERF_CFG.get("parallel") or 1)
-        if mbps is not None and (SUM_RE.search(text) or parallel <= 1):
-            _IPERF_STATE["mbits_per_second"] = mbps
+        last = dict(_LAST)
+    _append_app(
+        f"sftp {name} bytes={nbytes} app_ms={app_ms} tx_ms={tx} "
+        f"ema_app={last.get('ema_app_ms')} ema_e2e={last.get('ema_e2e_ms')} "
+        f"transfer_s={transfer_s:.3f}"
+    )
 
 
-def _next_iperf_port(port: int) -> int:
-    return IPERF_PORT + ((int(port) - IPERF_PORT + 1) % IPERF_PORT_COUNT)
+def _open_sftp():
+    import paramiko
 
-
-def _kill_iperf() -> None:
-    global _IPERF_PROC
-    with _LOCK:
-        proc = _IPERF_PROC
-    if proc is None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-    try:
-        proc.wait(timeout=3)
-    except Exception:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-    with _LOCK:
-        if _IPERF_PROC is proc:
-            _IPERF_PROC = None
-            _IPERF_STATE["running"] = False
-            _IPERF_STATE["pid"] = None
-
-
-def _iperf_supervisor() -> None:
-    global _IPERF_PROC
-    backoff = 2.0
-    while True:
-        with _LOCK:
-            wanted = _IPERF_WANTED
-        if not wanted:
-            _kill_iperf()
-            _IPERF_WAKE.wait(timeout=1.0)
-            _IPERF_WAKE.clear()
-            continue
-
-        cmd = _iperf_cmd()
-        _append_log("starting: " + " ".join(cmd))
-        started = time.time()
-        busy = False
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                start_new_session=True,
-            )
-        except FileNotFoundError:
-            _append_log("iperf3 binary not found")
-            with _LOCK:
-                _IPERF_STATE["running"] = False
-                _IPERF_STATE["error"] = "iperf3 not found"
-            time.sleep(10)
-            continue
-        except OSError as exc:
-            _append_log(f"iperf3 spawn failed: {exc}")
-            with _LOCK:
-                _IPERF_STATE["running"] = False
-                _IPERF_STATE["error"] = str(exc)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 30.0)
-            continue
-
-        with _LOCK:
-            _IPERF_PROC = proc
-            _IPERF_STATE["running"] = True
-            _IPERF_STATE["pid"] = proc.pid
-            _IPERF_STATE["cmd"] = cmd
-            _IPERF_STATE["error"] = ""
-            _IPERF_STATE["config"] = dict(_IPERF_CFG)
-
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            with _LOCK:
-                still = _IPERF_WANTED
-            if not still:
-                break
-            low = line.lower()
-            if "busy running a test" in low or "server is busy" in low:
-                busy = True
-            _append_log(line)
-
-        if not _IPERF_WANTED:
-            _kill_iperf()
-            _append_log("iperf3 stopped by control")
-            backoff = 2.0
-            continue
-
-        rc = proc.wait()
-        with _LOCK:
-            _IPERF_PROC = None
-            _IPERF_STATE["running"] = False
-            _IPERF_STATE["pid"] = None
-            cur_port = int(_IPERF_CFG.get("port") or IPERF_PORT)
-        if busy or (rc != 0 and time.time() - started < 3):
-            nxt = _next_iperf_port(cur_port)
-            _append_log(f"iperf3 :{cur_port} busy/failed; trying :{nxt}")
-            _iperf_cmd(nxt)
-            backoff = 0.4
-            if _IPERF_WAKE.wait(timeout=backoff):
-                _IPERF_WAKE.clear()
-            continue
-        if time.time() - started > 5:
-            backoff = 2.0
-        with _LOCK:
-            still = _IPERF_WANTED
-        if not still:
-            continue
-        _append_log(f"iperf3 exited rc={rc}; retry in {backoff:.0f}s")
-        # Wait with wake so Stop/Start can interrupt the backoff
-        if _IPERF_WAKE.wait(timeout=backoff):
-            _IPERF_WAKE.clear()
-        backoff = min(backoff * 2, 30.0)
-
-
-def _set_wanted(wanted: bool) -> None:
-    global _IPERF_WANTED
-    with _LOCK:
-        _IPERF_WANTED = wanted
-        _IPERF_STATE["wanted"] = wanted
-    _IPERF_WAKE.set()
-    if not wanted:
-        _kill_iperf()
-
-
-def _apply_cfg(body: IperfControl) -> None:
-    with _LOCK:
-        if body.parallel is not None:
-            _IPERF_CFG["parallel"] = int(body.parallel)
-        if body.bandwidth:
-            _IPERF_CFG["bandwidth"] = str(body.bandwidth).strip()
-        if body.time is not None and str(body.time).strip() != "":
-            _IPERF_CFG["time"] = str(body.time).strip()
-        _IPERF_STATE["config"] = dict(_IPERF_CFG)
-
-
-def _sftp_once() -> dict:
-    try:
-        import paramiko
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail="paramiko missing") from exc
     host = os.environ.get("SFTP_HOST") or SERVER
     user = os.environ.get("SFTP_USER", "ina")
     password = os.environ.get("SFTP_PASS", "ina")
-    local_dir = Path(os.environ.get("SFTP_LOCAL_DIR", "/tmp/exp4-s1-dl"))
-    local_dir.mkdir(parents=True, exist_ok=True)
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(30)
-    src = os.environ.get("SIM5G_IP") or os.environ.get("MULTUS_IP") or ""
-    if src:
-        sock.bind((src, 0))
-    sock.connect((host, SFTP_PORT))
-
+    if connect_tcp is not None:
+        sock = connect_tcp(host, SFTP_PORT, timeout=30)
+    else:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(30)
+        src = os.environ.get("SIM5G_IP") or os.environ.get("MULTUS_IP") or ""
+        if src:
+            sock.bind((src, 0))
+        sock.connect((host, SFTP_PORT))
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(host, port=SFTP_PORT, username=user, password=password, timeout=30, sock=sock)
+    return client, client.open_sftp()
+
+
+def _list_remote() -> list[tuple[str, float | None]]:
+    client = None
     try:
-        client.connect(
-            host,
-            port=SFTP_PORT,
-            username=user,
-            password=password,
-            timeout=30,
-            sock=sock,
-        )
-        sftp = client.open_sftp()
-        names = sftp.listdir(SFTP_REMOTE_DIR)
-        queued: list[tuple[int, str, float]] = []
-        for name in names:
+        client, sftp = _open_sftp()
+        out: list[tuple[str, float | None]] = []
+        for name in sftp.listdir(SFTP_REMOTE_DIR):
             m = FILE_RE.match(name)
-            if m:
-                queued.append((int(m.group(1)), name, float(m.group(2))))
-        queued.sort(key=lambda x: x[0])
-        if not queued:
-            sftp.close()
-            client.close()
-            raise TimeoutError("no queued file ready")
-        seq, name, t_send = queued[0]
+            if not m:
+                continue
+            app_ms = float(m.group(3)) if m.group(3) else None
+            out.append((name, app_ms))
+        sftp.close()
+        return out
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def _download_one(name: str, app_ms: float | None) -> None:
+    local_dir = Path(os.environ.get("SFTP_LOCAL_DIR", "/tmp/exp4-s1-dl"))
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local = local_dir / name
+    client = None
+    nbytes = 0
+    try:
+        client, sftp = _open_sftp()
         remote = f"{SFTP_REMOTE_DIR}/{name}"
-        local = local_dir / name
-        nbytes = 0
 
         def _cb(transferred: int, _total: int) -> None:
             nonlocal nbytes
             nbytes = transferred
 
+        t0 = time.time()
         sftp.get(remote, str(local), callback=_cb)
-        t_recv = time.time()
+        transfer_s = max(time.time() - t0, 1e-6)
         try:
             sftp.remove(remote)
         except OSError:
             pass
         sftp.close()
-        client.close()
-    except Exception:
-        try:
-            client.close()
-        except Exception:
-            pass
-        sock.close()
-        raise
-    sock.close()
-    local.unlink(missing_ok=True)
-    dt = max(t_recv - t_send, 1e-6)
-    e2e_ms = max(0.0, (t_recv - t_send) * 1000.0)
-    try:
-        Path("/tmp/exp4_e2e_latency_ms").write_text(f"{e2e_ms:.3f}\n", encoding="utf-8")
-    except OSError:
-        pass
-    out = {
-        "kind": "sftp",
-        "host": host,
-        "file_id": name,
-        "bytes": nbytes,
-        "t_send": t_send,
-        "t_recv": t_recv,
-        "e2e_ms": e2e_ms,
-        "transfer_s": dt,
-        "goodput_mbit": (nbytes * 8.0) / dt / 1e6,
-        "deleted": True,
-    }
+        local.unlink(missing_ok=True)
+        _on_file_done(name, app_ms, nbytes, transfer_s)
+    except Exception as exc:
+        with _LOCK:
+            _IN_FLIGHT.discard(name)
+            _SFTP_STATS["failed"] = int(_SFTP_STATS["failed"]) + 1
+            _SFTP_STATS["in_flight"] = len(_IN_FLIGHT)
+            _SFTP_STATS["error"] = str(exc)
+        _append_app(f"sftp {name} failed: {exc}")
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+        local.unlink(missing_ok=True)
+
+
+def _sftp_once() -> dict:
+    """One-shot: list and start any idle files; return current snapshot last."""
+    listed = _list_remote()
+    started = 0
+    for name, app_ms in listed:
+        with _LOCK:
+            if name in _IN_FLIGHT:
+                continue
+            _IN_FLIGHT.add(name)
+            _SFTP_STATS["in_flight"] = len(_IN_FLIGHT)
+        threading.Thread(
+            target=_download_one, args=(name, app_ms), daemon=True, name=f"sftp-{name}"
+        ).start()
+        started += 1
+    if started == 0 and not listed:
+        raise TimeoutError("no queued file ready")
+    time.sleep(0.05)
     with _LOCK:
-        _LAST.update(out)
-        _SFTP_STATS["success"] = int(_SFTP_STATS["success"]) + 1
-        _SFTP_STATS["deleted"] = int(_SFTP_STATS["deleted"]) + 1
-        _SFTP_STATS["error"] = ""
-    _append_log(
-        f"sftp {name} bytes={nbytes} e2e_ms={e2e_ms:.1f} "
-        f"transfer_s={dt:.3f} goodput_mbit={out['goodput_mbit']:.2f} deleted"
-    )
-    return out
+        return dict(_LAST)
 
 
 def _sftp_supervisor() -> None:
-    backoff = IDLE_SLEEP_S
     while True:
         with _LOCK:
             wanted = _SFTP_WANTED
@@ -413,48 +262,67 @@ def _sftp_supervisor() -> None:
             with _LOCK:
                 _SFTP_STATS["running"] = False
             time.sleep(0.2)
-            backoff = IDLE_SLEEP_S
             continue
+        if detect_to_server_iface is not None and not detect_to_server_iface():
+            time.sleep(1.0)
+            continue
+        if pin_to_server is not None:
+            pin_to_server()
         with _LOCK:
             _SFTP_STATS["running"] = True
         try:
-            _sftp_once()
-            backoff = IDLE_SLEEP_S
-        except TimeoutError:
-            time.sleep(backoff)
-            backoff = min(backoff * 1.5, 2.0)
-        except HTTPException:
-            time.sleep(min(backoff, 5.0))
+            listed = _list_remote()
+            for name, app_ms in listed:
+                with _LOCK:
+                    if name in _IN_FLIGHT:
+                        continue
+                    _IN_FLIGHT.add(name)
+                    _SFTP_STATS["in_flight"] = len(_IN_FLIGHT)
+                threading.Thread(
+                    target=_download_one,
+                    args=(name, app_ms),
+                    daemon=True,
+                    name=f"sftp-{name}",
+                ).start()
         except Exception as exc:
             with _LOCK:
-                _SFTP_STATS["failed"] = int(_SFTP_STATS["failed"]) + 1
                 _SFTP_STATS["error"] = str(exc)
-            _append_log(f"sftp failed: {exc}")
-            time.sleep(min(backoff, 5.0))
-            backoff = min(backoff * 2, 10.0)
+            _append_app(f"sftp list failed: {exc}")
+        time.sleep(max(0.2, LIST_PERIOD_S))
+
+
+def _set_sftp_wanted(wanted: bool) -> None:
+    global _SFTP_WANTED
+    with _LOCK:
+        _SFTP_WANTED = wanted
+        _SFTP_STATS["wanted"] = wanted
 
 
 def _snapshot() -> dict[str, Any]:
     with _LOCK:
-        return {
-            "ok": True,
-            "app": "exp4-s1",
-            "role": "client-backend",
-            "server": SERVER,
-            "busy": _BUSY,
-            "last": dict(_LAST),
-            "sftp": dict(_SFTP_STATS),
-            "sftp_running": _SFTP_STATS["running"],
-            "success": _SFTP_STATS["success"],
-            "failed": _SFTP_STATS["failed"],
-            "deleted": _SFTP_STATS["deleted"],
-            "log": list(_IPERF_LOG),
-            "iperf": {
-                **dict(_IPERF_STATE),
-                "config": dict(_IPERF_CFG),
-                "log": list(_IPERF_LOG),
-            },
-        }
+        sftp = dict(_SFTP_STATS)
+        last = dict(_LAST)
+        busy = _BUSY
+        wanted = _SFTP_WANTED
+        running = bool(sftp["running"])
+    iperf = IPERF.snapshot()
+    app = app_fields(running=running, wanted=wanted, log=APP_LOG, extra={"kind": "sftp"})
+    return {
+        "ok": True,
+        "name": "exp4-s1",
+        "role": "client-backend",
+        "server": SERVER,
+        "busy": busy,
+        "last": last,
+        "sftp": sftp,
+        "sftp_running": running,
+        "success": sftp["success"],
+        "failed": sftp["failed"],
+        "deleted": sftp["deleted"],
+        "log": app["log"],
+        "app": app,
+        "iperf": iperf,
+    }
 
 
 @app.get("/api/health")
@@ -486,25 +354,13 @@ def sftp() -> dict:
             _BUSY = False
 
 
-@app.post("/api/iperf")
-def iperf(body: IperfControl) -> dict:
-    action = (body.action or "").strip().lower()
-    if action not in ("start", "stop", "restart"):
-        raise HTTPException(status_code=400, detail="action must be start|stop|restart")
-    if action in ("start", "restart"):
-        _apply_cfg(body)
-    if action == "stop":
-        _set_wanted(False)
-        _append_log("control: stop")
-    elif action == "start":
-        _set_wanted(True)
-        _append_log("control: start")
-    else:  # restart
-        _set_wanted(False)
-        time.sleep(0.3)
-        _set_wanted(True)
-        _append_log("control: restart")
-    return {"ok": True, **_snapshot()}
+attach_iperf_routes(app, IPERF)
+attach_app_routes(
+    app,
+    start_fn=lambda: _set_sftp_wanted(True),
+    stop_fn=lambda: _set_sftp_wanted(False),
+    log=APP_LOG,
+)
 
 
 @app.on_event("startup")
@@ -515,23 +371,26 @@ def _startup() -> None:
         start_heartbeat = None  # type: ignore[assignment]
 
     def _hb() -> dict:
-        with _LOCK:
-            iperf = dict(_IPERF_STATE)
+        iperf = IPERF.snapshot()
         running = bool(iperf.get("running"))
-        port = (iperf.get("config") or {}).get("port") or IPERF_PORT
+        port = (iperf.get("config") or {}).get("port") or 5201
+        with _LOCK:
+            sftp_on = _SFTP_WANTED
         return {
-            "detail": f"iperf {'running' if running else 'idle'} :{port}",
+            "detail": (
+                f"sftp {'on' if sftp_on else 'off'}; "
+                f"iperf3 {'running' if running else 'idle'} :{port}"
+            ),
         }
 
     if start_heartbeat is not None:
         start_heartbeat(payload_fn=_hb)
-    threading.Thread(target=_iperf_supervisor, daemon=True, name="iperf-supervisor").start()
+    if ensure_pin_watch is not None:
+        ensure_pin_watch()
+    IPERF.start_supervisor()
     threading.Thread(target=_sftp_supervisor, daemon=True, name="sftp-download").start()
     if SFTP_AUTOSTART:
-        _append_log("sftp queue autostart — pull 1 MB files until fully received")
-    if IPERF_AUTOSTART:
-        _set_wanted(True)
-        _append_log("iperf autostart enabled")
+        _append_app("sftp autostart — list every 1s, pull all idle files in parallel")
 
 
 if __name__ == "__main__":

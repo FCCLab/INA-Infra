@@ -24,6 +24,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+import sys
+
+for _p in ("/usr/local/bin", "/app/backend", "/app"):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    from to_server import detect_to_server_iface, ensure_pin_watch, pin_to_server
+except ImportError:
+    detect_to_server_iface = None  # type: ignore
+    ensure_pin_watch = None  # type: ignore
+    pin_to_server = None  # type: ignore
+from ue_control import (
+    Iperf3Client,
+    LogBuffer,
+    app_fields,
+    attach_app_routes,
+    attach_iperf_routes,
+)
+
 try:
     from prometheus_client import Counter, Gauge, start_http_server
 except ImportError:  # pragma: no cover
@@ -207,6 +226,8 @@ app.add_middleware(
 
 _lock = threading.RLock()
 _logs: deque[dict[str, Any]] = deque(maxlen=LOG_LIMIT)
+APP_LOG = LogBuffer(kind="cctv")
+IPERF = Iperf3Client()
 
 SAMPLE_VIDEOS = [
     {
@@ -285,6 +306,7 @@ def _log_event(level: str, msg: str, extra: Optional[Dict[str, Any]] = None) -> 
     }
     with _lock:
         _logs.append(event)
+    APP_LOG.append(msg, kind=level)
     getattr(logger, level if hasattr(logger, level) else "info")(msg)
 
 
@@ -350,6 +372,12 @@ def _resolve_api_iface() -> str:
 
 def _resolve_pdu_iface() -> Optional[str]:
     global _pdu_iface_live
+    if detect_to_server_iface is not None:
+        live = detect_to_server_iface()
+        if live:
+            with _pdu_lock:
+                _pdu_iface_live = live
+        return live
     with _pdu_lock:
         cands = [_pdu_iface_live, TO_SERVER_IFACE_CFG, PDU_IFACE_CFG]
         if not _NO5G:
@@ -377,6 +405,8 @@ _resolve_to_server_iface = _resolve_pdu_iface
 
 
 def _setup_pdu_routes() -> bool:
+    if pin_to_server is not None:
+        return pin_to_server() is not None
     iface = _resolve_pdu_iface()
     if not iface:
         return False
@@ -409,6 +439,84 @@ def _pdu_watchdog_loop() -> None:
         except Exception as exc:
             logger.debug(f"PDU watchdog error: {exc}")
         time.sleep(5)
+
+
+def _mtx_pull_local_ips() -> set[str]:
+    """Local IPs MediaMTX is using toward the app-server RTSP port."""
+    ips: set[str] = set()
+    needle = f"{RTSP_TARGET_HOST}:{MTX_SOURCE_RTSP_PORT}"
+    try:
+        out = subprocess.check_output(["ss", "-tn"], text=True, timeout=3, stderr=subprocess.DEVNULL)
+    except Exception:
+        return ips
+    for line in out.splitlines():
+        if "ESTAB" not in line or needle not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        local = parts[3]
+        ip = local.rsplit(":", 1)[0].strip("[]")
+        if ip:
+            ips.add(ip)
+    return ips
+
+
+def _mtx_patch_path(name: str, source: str) -> None:
+    body = json.dumps({"source": source, "sourceOnDemand": False}).encode()
+    req = urllib.request.Request(
+        f"{MTX_API_URL}/v3/config/paths/patch/{name}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="PATCH",
+    )
+    with urllib.request.urlopen(req, timeout=4) as resp:
+        resp.read()
+
+
+def _mtx_bounce_sources() -> None:
+    """Drop stale console-LAN RTSP pulls and reconnect (kernel then uses /32 via oaitun)."""
+    if pin_to_server is not None:
+        pin_to_server()
+    for st in _dl_streams():
+        try:
+            _mtx_patch_path(st["path"], "rtsp://127.0.0.1:9/reconnect")
+        except Exception:
+            pass
+        time.sleep(0.15)
+        try:
+            _mtx_patch_path(st["path"], st["source_rtsp"])
+        except Exception as exc:
+            _log_event("warn", f"MediaMTX bounce {st['path']} failed: {exc}")
+    _log_event("info", "MediaMTX RTSP pulls bounced onto to-server iface")
+
+
+def _mtx_5g_watchdog_loop() -> None:
+    """MediaMTX often connects before PDU exists and sticks to net2 forever."""
+    last_bounce = 0.0
+    last_kill = 0.0
+    while True:
+        try:
+            iface = _resolve_pdu_iface()
+            if not iface:
+                time.sleep(2.0)
+                continue
+            pdu_ip = get_interface_ip(iface) or ""
+            locals_ = _mtx_pull_local_ips()
+            good = {ip for ip in locals_ if pdu_ip and ip == pdu_ip}
+            now = time.time()
+            if locals_ and not good:
+                if now - last_bounce > 12:
+                    _mtx_bounce_sources()
+                    last_bounce = now
+                elif now - last_kill > 30:
+                    # PATCH can no-op if paths are stale; entrypoint restarts MTX after pin.
+                    _log_event("warn", "MediaMTX still on console LAN; restarting pulls")
+                    subprocess.run(["pkill", "-TERM", "mediamtx"], timeout=3, check=False)
+                    last_kill = now
+        except Exception as exc:
+            logger.debug("mtx 5g watchdog: %s", exc)
+        time.sleep(5.0)
 
 
 # ---------------------------------------------------------------------------
@@ -733,12 +841,16 @@ def on_startup() -> None:
         except Exception as exc:
             logger.warning(f"Metrics server failed: {exc}")
 
+    if ensure_pin_watch is not None:
+        ensure_pin_watch()
     # Launch background workers
     threading.Thread(target=_pdu_watchdog_loop, daemon=True).start()
     threading.Thread(target=_connectivity_loop, daemon=True).start()
+    threading.Thread(target=_mtx_5g_watchdog_loop, daemon=True, name="mtx-5g").start()
 
     if _state["streaming_enabled"]:
         STREAMER.start()
+    IPERF.start_supervisor()
 
     def _on_video_e2e(sample: dict) -> None:
         with _lock:
@@ -855,6 +967,13 @@ def get_status() -> dict:
             "ds_num_streams": DS_NUM_STREAMS,
             "streams": _dl_streams(),
             "mtx": _mtx_local_status(),
+            "app": app_fields(
+                running=STREAMER.running,
+                wanted=bool(_state["streaming_enabled"]),
+                log=APP_LOG,
+                extra={"kind": "cctv"},
+            ),
+            "iperf": IPERF.snapshot(),
             **_state,
         }
 
@@ -879,6 +998,22 @@ def stop_stream() -> dict:
 def restart_stream() -> dict:
     STREAMER.restart()
     return {"ok": True, "status": "restarted", "rtsp_url": _state["rtsp_url"]}
+
+
+def _app_start() -> None:
+    with _lock:
+        _state["streaming_enabled"] = True
+    STREAMER.start()
+
+
+def _app_stop() -> None:
+    with _lock:
+        _state["streaming_enabled"] = False
+    STREAMER.stop()
+
+
+attach_iperf_routes(app, IPERF)
+attach_app_routes(app, start_fn=_app_start, stop_fn=_app_stop, log=APP_LOG)
 
 
 @app.post("/api/stream/config")

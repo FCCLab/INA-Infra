@@ -25,6 +25,7 @@ COPY make_payload.sh /usr/local/bin/make_payload.sh
 COPY influx_publish.py /usr/local/bin/exp4_influx_publish.py
 COPY control_api.py connected_clients.py /app/
 COPY frontend-console/ /app/frontend-console/
+COPY ifaces.sh /app/common/ifaces.sh
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/make_payload.sh /usr/local/bin/exp4_influx_publish.py /entrypoint.sh
 

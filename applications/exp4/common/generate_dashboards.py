@@ -2,7 +2,7 @@
 """Write Grafana dashboard JSON under each Exp4 app's dashboard/ dir.
 
 Server (origin=server): CPU m, RAM MB, GPU %, VRAM MB (absolute)
-Client (origin=client): DL throughput, latency
+Client (origin=client): DL throughput, application latency, transmission latency, E2E
 """
 
 from __future__ import annotations
@@ -90,18 +90,97 @@ def dashboard(uid: str, title: str, app_type: str) -> dict:
             "Client DL throughput",
             0,
             8,
-            12,
+            6,
             "Mbps",
             flux(app_type, "client", "throughput_dl_mbps"),
         ),
         timeseries(
             6,
-            "Client E2E latency (app t_send → client)",
-            12,
+            "Client application latency",
+            6,
             8,
-            12,
+            6,
             "ms",
             flux(app_type, "client", "latency_ms"),
+        ),
+        timeseries(
+            7,
+            "Client transmission latency",
+            12,
+            8,
+            6,
+            "ms",
+            flux(app_type, "client", "tx_latency_ms"),
+        ),
+        timeseries(
+            8,
+            "Client E2E latency (app + tx)",
+            18,
+            8,
+            6,
+            "ms",
+            flux(app_type, "client", "e2e_latency_ms"),
+        ),
+        timeseries(
+            9,
+            "Server DL TCP Send-Q / notsent / retrans (TO_CLIENT_IFACE)",
+            0,
+            16,
+            12,
+            "decbytes",
+            (
+                'from(bucket: "default")\n'
+                "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+                f'  |> filter(fn: (r) => r._measurement == "application_metrics" '
+                f'and r.app_type == "{app_type}" and r.origin == "server")\n'
+                '  |> filter(fn: (r) => r._field == "tcp_sendq_bytes" or '
+                'r._field == "tcp_notsent_bytes" or r._field == "tcp_retrans")\n'
+                "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+                '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_sendq_bytes" '
+                'then "Send-Q" else if r._field == "tcp_notsent_bytes" then "notsent" '
+                'else "retrans" }))\n'
+                "  |> yield()"
+            ),
+        ),
+        timeseries(
+            10,
+            "Server DL TCP cwnd / rwnd (TO_CLIENT_IFACE)",
+            12,
+            16,
+            12,
+            "short",
+            (
+                'from(bucket: "default")\n'
+                "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+                f'  |> filter(fn: (r) => r._measurement == "application_metrics" '
+                f'and r.app_type == "{app_type}" and r.origin == "server")\n'
+                '  |> filter(fn: (r) => r._field == "tcp_cwnd" or '
+                'r._field == "tcp_rwnd_bytes")\n'
+                "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+                '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_cwnd" '
+                'then "cwnd" else "rwnd" }))\n'
+                "  |> yield()"
+            ),
+        ),
+        timeseries(
+            11,
+            "Client DL TCP Recv-Q / rwnd (TO_SERVER_IFACE)",
+            0,
+            24,
+            24,
+            "decbytes",
+            (
+                'from(bucket: "default")\n'
+                "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+                f'  |> filter(fn: (r) => r._measurement == "application_metrics" '
+                f'and r.app_type == "{app_type}" and r.origin == "client")\n'
+                '  |> filter(fn: (r) => r._field == "tcp_recvq_bytes" or '
+                'r._field == "tcp_rwnd_bytes")\n'
+                "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+                '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_recvq_bytes" '
+                'then "Recv-Q" else "rwnd" }))\n'
+                "  |> yield()"
+            ),
         ),
     ]
     return {
@@ -123,7 +202,7 @@ def dashboard(uid: str, title: str, app_type: str) -> dict:
             "version": 1,
         },
         "overwrite": True,
-        "message": f"Exp4 {app_type}: 4 server + 2 client metrics",
+        "message": f"Exp4 {app_type}: 4+4 plus Send-Q/notsent and Recv-Q/rwnd",
     }
 
 
@@ -138,10 +217,13 @@ def main() -> None:
             f"# {title} Grafana\n\n"
             f"Influx `application_metrics`, `app_type={app_type}`.\n\n"
             f"**Server** (`origin=server`): CPU m, RAM MB, GPU %, VRAM MB "
-            f"(1000m = 1 full CPU; gpu_pct = 0–100%).\n\n"
+            f"(1000m = 1 full CPU; gpu_pct = 0–100%), plus DL TCP Send-Q / "
+            f"notsent on `TO_CLIENT_IFACE` (`net1`) only.\n\n"
             f"**Client** (`origin=client`): DL throughput (RX on `TO_SERVER_IFACE`), "
-            f"latency (application E2E). s2 is `camera_ms + yolo_ms + rtsp_hls_ms`; "
-            f"other slices use `t_send` before app work then `t_recv - t_send`.\n\n"
+            f"application latency (`t_send` → client), transmission latency "
+            f"(ICMP RTT; TCP connect fallback), E2E = application + transmission, "
+            f"plus TCP Recv-Q / rwnd on `TO_SERVER_IFACE`. "
+            f"s2 application latency is `camera_ms + yolo_ms + rtsp_hls_ms`.\n\n"
             f"Import `{path.name}` into Grafana (`10.1.137.105:3000`).\n",
             encoding="utf-8",
         )

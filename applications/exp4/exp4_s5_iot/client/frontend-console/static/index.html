@@ -37,6 +37,24 @@
     .kpi-value.mono,.mono{font-family:'IBM Plex Mono',monospace}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;display:grid;gap:12px}
     .hint{font-size:12px;color:var(--text-dim)}
+    button{background:var(--accent);color:#04140e;border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer}
+    button.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+    button.danger{background:var(--bad-bg);color:var(--bad);border:1px solid rgba(255,90,110,.35)}
+    .term-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width:900px){.term-grid{grid-template-columns:1fr}}
+    .console{background:#05080f;overflow:hidden;border:1px solid var(--border);border-radius:10px}
+    .console-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:11px}
+    .console-title{color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase}
+    .console-meta{margin-left:auto;color:var(--text-faint)}
+    .console-body{font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.5;min-height:200px;max-height:280px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#c6f6d5}
+    .console-idle{color:var(--text-faint)}
+    .console-line{padding:1px 0}
+    .console-line .ts{color:var(--text-faint);margin-right:8px}
+    .console-line.err{color:var(--bad)}
+    .iperf-ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.025)}
+    .iperf-ctl button{padding:6px 12px;font-size:12px}
+    .iperf-ctl .iperf-args-label{flex:1 1 220px;min-width:180px;margin:0;display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+    .iperf-ctl input{width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 8px;text-transform:none;letter-spacing:0;color:#eef2f9;background:#05080f;border:1px solid var(--border);border-radius:8px}
     .topic-list{display:grid;gap:8px}
     .topic-row{display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;
       padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
@@ -73,6 +91,34 @@
     </section>
 
     <section class="card">
+      <h2 style="font-size:16px;">Control</h2>
+      <div class="row">
+        <button type="button" id="btn-app-start">Subscribe</button>
+        <button type="button" class="danger" id="btn-app-stop">Unsubscribe</button>
+      </div>
+      <p class="hint">UE subscribes to server DL topics on the broker. Unsubscribe stops receiving without tearing down iperf3. Use the iperf3 terminal independently.</p>
+      <div class="term-grid">
+        <div class="console">
+          <div class="console-bar"><span class="console-title">main application</span><span class="console-meta" id="term-meta">0 lines</span></div>
+          <div class="console-body" id="app-log"><div class="console-idle">waiting for backend…</div></div>
+        </div>
+        <div class="console">
+          <div class="console-bar"><span class="console-title">iperf3</span><span class="console-meta" id="iperf-term-meta">0 lines</span></div>
+          <div class="iperf-ctl">
+            <button type="button" id="btn-iperf-start">Start</button>
+            <button type="button" class="danger" id="btn-iperf-stop">Stop</button>
+            <button type="button" class="secondary" id="btn-iperf-update">Update</button>
+            <span class="pill" id="iperf-pill">iperf3 stopped</span>
+            <label class="iperf-args-label">arguments
+              <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 5 -b 10M -t 0 -i 1 --forceflush"/>
+            </label>
+          </div>
+          <div class="console-body" id="iperf-log"><div class="console-idle">iperf3 stopped until started</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="row" style="justify-content:space-between;">
         <div>
           <h2 style="font-size:16px;">Topic statistics</h2>
@@ -91,6 +137,31 @@
       if (!r.ok) throw new Error(body.detail || body.message || r.statusText);
       return body;
     }
+    function makeTerm(elId, metaId) {
+      const el = document.getElementById(elId);
+      let lastSeq = 0;
+      return function drain(logs) {
+        (logs || []).forEach(e => {
+          if (!e || !el) return;
+          const seq = Number(e.seq || 0);
+          if (seq && seq <= lastSeq) return;
+          const idle = el.querySelector(".console-idle");
+          if (idle) idle.remove();
+          const line = e.line || e.msg || String(e);
+          const div = document.createElement("div");
+          div.className = "console-line" + (/error|fail/i.test(line) ? " err" : "");
+          div.innerHTML = '<span class="ts">' + (e.ts || e.time || "") + "</span>" + esc(line);
+          el.appendChild(div);
+          while (el.childElementCount > 400) el.removeChild(el.firstChild);
+          el.scrollTop = el.scrollHeight;
+          if (seq) lastSeq = seq;
+          const meta = document.getElementById(metaId);
+          if (meta) meta.textContent = lastSeq + " lines";
+        });
+      };
+    }
+    const drainApp = makeTerm("app-log", "term-meta");
+    const drainIperf = makeTerm("iperf-log", "iperf-term-meta");
     function esc(s) { return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
     function fmtHz(hz) {
       const n = Number(hz) || 0;
@@ -129,14 +200,24 @@
         $("kpi-dl-hz").textContent = fmtHz(st.dl_avg_freq_hz);
         $("kpi-mode").textContent = s.send_enabled ? "UL enabled (override)" : "DL receive only";
         $("kpi-pdu").textContent = s.pdu_ready ? `Ready (${s.pdu_iface})` : `Waiting (${s.pdu_iface})`;
+        drainApp((s.app && s.app.log) || []);
+        drainIperf((s.iperf && s.iperf.log) || []);
+        const ip = s.iperf || {};
+        if ($("iperf-pill")) {
+          $("iperf-pill").className = "pill " + (ip.running ? "ok" : "");
+          $("iperf-pill").textContent = ip.running ? "iperf3 running" : "iperf3 stopped";
+        }
+        if ($("iperf-args") && document.activeElement !== $("iperf-args") && ip.args != null) {
+          $("iperf-args").value = ip.args;
+        }
         $("cfg-hint").textContent =
           `Server → UE DL only ≈ ${fmtMbps(st.target_mbps || 2)}. No UL publish from client (send_enabled=${!!s.send_enabled}).`;
         if ($("pills")) {
           $("pills").innerHTML =
             `<a class="pill" href="http://10.1.137.105:3000/d/ina-exp4-s5/ina-exp4-s5?orgId=1&refresh=5s" target="_blank" rel="noopener">Grafana dashboard</a>` +
             `<span class="pill ${s.pdu_ready ? "ok":"bad"}">${s.pdu_ready ? "PDU up" : "PDU wait"}</span>` +
-            `<span class="pill ${s.mqtt_connected ? "ok":"bad"}">${s.mqtt_connected ? "MQTT" : "MQTT down"}</span>` +
-            `<span class="pill ok">DL only</span>`;
+            `<span class="pill ${s.mqtt_connected ? "ok":"bad"}">${s.mqtt_connected ? "MQTT up" : "MQTT down"}</span>` +
+            `<span class="pill ${s.mqtt_subscribed ? "ok" : ""}">${s.mqtt_subscribed ? "subscribed" : "unsubscribed"}</span>`;
         }
         renderTopicStats(st);
       } catch (e) {
@@ -145,6 +226,21 @@
     }
     refresh();
     setInterval(refresh, 1000);
+    $("btn-app-start").onclick = () => req("/api/mqtt/subscribe", { method: "POST" }).then(refresh).catch(e => alert(e.message));
+    $("btn-app-stop").onclick = () => req("/api/mqtt/unsubscribe", { method: "POST" }).then(refresh).catch(e => alert(e.message));
+    function iperfPayload(action) {
+      const el = $("iperf-args");
+      return JSON.stringify({ action, args: el ? el.value : "" });
+    }
+    function iperfAct(action) {
+      return req("/api/iperf", { method: "POST", body: iperfPayload(action) }).then(refresh);
+    }
+    $("btn-iperf-start").onclick = () => iperfAct("start").catch(e => alert(e.message));
+    $("btn-iperf-stop").onclick = () => iperfAct("stop").catch(e => alert(e.message));
+    $("btn-iperf-update").onclick = () => iperfAct("update").catch(e => alert(e.message));
+    $("iperf-args").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); iperfAct("start").catch(err => alert(err.message)); }
+    });
   </script>
 </body>
 </html>

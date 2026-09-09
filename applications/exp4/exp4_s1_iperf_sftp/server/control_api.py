@@ -44,13 +44,21 @@ SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in (
     "off",
 )
 BLOB_BYTES = int(os.environ.get("EXP4_BLOB_BYTES", str(1 * 1024 * 1024)))
-READY_DEPTH = max(1, int(os.environ.get("EXP4_READY_QUEUE_DEPTH", "8")))
+READY_DEPTH = max(1, int(os.environ.get("EXP4_READY_QUEUE_DEPTH", "32")))
 DOWNLOAD_DIR = Path(os.environ.get("EXP4_DOWNLOAD_DIR", "/home/ina/download"))
-FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
+FILE_RE = re.compile(
+    r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?\.bin$"
+)
 
 _SFTP_WANTED = SFTP_AUTOSTART
 _FILE_SEQ = 0
-_SFTP_STATS: dict[str, Any] = {"generated": 0, "ready": 0, "last_file": "", "last_error": ""}
+_SFTP_STATS: dict[str, Any] = {
+    "generated": 0,
+    "ready": 0,
+    "last_file": "",
+    "last_error": "",
+    "last_app_ms": None,
+}
 
 _LOCK = threading.Lock()
 _LOG: collections.deque[dict[str, Any]] = collections.deque(maxlen=LOG_MAX)
@@ -93,22 +101,32 @@ def _ready_files() -> list[Path]:
 
 
 def _generate_one() -> Path:
+    """Application work: create a random 1 MB file and enqueue it."""
     global _FILE_SEQ
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    t_send = time.time()
+    t0 = time.time()
     with _LOCK:
         _FILE_SEQ += 1
         seq = _FILE_SEQ
-    path = DOWNLOAD_DIR / f"q-{seq:06d}-{t_send:.6f}.bin"
-    path.write_bytes(os.urandom(BLOB_BYTES))
+    blob = os.urandom(BLOB_BYTES)
+    tmp = DOWNLOAD_DIR / f".w-{seq:06d}"
+    tmp.write_bytes(blob)
     uid, gid = _ina_ids()
-    os.chown(path, uid, gid)
-    os.chmod(path, 0o644)
+    os.chown(tmp, uid, gid)
+    os.chmod(tmp, 0o644)
+    app_ms = max(0.0, (time.time() - t0) * 1000.0)
+    path = DOWNLOAD_DIR / f"q-{seq:06d}-{t0:.6f}-{app_ms:.3f}.bin"
+    tmp.replace(path)
     with _LOCK:
         _SFTP_STATS["generated"] = int(_SFTP_STATS["generated"]) + 1
         _SFTP_STATS["last_file"] = path.name
+        _SFTP_STATS["last_app_ms"] = app_ms
         _SFTP_STATS["last_error"] = ""
-    _append_log(f"generate {path.name} bytes={BLOB_BYTES} q={len(_ready_files())}/{READY_DEPTH}", "sftp")
+    _append_log(
+        f"generate {path.name} bytes={BLOB_BYTES} app_ms={app_ms:.3f} "
+        f"q={len(_ready_files())}/{READY_DEPTH}",
+        "sftp",
+    )
     return path
 
 

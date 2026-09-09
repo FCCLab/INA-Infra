@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE))
 
 from ott_chromium import chromium_sidecar_yaml, chromium_volumes_yaml, extra_ott_env  # noqa: E402
 from scheme import NAMESPACE, REGISTRY, SLICES  # noqa: E402
+from ue_resources import app_client_resources_yaml, ue_ran_resources_yaml  # noqa: E402
 
 EDGE_CONTEXT = "edge@edge"
 UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.2-amd64"
@@ -206,7 +207,7 @@ spec:
         - name: configuration
           mountPath: /opt/oai-nr-ue/etc/nr-ue.conf
           subPath: ue.conf
-      - name: app-client
+{ue_ran_resources_yaml()}      - name: app-client
         image: {CLIENT_IMAGES[sid]}
         imagePullPolicy: IfNotPresent
         securityContext:
@@ -225,25 +226,7 @@ spec:
         - name: CONSOLE_MAC
           value: "{console_mac}"
 {extra_env(sid)}
-        resources:
-          requests: {{cpu: 100m, memory: 128Mi}}
-          limits: {{cpu: "1", memory: 1Gi}}
-      - name: traffic-tester
-        image: docker.io/nicolaka/netshoot:latest
-        imagePullPolicy: IfNotPresent
-        command: ["sleep", "infinity"]
-        env:
-        - name: SERVER_URL
-          value: "http://{s['app_ip']}:80"
-        - name: SLICE_ID
-          value: "{sid}"
-        securityContext:
-          capabilities:
-            add: ["NET_ADMIN", "NET_RAW"]
-        resources:
-          requests: {{cpu: 50m, memory: 64Mi}}
-          limits: {{cpu: 200m, memory: 128Mi}}
-{chromium_sidecar_yaml(ue_name) if sid == 3 else ""}      volumes:
+{app_client_resources_yaml(sid)}{chromium_sidecar_yaml(ue_name) if sid == 3 else ""}      volumes:
       - name: configuration
         configMap:
           name: {ue_name}-configmap

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exp4 slice 1: SFTP download of a queued 1 MB file over the PDU.
 
-Latency is last-byte receive minus t_send (stamped in the remote filename
-at generate start).
+Latency is the server application time encoded in the filename (create random
+file), not last-byte SFTP.
 """
 
 from __future__ import annotations
@@ -17,7 +17,9 @@ from pathlib import Path
 
 import paramiko
 
-FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
+FILE_RE = re.compile(
+    r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?\.bin$"
+)
 
 
 def main() -> None:
@@ -47,18 +49,19 @@ def main() -> None:
         sock=sock,
     )
     sftp = client.open_sftp()
-    queued: list[tuple[int, str, float]] = []
+    queued: list[tuple[int, str, float, float | None]] = []
     for name in sftp.listdir(args.remote_dir):
         m = FILE_RE.match(name)
         if m:
-            queued.append((int(m.group(1)), name, float(m.group(2))))
+            app_ms = float(m.group(3)) if m.group(3) else None
+            queued.append((int(m.group(1)), name, float(m.group(2)), app_ms))
     queued.sort(key=lambda x: x[0])
     if not queued:
         sftp.close()
         client.close()
         print("no queued file ready", file=sys.stderr)
         sys.exit(2)
-    _seq, name, t_send = queued[0]
+    _seq, name, t_send, app_ms = queued[0]
     remote = f"{args.remote_dir}/{name}"
     dest = Path("/tmp") / name
     nbytes = 0
@@ -67,6 +70,7 @@ def main() -> None:
         nonlocal nbytes
         nbytes = transferred
 
+    t_get0 = time.time()
     sftp.get(remote, str(dest), callback=_cb)
     t_recv = time.time()
     try:
@@ -76,12 +80,11 @@ def main() -> None:
     sftp.close()
     client.close()
     dest.unlink(missing_ok=True)
-    e2e_ms = max(0.0, (t_recv - t_send) * 1000.0)
-    dt = max(t_recv - t_send, 1e-6)
+    dt = max(t_recv - t_get0, 1e-6)
     mbit = (nbytes * 8.0) / dt / 1e6
     print(
         f"exp4_sftp host={args.host} file={name} bytes={nbytes} "
-        f"e2e_ms={e2e_ms:.1f} t_send={t_send:.6f} t_recv={t_recv:.6f} "
+        f"app_ms={app_ms} t_send={t_send:.6f} t_recv={t_recv:.6f} "
         f"transfer_s={dt:.4f} goodput_mbit={mbit:.3f} deleted",
         flush=True,
     )

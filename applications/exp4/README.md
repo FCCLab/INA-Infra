@@ -144,19 +144,28 @@ Same image, two processes:
 
 ## Interfaces
 
-| Role | Env | Simulated 5G (`exp4_deploy.sh`) | Later with real 5G |
+`paper/exp4` only **names** the ifaces and the app-server IP. The client image
+detects the live to-server iface, installs `/32` routes, and binds sockets
+(`applications/exp4/common/to_server.py` + `ifaces.sh`).
+
+| Role | Env (name only) | Simulated 5G (`exp4_deploy.sh`) | 5G on `usrp` |
 | :--- | :--- | :--- | :--- |
 | Server data | `TO_CLIENT_IFACE` | `net1` (`10.140.<N>.1`) | `net1` (`10.1.137.21N` N6) |
 | Server console | `CONSOLE_IFACE` | `net2` (`10.1.137.21N`) | `eth0` (optional) |
-| Client data | `TO_SERVER_IFACE` | `net1` (`10.140.<N>.2`) | `oaitun_ue1` (`10.140.<N>.2`) |
-| Client console | `CONSOLE_IFACE` | `net2` (`10.1.137.22N`) | `net1` (`.22N`) |
+| Client data | `TO_SERVER_IFACE` | `net1` (`10.140.<N>.2`) | hint `oaitun_ue1`; app also accepts any `oaitun*` with IPv4 |
+| Client console | `CONSOLE_IFACE` | `net2` (`10.1.137.22N`) | `net2` (`.22N`) |
+
+App-server IPs (`TARGET_SERVER_IP`, `IPERF_HOST`, `SFTP_HOST`, `BROKER_HOST`, …)
+are pinned via the to-server iface so they are not absorbed by net2’s
+`10.1.137.0/24`. Console stays on `CONSOLE_IFACE`.
 
 ## Metrics
 
 Each **server** publishes absolute **CPU millicores / RAM MB / GPU % / VRAM MB**
 (`origin=server`; `1000m` = one full CPU; `gpu_pct` = 0–100% of one GPU).
-Each **client** publishes **DL throughput** (RX on `TO_SERVER_IFACE` / `net1`) and **E2E latency**
-(`t_recv - t_send` over sim5G `net1`, `origin=client`):
+Each **client** publishes **DL throughput** (RX on the live to-server iface) and
+**E2E latency** only while that iface is up (`origin=client`). Neither metric
+uses the console macvlan (`net2`):
 
 - **s1** SFTP: queued **1 MB** files; `t_send` at generate start (in the filename); `t_recv` when the file is **fully received**.
 - **s4** same SFTP + iperf path as s1, **plus encrypt** before the file is queued (same size, still 1 MB); `t_send` at generate start; `t_recv` when fully received (so s4 latency is higher than s1).

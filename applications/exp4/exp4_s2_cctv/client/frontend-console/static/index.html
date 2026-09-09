@@ -110,6 +110,21 @@
     .log-level.warn { color: var(--warn); }
     .log-level.error { color: var(--bad); }
     .log-msg { color: var(--text-dim); word-break: break-all; }
+    .term-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .term-grid { grid-template-columns: 1fr; } }
+    .console { background: #05080f; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
+    .console-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255,255,255,.04); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+    .console-title { color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; }
+    .console-meta { margin-left: auto; color: var(--text-faint); }
+    .console-body { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.5; min-height: 220px; max-height: 320px; overflow: auto; padding: 10px 12px 14px; white-space: pre-wrap; word-break: break-word; color: #c6f6d5; }
+    .console-idle { color: var(--text-faint); }
+    .console-line { padding: 1px 0; }
+    .console-line .ts { color: var(--text-faint); margin-right: 8px; }
+    .console-line.err { color: var(--bad); }
+    .iperf-ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.025); }
+    .iperf-ctl button { padding: 6px 12px; font-size: 12px; }
+    .iperf-ctl .iperf-args-label { flex: 1 1 220px; min-width: 180px; margin: 0; display: flex; flex-direction: column; gap: 3px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+    .iperf-ctl input { width: 100%; font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 6px 8px; text-transform: none; letter-spacing: 0; color: #eef2f9; }
     
     .diag-res { padding: 12px 14px; border-radius: 10px; background: #05080f; border: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
@@ -285,11 +300,33 @@
 
         <section class="card">
           <div class="row" style="justify-content: space-between;">
-            <h2>Transmission & Event Logs</h2>
-            <button type="button" class="secondary" id="btn-clear-logs" style="padding: 4px 8px; font-size: 11px;">Clear View</button>
+            <h2>Terminals</h2>
+            <button type="button" class="secondary" id="btn-clear-logs" style="padding: 4px 8px; font-size: 11px;">Clear view</button>
           </div>
-          <div class="log-box" id="log-container">
-            <div class="log-item"><span class="log-time">--:--:--</span><span class="log-msg">Connecting to local backend…</span></div>
+          <div class="term-grid">
+            <div class="console">
+              <div class="console-bar">
+                <span class="console-title">main application</span>
+                <span class="console-meta" id="term-meta">0 lines</span>
+              </div>
+              <div class="console-body" id="log-container"><div class="console-idle">Connecting to local backend…</div></div>
+            </div>
+            <div class="console">
+              <div class="console-bar">
+                <span class="console-title">iperf3</span>
+                <span class="console-meta" id="iperf-term-meta">0 lines</span>
+              </div>
+              <div class="iperf-ctl">
+                <button type="button" id="btn-iperf-start">Start</button>
+                <button type="button" class="danger" id="btn-iperf-stop">Stop</button>
+                <button type="button" class="secondary" id="btn-iperf-update">Update</button>
+                <span class="pill" id="iperf-pill">iperf3 stopped</span>
+                <label class="iperf-args-label">arguments
+                  <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 5 -b 10M -t 0 -i 1 --forceflush"/>
+                </label>
+              </div>
+              <div class="console-body" id="iperf-log"><div class="console-idle">iperf3 stopped until started</div></div>
+            </div>
           </div>
         </section>
       </div>
@@ -415,6 +452,31 @@
       });
       return resp.json();
     }
+    function makeTerm(elId, metaId) {
+      const el = document.getElementById(elId);
+      let lastSeq = 0;
+      return function drain(logs) {
+        (logs || []).forEach(e => {
+          if (!e || !el) return;
+          const seq = Number(e.seq || 0);
+          if (seq && seq <= lastSeq) return;
+          const idle = el.querySelector('.console-idle');
+          if (idle) idle.remove();
+          const line = e.line || e.msg || String(e);
+          const div = document.createElement('div');
+          div.className = 'console-line' + (/error|fail/i.test(line) ? ' err' : '');
+          div.innerHTML = '<span class="ts">' + (e.ts || e.time || '') + '</span>' + line;
+          el.appendChild(div);
+          while (el.childElementCount > 400) el.removeChild(el.firstChild);
+          el.scrollTop = el.scrollHeight;
+          if (seq) lastSeq = seq;
+          const meta = document.getElementById(metaId);
+          if (meta) meta.textContent = lastSeq + ' lines';
+        });
+      };
+    }
+    const drainApp = makeTerm('log-container', 'term-meta');
+    const drainIperf = makeTerm('iperf-log', 'iperf-term-meta');
 
     async function loadVideos() {
       try {
@@ -452,7 +514,8 @@
       try {
         state = await api('/status');
         updateUI();
-        loadLogs();
+        drainApp((state.app && state.app.log) || []);
+        drainIperf((state.iperf && state.iperf.log) || []);
         if (!playersWired) await wireDlPlayer();
       } catch (err) {
         console.error('Refresh failed:', err);
@@ -499,6 +562,17 @@
       const uriPill = document.getElementById('stream-uri-pill');
       if (uriPill) uriPill.textContent = state.rtsp_url || '—';
 
+      const ip = state.iperf || {};
+      const ipill = document.getElementById('iperf-pill');
+      if (ipill) {
+        ipill.className = 'pill ' + (ip.running ? 'ok' : '');
+        ipill.textContent = ip.running ? 'iperf3 running' : 'iperf3 stopped';
+      }
+      const argsEl = document.getElementById('iperf-args');
+      if (argsEl && document.activeElement !== argsEl && ip.args != null) {
+        argsEl.value = ip.args;
+      }
+
       const el = (id) => document.getElementById(id);
       if (document.activeElement !== el('cfg-host') && el('cfg-host')) el('cfg-host').value = state.rtsp_target_host || '10.1.137.212';
       if (document.activeElement !== el('cfg-port') && el('cfg-port')) el('cfg-port').value = state.rtsp_port || 8554;
@@ -512,26 +586,22 @@
       }
     }
 
-    async function loadLogs() {
-      try {
-        const logs = await api('/logs?limit=40');
-        const container = document.getElementById('log-container');
-        if (!logs.length) return;
-        container.innerHTML = logs.map(l => `
-          <div class="log-item">
-            <span class="log-time">${l.time || '--:--:--'}</span>
-            <span class="log-level ${l.level || 'info'}">${l.level || 'info'}</span>
-            <span class="log-msg">${l.msg || ''}</span>
-          </div>
-        `).join('');
-      } catch (err) {
-        console.error('Failed loading logs:', err);
-      }
-    }
-
-    document.getElementById('btn-start').onclick = () => api('/stream/start', { method: 'POST' }).then(() => refresh());
-    document.getElementById('btn-stop').onclick = () => api('/stream/stop', { method: 'POST' }).then(() => refresh());
+    document.getElementById('btn-start').onclick = () => api('/app/start', { method: 'POST' }).then(() => refresh());
+    document.getElementById('btn-stop').onclick = () => api('/app/stop', { method: 'POST' }).then(() => refresh());
     document.getElementById('btn-restart').onclick = () => api('/stream/restart', { method: 'POST' }).then(() => refresh());
+    function iperfPayload(action) {
+      const el = document.getElementById('iperf-args');
+      return JSON.stringify({ action, args: el ? el.value : '' });
+    }
+    function iperfAct(action) {
+      return api('/iperf', { method: 'POST', body: iperfPayload(action) }).then(() => refresh());
+    }
+    document.getElementById('btn-iperf-start').onclick = () => iperfAct('start');
+    document.getElementById('btn-iperf-stop').onclick = () => iperfAct('stop');
+    document.getElementById('btn-iperf-update').onclick = () => iperfAct('update');
+    document.getElementById('iperf-args').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); iperfAct('start'); }
+    });
     document.getElementById('btn-refresh').onclick = () => refresh();
 
     document.getElementById('btn-save-config').onclick = async () => {
@@ -566,7 +636,8 @@
     };
 
     document.getElementById('btn-clear-logs').onclick = () => {
-      document.getElementById('log-container').innerHTML = '<div class="log-item"><span class="log-time">--:--:--</span><span class="log-msg">Log view cleared.</span></div>';
+      document.getElementById('log-container').innerHTML = '<div class="console-idle">Log view cleared.</div>';
+      document.getElementById('iperf-log').innerHTML = '<div class="console-idle">iperf3 stopped until started</div>';
     };
 
     loadVideos().then(async () => {
@@ -574,7 +645,6 @@
       await wireDlPlayer();
     });
     setInterval(refresh, 2500);
-  </script>
   </script>
 </body>
 </html>

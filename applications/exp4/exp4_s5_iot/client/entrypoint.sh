@@ -17,6 +17,13 @@ case "${SCHEME_ID:-}${EXP4_NO5G:-}" in
     ;;
 esac
 export TO_SERVER_IFACE CONSOLE_IFACE
+for _p in /exp4/ifaces.sh /app/common/ifaces.sh; do
+  [ -f "$_p" ] || continue
+  # shellcheck disable=SC1090
+  . "$_p"
+  exp4_client_ifaces || true
+  break
+done
 export EXP4_METRICS_ORIGIN="${EXP4_METRICS_ORIGIN:-client}"
 export EXP4_APP_TYPE="${EXP4_APP_TYPE:-exp4-s5}"
 export SLICE_ID="${SLICE_ID:-5}"

@@ -32,8 +32,8 @@ SLICES = {
         "dnn": "oai1",
         "sd": "0x000001",
         "imsi": "001010000000101",
-        "cpu_app": 0.5,
-        "mem_app": "256Mi",
+        "cpu_app": 2.0,
+        "mem_app": "1Gi",
         "gpu_app": 0.0,
         "b_min": 54.6,  # equal 1/5 of 273
     },

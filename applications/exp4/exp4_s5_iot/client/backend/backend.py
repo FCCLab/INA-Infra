@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import socket
 import subprocess
 import threading
 import time
+import types
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +18,25 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+import sys
+
+for _p in ("/usr/local/bin", "/app/backend", "/app"):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    from to_server import detect_to_server_iface, ensure_pin_watch, pin_to_server
+except ImportError:
+    detect_to_server_iface = None  # type: ignore
+    ensure_pin_watch = None  # type: ignore
+    pin_to_server = None  # type: ignore
+from ue_control import (
+    Iperf3Client,
+    LogBuffer,
+    app_fields,
+    attach_app_routes,
+    attach_iperf_routes,
+)
 
 try:
     import paho.mqtt.client as mqtt
@@ -63,7 +85,8 @@ API_IFACE_CFG = (
 )
 PDU_IFACE_CFG = TO_SERVER_IFACE_CFG
 PDU_ROUTE_HOSTS = os.environ.get("PDU_ROUTE_HOSTS", "") or BROKER_HOST
-PDU_WAIT_TIMEOUT = int(os.environ.get("PDU_WAIT_TIMEOUT", "300"))
+PDU_WAIT_TIMEOUT = int(os.environ.get("PDU_WAIT_TIMEOUT", "0"))  # 0 = never give up
+PDU_POLL_S = float(os.environ.get("PDU_POLL_S", "2"))
 LOG_LIMIT = int(os.environ.get("PUBLISH_LOG_LIMIT", "80"))
 STAT_WINDOW_S = float(os.environ.get("MQTT_STAT_WINDOW_S", "30"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9106"))
@@ -78,6 +101,13 @@ PROBE_ACK_TOPIC = os.environ.get("PROBE_ACK_TOPIC") or f"{MQTT_TOPIC_PREFIX}/pro
 LATENCY_PROBE_PERIOD_S = float(os.environ.get("LATENCY_PROBE_PERIOD_S") or "0.5")
 # DL-only default: no UL probe publish from UE client → server.
 LATENCY_PROBE_ENABLED = os.environ.get("LATENCY_PROBE_ENABLED", "0") not in ("0", "false", "False")
+# Kernel receive buffer so bursts from Mosquitto are not window-limited.
+MQTT_SO_RCVBUF = max(65536, int(os.environ.get("MQTT_SO_RCVBUF", str(4 * 1024 * 1024))))
+# Log / latency-file sample rate for bulk DL (every Nth message). 1 = every msg.
+MQTT_DL_LOG_EVERY = max(1, int(os.environ.get("MQTT_DL_LOG_EVERY", "20")))
+_T_SEND_RE = re.compile(rb'"t_send":([0-9.]+)')
+_SEQ_RE = re.compile(rb'"seq":([0-9]+)')
+_dl_rx_n = 0
 
 _pdu_iface_live = PDU_IFACE_CFG
 _pdu_lock = threading.Lock()
@@ -352,6 +382,16 @@ def _messages_from_env() -> list[dict[str, Any]]:
 
 
 _messages = _messages_from_env()
+APP_AUTOSTART = os.environ.get("APP_AUTOSTART", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+_APP_WANTED = APP_AUTOSTART
+_mqtt_subscribed = False
+APP_LOG = LogBuffer(kind="mqtt")
+IPERF = Iperf3Client()
 _state = {
     # DL-only default: UE client receives MQTT; does not publish UL to server.
     "send_enabled": os.environ.get("SEND_ENABLED", "0") not in ("0", "false", "False"),
@@ -360,6 +400,7 @@ _state = {
     "last_error": None,
     "loop_alive": False,
     "mqtt_connected": False,
+    "mqtt_subscribed": False,
     "published": 0,
     "probe_rtt_ms": 0.0,
     "probe_owd_ms": 0.0,
@@ -399,10 +440,25 @@ def _resolve_api_iface() -> str:
     return API_IFACE_CFG
 
 
+def _log(msg: str) -> None:
+    print(f"[exp4-s5] {msg}", flush=True)
+    APP_LOG.append(msg)
+
+
 def _discover_pdu_iface() -> Optional[str]:
+    """Return to-server iface once it has IPv4. OAI creates oaitun_ue1 after PDU."""
+    if detect_to_server_iface is not None:
+        return detect_to_server_iface()
     candidates = []
     preferred = (TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, "net1") if _NO5G else (
-        TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, f"oaitun_ue{SLICE_ID}", "oaitun_ue4", "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue5"
+        TO_SERVER_IFACE_CFG,
+        PDU_IFACE_CFG,
+        "oaitun_ue1",
+        f"oaitun_ue{SLICE_ID}",
+        "oaitun_ue2",
+        "oaitun_ue3",
+        "oaitun_ue4",
+        "oaitun_ue5",
     )
     for raw in preferred:
         if raw and raw not in candidates:
@@ -472,6 +528,13 @@ def _ping_loop() -> None:
 
 def _pin_pdu() -> bool:
     global _pdu_iface_live
+    if pin_to_server is not None:
+        iface = pin_to_server()
+        if iface:
+            with _pdu_lock:
+                _pdu_iface_live = iface
+            return True
+        return False
     hosts = _server_hosts()
     if not hosts:
         return True
@@ -494,18 +557,100 @@ def _pin_pdu() -> bool:
 
 
 def _wait_pdu() -> None:
-    elapsed = 0
-    while elapsed < PDU_WAIT_TIMEOUT:
+    """Block until the to-server iface exists (optional timeout). 0 = forever."""
+    elapsed = 0.0
+    while PDU_WAIT_TIMEOUT <= 0 or elapsed < PDU_WAIT_TIMEOUT:
         if _pin_pdu():
             with _lock:
                 _state["pdu_ready"] = True
                 _state["pdu_iface"] = _pdu_iface_live
+                _state["last_error"] = None
+            _log(f"to-server ready on {_pdu_iface_live}")
             return
-        time.sleep(2)
-        elapsed += 2
+        time.sleep(PDU_POLL_S)
+        elapsed += PDU_POLL_S
     with _lock:
         _state["pdu_ready"] = False
         _state["last_error"] = f"PDU (prefer {PDU_IFACE_CFG}) not ready after {PDU_WAIT_TIMEOUT}s"
+
+
+def _mqtt_reset() -> None:
+    """Drop the broker TCP so the next connect uses the PDU /32, not net2."""
+    global _mqtt_client, _mqtt_connected, _mqtt_subscribed
+    client = _mqtt_client
+    _mqtt_client = None
+    _mqtt_connected = False
+    _mqtt_subscribed = False
+    with _lock:
+        _state["mqtt_connected"] = False
+        _state["mqtt_subscribed"] = False
+    if client is None:
+        return
+    try:
+        client.loop_stop()
+    except Exception:
+        pass
+    try:
+        client.disconnect()
+    except Exception:
+        pass
+
+
+def _dl_topics() -> tuple[str, ...]:
+    return (DL_TOPIC, LATENCY_TOPIC, PROBE_ACK_TOPIC)
+
+
+def _set_subscribed(ok: bool) -> None:
+    global _mqtt_subscribed
+    _mqtt_subscribed = bool(ok)
+    with _lock:
+        _state["mqtt_subscribed"] = bool(ok)
+
+
+def _mqtt_subscribe_topics(client: Any) -> None:
+    for topic in _dl_topics():
+        client.subscribe(topic, qos=MQTT_QOS)
+    _set_subscribed(True)
+    _log(f"subscribed {', '.join(_dl_topics())}")
+
+
+def _mqtt_unsubscribe_topics(client: Any) -> None:
+    for topic in _dl_topics():
+        try:
+            client.unsubscribe(topic)
+        except Exception:
+            pass
+    _set_subscribed(False)
+    _log(f"unsubscribed {', '.join(_dl_topics())}")
+
+
+def _watch_pdu_loop() -> None:
+    """UE only creates oaitun after PDU setup. Keep looking and re-pin / reconnect."""
+    was_ready = False
+    while True:
+        ok = _pin_pdu()
+        with _lock:
+            _state["pdu_ready"] = ok
+            _state["pdu_iface"] = _pdu_iface_live if ok else ""
+            if ok:
+                _state["last_error"] = None
+            else:
+                _state["last_error"] = f"waiting for to-server iface {PDU_IFACE_CFG}"
+        if ok and not was_ready:
+            _log(f"to-server {_pdu_iface_live} up; pinning {','.join(_server_hosts())} and reconnecting MQTT")
+            _mqtt_reset()
+            if _APP_WANTED:
+                try:
+                    _ensure_mqtt()
+                except Exception as exc:
+                    with _lock:
+                        _state["last_error"] = str(exc)
+                    _log(f"MQTT connect after PDU failed: {exc}")
+        elif not ok and was_ready:
+            _log(f"to-server iface gone; waiting for PDU ({PDU_IFACE_CFG})")
+            _mqtt_reset()
+        was_ready = ok
+        time.sleep(PDU_POLL_S)
 
 
 def _payload_body(msg: dict[str, Any], seq: int) -> dict[str, Any]:
@@ -594,13 +739,19 @@ def _mqtt_on_connect(client, _userdata, _flags, reason_code, _properties=None):
         _state["mqtt_connected"] = ok
         if not ok:
             _state["last_error"] = f"MQTT connect failed: {reason_code}"
-    if ok:
+            _state["mqtt_subscribed"] = False
+    if not ok:
+        _set_subscribed(False)
+        return
+    # Re-subscribe after reconnect only when the console wants DL.
+    if _APP_WANTED:
         try:
-            client.subscribe(DL_TOPIC, qos=MQTT_QOS)
-            client.subscribe(LATENCY_TOPIC, qos=MQTT_QOS)
-            client.subscribe(PROBE_ACK_TOPIC, qos=MQTT_QOS)
-        except Exception:
-            pass
+            _mqtt_subscribe_topics(client)
+        except Exception as exc:
+            _set_subscribed(False)
+            _log(f"subscribe after connect failed: {exc}")
+    else:
+        _set_subscribed(False)
 
 
 def _mqtt_on_disconnect(_client, _userdata, _flags, reason_code, _properties=None):
@@ -608,17 +759,126 @@ def _mqtt_on_disconnect(_client, _userdata, _flags, reason_code, _properties=Non
     _mqtt_connected = False
     with _lock:
         _state["mqtt_connected"] = False
+        _state["mqtt_subscribed"] = False
+    _set_subscribed(False)
+
+
+def _paho_loop_read_drain(self, max_packets: int = 1):
+    """Drain the broker socket until EAGAIN.
+
+    paho-mqtt 2.x ``loop_read`` overwrites max_packets with the QoS 1/2 inflight
+    count, so QoS 0 reads **one** MQTT packet per select() and leaves Recv-Q in
+    the kernel. Keep reading until the socket is empty so the TCP window stays
+    open and Mosquitto can push as fast as the path allows.
+    """
+    if self._sock is None:
+        return mqtt.MQTT_ERR_NO_CONN
+    again = mqtt.MQTT_ERR_AGAIN
+    success = mqtt.MQTT_ERR_SUCCESS
+    while True:
+        if self._sock is None:
+            return mqtt.MQTT_ERR_NO_CONN
+        rc = self._packet_read()
+        if rc == again:
+            return success
+        if rc != success:
+            if rc > 0:
+                return self._loop_rc_handle(rc)
+            return rc
+
+
+def _mqtt_on_socket_open(_client, _userdata, sock):
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, MQTT_SO_RCVBUF)
+    except OSError:
+        pass
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+    except (OSError, AttributeError):
+        pass
+
+
+def _extract_re_float(raw: bytes, cre: re.Pattern[bytes]) -> Optional[float]:
+    m = cre.search(raw)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _on_dl_fast(topic: str, raw: bytes, nbytes: int, recv: float) -> None:
+    """Count DL bytes and OWD without json.loads of the pad."""
+    global _dl_rx_n, _bytes_window, _window_t0
+    t_send = _extract_re_float(raw, _T_SEND_RE)
+    lat = max(0.0, (recv - t_send) * 1000.0) if t_send else None
+    _dl_rx_n += 1
+    log_it = (_dl_rx_n % MQTT_DL_LOG_EVERY) == 0
+    mbps = 0.0
+    with _lock:
+        _note_topic(topic, nbytes, "downlink")
+        _bytes_window += nbytes
+        now = time.monotonic()
+        dt = max(0.2, now - _window_t0)
+        mbps = (_bytes_window * 8.0) / (dt * 1e6)
+        if dt >= 5.0:
+            _bytes_window = 0
+            _window_t0 = now
+        if lat is not None:
+            _state["last_delay_ms"] = round(lat, 2)
+        if log_it:
+            seq = None
+            sm = _SEQ_RE.search(raw)
+            if sm:
+                try:
+                    seq = int(sm.group(1))
+                except ValueError:
+                    seq = None
+            _exchanges.appendleft(
+                {
+                    "ts": _now(),
+                    "direction": "downlink",
+                    "ok": True,
+                    "topic": topic,
+                    "bytes": nbytes,
+                    "latency_ms": round(lat, 2) if lat is not None else None,
+                    "seq": seq,
+                }
+            )
+            _state["last_error"] = None
+    if APP_LATENCY_MS is not None:
+        APP_UE_THROUGHPUT_MBPS.labels(ue_id=UE_ID).set(mbps)
+        APP_THROUGHPUT_MBPS.set(mbps)
+        if lat is not None:
+            APP_UE_LATENCY_MS.labels(ue_id=UE_ID).set(lat)
+            APP_LATENCY_MS.set(lat)
+    if log_it and lat is not None:
+        try:
+            open("/tmp/exp4_app_latency_ms", "w", encoding="utf-8").write(f"{lat:.3f}\n")
+        except OSError:
+            pass
 
 
 def _mqtt_on_message(_client, _userdata, msg):
     recv = time.time()
     raw = msg.payload or b""
+    topic = str(msg.topic or "")
+    try:
+        if topic == DL_TOPIC or "/dl/" in topic:
+            _on_dl_fast(topic, raw, len(raw), recv)
+            return
+    except Exception:
+        return
     parsed = None
     try:
         parsed = json.loads(raw)
     except Exception:
         parsed = None
-    topic = str(msg.topic or "")
     if topic == PROBE_ACK_TOPIC or topic.startswith("slice_d/probe-ack/"):
         t_send = parsed.get("t_send") if isinstance(parsed, dict) else None
         t_recv = parsed.get("t_recv") if isinstance(parsed, dict) else None
@@ -665,6 +925,11 @@ def _mqtt_on_message(_client, _userdata, msg):
                 lat = float(parsed["latency_ms"])
             except (TypeError, ValueError):
                 lat = None
+        if lat is not None:
+            try:
+                open("/tmp/exp4_e2e_latency_ms", "w", encoding="utf-8").write(f"{lat:.3f}\n")
+            except OSError:
+                pass
         _record(
             {
                 "ts": _now(),
@@ -684,10 +949,6 @@ def _mqtt_on_message(_client, _userdata, msg):
     lat = None
     if isinstance(t_send, (int, float)) and t_send > 0:
         lat = max(0.0, (recv - float(t_send)) * 1000.0)
-        try:
-            open("/tmp/exp4_e2e_latency_ms", "w", encoding="utf-8").write(f"{lat:.3f}\n")
-        except OSError:
-            pass
     _record(
         {
             "ts": _now(),
@@ -716,10 +977,25 @@ def _ensure_mqtt() -> Any:
     client.on_connect = _mqtt_on_connect
     client.on_disconnect = _mqtt_on_disconnect
     client.on_message = _mqtt_on_message
+    client.on_socket_open = _mqtt_on_socket_open
+    try:
+        client.loop_read = types.MethodType(_paho_loop_read_drain, client)
+    except Exception:
+        pass
     client.reconnect_delay_set(min_delay=1, max_delay=30)
-    client.connect_async(BROKER_HOST, BROKER_PORT, keepalive=60)
+    bind = ""
+    if not _NO5G:
+        iface = _discover_pdu_iface()
+        bind = get_interface_ip(iface) if iface else ""
+        if not bind:
+            raise RuntimeError("MQTT deferred until to-server iface has IPv4")
+    client.connect_async(BROKER_HOST, BROKER_PORT, keepalive=60, bind_address=bind)
     client.loop_start()
     _mqtt_client = client
+    _log(
+        f"MQTT connecting to {BROKER_HOST}:{BROKER_PORT} bind={bind or 'any'} "
+        f"drain=until-empty rcvbuf={MQTT_SO_RCVBUF}"
+    )
     return client
 
 
@@ -846,14 +1122,9 @@ def _restart_publishers() -> None:
 
 
 def _loop() -> None:
-    _wait_pdu()
-    try:
-        _ensure_mqtt()
-    except Exception as exc:
-        with _lock:
-            _state["last_error"] = str(exc)
     with _lock:
         _state["loop_alive"] = True
+        _state["last_error"] = f"waiting for to-server iface {PDU_IFACE_CFG}"
     _restart_publishers()
     if LATENCY_PROBE_ENABLED:
         threading.Thread(
@@ -862,9 +1133,20 @@ def _loop() -> None:
             name="iot-latency-probe",
             daemon=True,
         ).start()
-    while True:
-        time.sleep(5)
-        _pin_pdu()
+    if _NO5G:
+        _wait_pdu()
+        try:
+            if _APP_WANTED:
+                _ensure_mqtt()
+        except Exception as exc:
+            with _lock:
+                _state["last_error"] = str(exc)
+        while True:
+            time.sleep(PDU_POLL_S)
+            _pin_pdu()
+        return
+    _log(f"watching for to-server iface {PDU_IFACE_CFG} (UE creates it after PDU)")
+    _watch_pdu_loop()
 
 
 app = FastAPI(title=f"IoT UE {CLIENT_INDEX} backend", docs_url="/api/docs")
@@ -945,6 +1227,14 @@ def api_status() -> dict:
         "stats": stats,
         **st,
         "mqtt_connected": _mqtt_connected,
+        "mqtt_subscribed": _mqtt_subscribed,
+        "app": app_fields(
+            running=bool(_mqtt_subscribed),
+            wanted=bool(_APP_WANTED),
+            log=APP_LOG,
+            extra={"kind": "mqtt", "subscribed": bool(_mqtt_subscribed)},
+        ),
+        "iperf": IPERF.snapshot(),
     }
 
 
@@ -1030,6 +1320,65 @@ def api_publish_once(body: Optional[PublishOnceIn] = None) -> dict:
     return _publish_one(msg)
 
 
+def _app_start() -> None:
+    """Subscribe to DL topics (connect to broker if needed)."""
+    global _APP_WANTED
+    _APP_WANTED = True
+    try:
+        client = _ensure_mqtt()
+        if _mqtt_connected:
+            _mqtt_subscribe_topics(client)
+        else:
+            _log("MQTT connecting; will subscribe on connect")
+    except Exception as exc:
+        _log(f"MQTT subscribe failed: {exc}")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _app_stop() -> None:
+    """Unsubscribe from DL topics; keep broker TCP for a fast re-subscribe."""
+    global _APP_WANTED
+    _APP_WANTED = False
+    client = _mqtt_client
+    if client is not None and _mqtt_connected:
+        try:
+            _mqtt_unsubscribe_topics(client)
+        except Exception as exc:
+            _log(f"MQTT unsubscribe failed: {exc}")
+            _set_subscribed(False)
+    else:
+        _set_subscribed(False)
+        _log("MQTT unsubscribed (not connected)")
+
+
+attach_iperf_routes(app, IPERF)
+attach_app_routes(app, start_fn=_app_start, stop_fn=_app_stop, log=APP_LOG)
+
+
+@app.post("/api/mqtt/subscribe")
+def api_mqtt_subscribe() -> dict:
+    _app_start()
+    return {
+        "ok": True,
+        "action": "subscribe",
+        "mqtt_connected": _mqtt_connected,
+        "mqtt_subscribed": _mqtt_subscribed,
+        "topics": list(_dl_topics()),
+    }
+
+
+@app.post("/api/mqtt/unsubscribe")
+def api_mqtt_unsubscribe() -> dict:
+    _app_stop()
+    return {
+        "ok": True,
+        "action": "unsubscribe",
+        "mqtt_connected": _mqtt_connected,
+        "mqtt_subscribed": _mqtt_subscribed,
+        "topics": list(_dl_topics()),
+    }
+
+
 @app.on_event("startup")
 def _startup() -> None:
     if start_http_server is not None:
@@ -1053,6 +1402,9 @@ def _startup() -> None:
 
     if start_heartbeat is not None:
         start_heartbeat(payload_fn=_hb)
+    if ensure_pin_watch is not None:
+        ensure_pin_watch()
+    IPERF.start_supervisor()
     threading.Thread(target=_ping_loop, name="iot-ue-ping-loop", daemon=True).start()
     threading.Thread(target=_loop, name="iot-ue-loop", daemon=True).start()
 

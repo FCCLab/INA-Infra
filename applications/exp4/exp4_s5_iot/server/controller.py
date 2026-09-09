@@ -23,10 +23,17 @@ import sys
 import threading
 import time
 from collections import deque
+from typing import Optional
 
 import paho.mqtt.client as mqtt
 
 from common import metrics
+import dl_runtime
+
+try:
+    from mqtt_tx_latency import start_sniffer as start_mqtt_tx_sniffer
+except ImportError:
+    start_mqtt_tx_sniffer = None  # type: ignore
 
 
 def _env(name: str, default: str) -> str:
@@ -64,10 +71,12 @@ METRICS_BIND_IP = _env("METRICS_BIND_IP", "0.0.0.0")
 METRICS_PORT = _env_int("METRICS_PORT", 9105)
 
 # Exp4 slice 5 is MQTT Get / DL telemetry (SLA 80 ms, T_bar = 2 Mbit/s).
-# 20 Hz × 12500 B ≈ 2.0 Mbit/s application payload per device.
-DL_FAST_PERIOD_S = _env_float("DL_FAST_PERIOD_S", 0.002)
+# Fast DL period 0 = publish as fast as the broker will take so the UE PDU
+# stays busy. Mosquitto max_queued_* keeps a small standing buffer.
+DL_FAST_PERIOD_S = _env_float("DL_FAST_PERIOD_S", 0.0)
 DL_SLOW_PERIOD_S = _env_float("DL_SLOW_PERIOD_S", 1.0)
-DL_PAYLOAD_BYTES = _env_int("DL_PAYLOAD_BYTES", 5000)
+DL_PAYLOAD_BYTES = _env_int("DL_PAYLOAD_BYTES", 128)
+MQTT_MAX_QUEUED = max(1, _env_int("MQTT_MAX_QUEUED", 32))
 # Devices unseen for this long are dropped from the downlink fan-out. Default is
 # 2x the client's default slow uplink period (2 * 3600 s).
 DEVICE_TTL_S = _env_float("DEVICE_TTL_S", 7200)
@@ -94,12 +103,10 @@ log = logging.getLogger("slice-d.edge")
 def _validate() -> None:
     if MQTT_QOS not in (0, 1):
         _fail(f"MQTT_QOS must be 0 or 1, got {MQTT_QOS}")
-    for name, period in (
-        ("DL_FAST_PERIOD_S", DL_FAST_PERIOD_S),
-        ("DL_SLOW_PERIOD_S", DL_SLOW_PERIOD_S),
-    ):
-        if period <= 0:
-            _fail(f"{name} must be > 0, got {period}")
+    if DL_FAST_PERIOD_S < 0:
+        _fail(f"DL_FAST_PERIOD_S must be >= 0, got {DL_FAST_PERIOD_S}")
+    if DL_SLOW_PERIOD_S <= 0:
+        _fail(f"DL_SLOW_PERIOD_S must be > 0, got {DL_SLOW_PERIOD_S}")
 
 
 M = metrics.build_side_metrics("edge")
@@ -143,14 +150,21 @@ class Controller:
         self._ul_delay_window: deque[float] = deque(maxlen=64)
         self._ul_bytes = 0
         self._dl_bytes = 0
+        self._dl_msgs = 0
+        self._dl_pub_errors = 0
         self._last_ul_bytes = 0
         self._last_dl_bytes = 0
+        self._stats_last_dl_msgs = 0
+        self._stats_last_dl_bytes = 0
+        self._stats_last_dl_errors = 0
         self._last_report = time.monotonic()
+        self._last_stats = time.monotonic()
         self._dl_seq = 0
         self._dev_delay_ms: dict[str, float] = {}
         self._dev_bytes: dict[str, int] = {}
         self._dev_last_bytes: dict[str, int] = {}
         self._dev_ue_id: dict[str, str] = {}
+        self._tx_owd_ms: Optional[float] = None
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -162,6 +176,10 @@ class Controller:
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
         self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+        try:
+            self._client.max_queued_messages_set(MQTT_MAX_QUEUED)
+        except Exception:
+            pass
 
     # -- MQTT callbacks -------------------------------------------------------
     def _on_connect(self, client, _userdata, _flags, reason_code, _properties):
@@ -210,6 +228,26 @@ class Controller:
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             M.publish_errors.inc()
             log.debug("latency publish failed dev=%s rc=%s", device_id, info.rc)
+
+    def _on_tx_sample(self, delay_ms: float) -> None:
+        with self._lock:
+            self._tx_owd_ms = delay_ms
+
+    def _tx_latency_pub_loop(self) -> None:
+        """Push publish→TO_CLIENT_IFACE delay to the UE so Grafana (client origin) sees it."""
+        while not self._stop.wait(0.25):
+            with self._lock:
+                ms = self._tx_owd_ms
+            if ms is None:
+                continue
+            for device_id in self._live_devices():
+                self._publish_latency(
+                    device_id,
+                    self._dev_ue_id.get(device_id) or device_id,
+                    {"seq": 0, "t_send": None},
+                    time.time(),
+                    ms,
+                )
 
     def _echo_probe(
         self,
@@ -313,26 +351,120 @@ class Controller:
         return live
 
     def _downlink_loop(self, tier: str, period: float) -> None:
-        while not self._stop.wait(period):
-            for device_id in self._live_devices():
+        """Fan-out DL. Fast tier honors console start/stop + msgs/s; slow keeps fixed period.
+
+        Hot path: cache runtime, rebuild payload templates only when size/devices change,
+        and on each publish only overwrite seq + t_send in the prebuilt buffer.
+        """
+        next_deadline = time.monotonic()
+        templates: dict[str, metrics.PayloadTemplate] = {}
+        tmpl_key: tuple[str, ...] = ()
+        payload_bytes = DL_PAYLOAD_BYTES
+        bytes_ctr = M.bytes_sent.labels(tier=tier)
+        msgs_ctr = M.msgs_sent.labels(tier=tier)
+        devices_cached: list[str] = []
+        devices_cached_at = 0.0
+        topic_of: dict[str, str] = {}
+
+        while not self._stop.is_set():
+            rt = dl_runtime.load_cached(0.25)
+            if not rt.running:
+                if self._stop.wait(0.25):
+                    break
+                next_deadline = time.monotonic()
+                templates.clear()
+                tmpl_key = ()
+                continue
+            if tier == "fast":
+                period = rt.period_s()
+                payload_bytes = rt.payload_bytes
+            else:
+                payload_bytes = DL_PAYLOAD_BYTES
+            max_rate = period <= 0
+
+            now_m = time.monotonic()
+            if not devices_cached or (now_m - devices_cached_at) >= 0.5:
+                devices_cached = self._live_devices()
+                devices_cached_at = now_m
+
+            key = (tier, str(payload_bytes), *devices_cached)
+            if key != tmpl_key:
+                templates = {
+                    d: metrics.make_payload_template(d, tier, payload_bytes)
+                    for d in devices_cached
+                }
+                topic_of = {d: f"{MQTT_TOPIC_PREFIX}/dl/{d}" for d in devices_cached}
+                tmpl_key = key
+
+            blocked = False
+            for device_id in devices_cached:
+                tmpl = templates.get(device_id)
+                if tmpl is None:
+                    continue
                 with self._lock:
                     self._dl_seq += 1
                     seq = self._dl_seq
-                payload = metrics.build_payload(device_id, seq, tier, DL_PAYLOAD_BYTES)
-                info = self._client.publish(
-                    f"{MQTT_TOPIC_PREFIX}/dl/{device_id}", payload, qos=MQTT_QOS
-                )
+                payload = tmpl.stamp(seq)
+                info = self._client.publish(topic_of[device_id], payload, qos=MQTT_QOS)
                 if info.rc == mqtt.MQTT_ERR_SUCCESS:
-                    M.bytes_sent.labels(tier=tier).inc(len(payload))
-                    M.msgs_sent.labels(tier=tier).inc()
+                    nbytes = tmpl.nbytes
+                    bytes_ctr.inc(nbytes)
+                    msgs_ctr.inc()
                     with self._lock:
-                        self._dl_bytes += len(payload)
-                    log.debug("dl seq=%d tier=%s dev=%s bytes=%d", seq, tier, device_id, len(payload))
+                        self._dl_bytes += nbytes
+                        self._dl_msgs += 1
                 else:
                     M.publish_errors.inc()
-                    log.debug("dl publish failed dev=%s tier=%s rc=%s", device_id, tier, info.rc)
+                    with self._lock:
+                        self._dl_pub_errors += 1
+                    if info.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
+                        blocked = True
+                        break
+
+            now = time.monotonic()
+            if max_rate:
+                self._stop.wait(0.001 if blocked else 0.0001)
+                next_deadline = now
+            elif blocked:
+                self._stop.wait(min(0.01, period if period > 0 else 0.01))
+                next_deadline = time.monotonic()
+            else:
+                next_deadline += period
+                if next_deadline > now + 1.0:
+                    next_deadline = now + period
+                elif now - next_deadline > 1.0:
+                    next_deadline = now
+                sleep_for = next_deadline - now
+                if sleep_for > 0:
+                    if self._stop.wait(sleep_for):
+                        break
 
     # -- Summary logging ------------------------------------------------------
+    def _stats_loop(self) -> None:
+        """Publish measured DL generate rate for the server console (~2 Hz)."""
+        while not self._stop.wait(0.5):
+            now = time.monotonic()
+            elapsed = now - self._last_stats
+            if elapsed <= 0:
+                continue
+            with self._lock:
+                msg_delta = self._dl_msgs - self._stats_last_dl_msgs
+                byte_delta = self._dl_bytes - self._stats_last_dl_bytes
+                err_delta = self._dl_pub_errors - self._stats_last_dl_errors
+                self._stats_last_dl_msgs = self._dl_msgs
+                self._stats_last_dl_bytes = self._dl_bytes
+                self._stats_last_dl_errors = self._dl_pub_errors
+                total_msgs = self._dl_msgs
+                total_bytes = self._dl_bytes
+            self._last_stats = now
+            dl_runtime.write_stats(
+                msgs_per_s=msg_delta / elapsed,
+                bytes_per_s=byte_delta / elapsed,
+                publish_errors_per_s=err_delta / elapsed,
+                total_msgs=total_msgs,
+                total_bytes=total_bytes,
+            )
+
     def _report_loop(self) -> None:
         while not self._stop.wait(LOG_INTERVAL_S):
             now = time.monotonic()
@@ -397,10 +529,17 @@ class Controller:
 
         self._client.connect_async(LOCAL_BROKER_HOST, LOCAL_BROKER_PORT, keepalive=60)
         self._client.loop_start()
+        if start_mqtt_tx_sniffer is not None:
+            start_mqtt_tx_sniffer(self._stop, on_sample=self._on_tx_sample)
+        threading.Thread(
+            target=self._tx_latency_pub_loop, name="tx-latency-pub", daemon=True
+        ).start()
 
+        # Seed shared runtime so control_api and console see the same defaults.
+        rt0 = dl_runtime.load()
         threading.Thread(
             target=self._downlink_loop,
-            args=("fast", DL_FAST_PERIOD_S),
+            args=("fast", rt0.period_s()),
             name="dl-fast",
             daemon=True,
         ).start()
@@ -411,13 +550,18 @@ class Controller:
             daemon=True,
         ).start()
         threading.Thread(target=self._report_loop, name="report", daemon=True).start()
+        threading.Thread(target=self._stats_loop, name="dl-stats", daemon=True).start()
 
         log.info(
-            "started: qos=%d broker=%s:%d dl_fast=%.3fs dl_slow=%.3fs dl_devices=%s metrics=%s:%d",
+            "started: qos=%d broker=%s:%d dl_running=%s dl_fast=%s dl_msgs_per_s=%g "
+            "dl_payload=%d dl_slow=%.3fs dl_devices=%s metrics=%s:%d",
             MQTT_QOS,
             LOCAL_BROKER_HOST,
             LOCAL_BROKER_PORT,
-            DL_FAST_PERIOD_S,
+            rt0.running,
+            "max" if rt0.period_s() <= 0 else f"{rt0.period_s():.3f}s",
+            rt0.msgs_per_s,
+            rt0.payload_bytes,
             DL_SLOW_PERIOD_S,
             ",".join(DL_DEVICE_IDS) or "(discovered)",
             METRICS_BIND_IP,

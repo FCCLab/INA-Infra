@@ -59,6 +59,20 @@
     .overlay-badge{position:absolute;left:10px;top:10px;z-index:2;font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.65);border:1px solid var(--border);font-family:'IBM Plex Mono',monospace}
     .link-box{margin-top:8px;font-size:11px;color:var(--text-dim);word-break:break-all;font-family:'IBM Plex Mono',monospace}
     .log-box{background:#05080f;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;max-height:320px;overflow-y:auto}
+    .term-grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+    .console{background:#05080f;overflow:hidden;border:1px solid var(--border);border-radius:10px}
+    .console-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:11px}
+    .console-title{color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase}
+    .console-meta{margin-left:auto;color:var(--text-faint)}
+    .console-body{font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.5;min-height:160px;max-height:240px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word;color:#c6f6d5}
+    .console-idle{color:var(--text-faint)}
+    .console-line{padding:1px 0}
+    .console-line .ts{color:var(--text-faint);margin-right:8px}
+    .console-line.err{color:var(--bad)}
+    .iperf-ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.025)}
+    .iperf-ctl button{padding:6px 12px;font-size:12px}
+    .iperf-ctl .iperf-args-label{flex:1 1 220px;min-width:180px;margin:0;display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+    .iperf-ctl input{width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 8px;text-transform:none;letter-spacing:0;color:#eef2f9;background:#05080f;border:1px solid var(--border);border-radius:8px}
     .log-item{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)}
     .log-time{color:var(--text-faint);white-space:nowrap}.log-msg{color:var(--text-dim)}
     .hint{color:var(--text-dim);font-size:13px;margin-top:2px}
@@ -145,8 +159,26 @@
           </table>
         </section>
         <section class="card">
-          <h2>Reception console</h2>
-          <div class="log-box" id="event-log">Waiting…</div>
+          <h2>Terminals</h2>
+          <div class="term-grid">
+            <div class="console">
+              <div class="console-bar"><span class="console-title">main application</span><span class="console-meta" id="term-meta">0 lines</span></div>
+              <div class="console-body" id="event-log"><div class="console-idle">Waiting…</div></div>
+            </div>
+            <div class="console">
+              <div class="console-bar"><span class="console-title">iperf3</span><span class="console-meta" id="iperf-term-meta">0 lines</span></div>
+              <div class="iperf-ctl">
+                <button type="button" id="btn-iperf-start">Start</button>
+                <button type="button" class="danger" id="btn-iperf-stop">Stop</button>
+                <button type="button" class="secondary" id="btn-iperf-update">Update</button>
+                <span class="pill" id="iperf-pill">iperf3 stopped</span>
+                <label class="iperf-args-label">arguments
+                  <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 5 -b 10M -t 0 -i 1 --forceflush"/>
+                </label>
+              </div>
+              <div class="console-body" id="iperf-log"><div class="console-idle">iperf3 stopped until started</div></div>
+            </div>
+          </div>
         </section>
       </div>
     </div>
@@ -163,6 +195,32 @@
       if(!total) return "4 × "+q;
       return `${n} / ${total} on · ${q}`;
     }
+
+    function makeTerm(elId, metaId) {
+      const el = document.getElementById(elId);
+      let lastSeq = 0;
+      return function drain(logs) {
+        (logs || []).forEach(e => {
+          if (!e || !el) return;
+          const seq = Number(e.seq || 0);
+          if (seq && seq <= lastSeq) return;
+          const idle = el.querySelector('.console-idle');
+          if (idle) idle.remove();
+          const line = e.line || e.msg || String(e);
+          const div = document.createElement('div');
+          div.className = 'console-line' + (/error|fail/i.test(line) ? ' err' : '');
+          div.innerHTML = '<span class="ts">' + (e.ts || e.time || '') + '</span>' + line;
+          el.appendChild(div);
+          while (el.childElementCount > 400) el.removeChild(el.firstChild);
+          el.scrollTop = el.scrollHeight;
+          if (seq) lastSeq = seq;
+          const meta = document.getElementById(metaId);
+          if (meta) meta.textContent = lastSeq + ' lines';
+        });
+      };
+    }
+    const drainApp = makeTerm('event-log', 'term-meta');
+    const drainIperf = makeTerm('iperf-log', 'iperf-term-meta');
 
     async function req(url, opts){
       const r = await fetch(url, Object.assign({headers:{"Content-Type":"application/json"}}, opts||{}));
@@ -338,11 +396,15 @@
           : (mosaicSlots.length?`${tabsOn(mosaicSlots)}/${mosaicSlots.length} idle`:"idle");
         if(selectedId){const sel=$("sel-channel"); if(sel) sel.value=selectedId;}
         if(! $("chrome-frame").src) mountChromeUi();
-        if(data.recent_events&&data.recent_events.length){
-          $("event-log").innerHTML=data.recent_events.slice().reverse().map(e=>`
-            <div class="log-item"><span class="log-time">${e.time||""}</span>
-            <span style="color:var(--accent2);font-weight:600">[${e.type||"evt"}]</span>
-            <span class="log-msg">${e.msg||""}</span></div>`).join("");
+        drainApp((data.app && data.app.log) || []);
+        drainIperf((data.iperf && data.iperf.log) || []);
+        const ip = data.iperf || {};
+        if ($("iperf-pill")) {
+          $("iperf-pill").className = "pill " + (ip.running ? "ok" : "");
+          $("iperf-pill").textContent = ip.running ? "iperf3 running" : "iperf3 stopped";
+        }
+        if ($("iperf-args") && document.activeElement !== $("iperf-args") && ip.args != null) {
+          $("iperf-args").value = ip.args;
         }
       }catch(err){lastError=String(err.message||err)}
     }
@@ -357,6 +419,19 @@
     $("btn-refresh").onclick=()=>loadVideos().catch(e=>alert(e.message));
     $("btn-play").onclick=()=>playMosaic().catch(e=>alert(e.message));
     $("btn-stop").onclick=()=>stopPlayback().catch(e=>alert(e.message));
+    function iperfPayload(action) {
+      const el = $("iperf-args");
+      return JSON.stringify({ action, args: el ? el.value : "" });
+    }
+    function iperfAct(action) {
+      return req("/api/iperf", { method: "POST", body: iperfPayload(action) }).then(fetchStatus);
+    }
+    $("btn-iperf-start").onclick=()=>iperfAct("start").catch(e=>alert(e.message));
+    $("btn-iperf-stop").onclick=()=>iperfAct("stop").catch(e=>alert(e.message));
+    $("btn-iperf-update").onclick=()=>iperfAct("update").catch(e=>alert(e.message));
+    $("iperf-args").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); iperfAct("start").catch(err=>alert(err.message)); }
+    });
     if ($("btn-watchdog")) $("btn-watchdog").onclick=toggleWatchdog;
     if ($("pill-watchdog")) $("pill-watchdog").onclick=toggleWatchdog;
     $("sel-channel").onchange=e=>{

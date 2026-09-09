@@ -695,7 +695,7 @@
         },
         "gridPos": {
           "h": 8,
-          "w": 12,
+          "w": 6,
           "x": 0,
           "y": 8
         },
@@ -830,8 +830,8 @@
         },
         "gridPos": {
           "h": 8,
-          "w": 12,
-          "x": 12,
+          "w": 6,
+          "x": 6,
           "y": 8
         },
         "id": 6,
@@ -863,7 +863,2061 @@
             "resultFormat": "time_series"
           }
         ],
-        "title": "Client E2E latency (app t_send \u2192 client)",
+        "title": "Client application latency",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 8
+        },
+        "id": 7,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client transmission latency",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "ms"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S1 FTP"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S2 CCTV/YOLO"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S3 OTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S4 CPU offload"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "S5 MQTT"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 8
+        },
+        "id": 8,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\")\n  |> filter(fn: (r) => r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r.app_type == \"exp4-s1\" then \"S1 FTP\" else if r.app_type == \"exp4-s2\" then \"S2 CCTV/YOLO\" else if r.app_type == \"exp4-s3\" then \"S3 OTT\" else if r.app_type == \"exp4-s4\" then \"S4 CPU offload\" else if r.app_type == \"exp4-s5\" then \"S5 MQTT\" else r.app_type }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "Client E2E latency (app + tx)",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "collapsed": false,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        },
+        "id": 9,
+        "panels": [],
+        "title": "Server DL TCP Send-Q / notsent / retrans (TO_CLIENT_IFACE)",
+        "type": "row"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Send-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "notsent"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "retrans"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2495C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dot",
+                    "dash": [
+                      2,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 0,
+          "y": 17
+        },
+        "id": 10,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S1 FTP",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Send-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "notsent"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "retrans"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2495C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dot",
+                    "dash": [
+                      2,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 5,
+          "y": 17
+        },
+        "id": 11,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S2 CCTV/YOLO",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Send-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "notsent"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "retrans"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2495C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dot",
+                    "dash": [
+                      2,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 10,
+          "y": 17
+        },
+        "id": 12,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S3 OTT",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Send-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "notsent"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "retrans"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2495C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dot",
+                    "dash": [
+                      2,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 15,
+          "y": 17
+        },
+        "id": 13,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S4 CPU offload",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Send-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "notsent"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "retrans"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2495C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dot",
+                    "dash": [
+                      2,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 20,
+          "y": 17
+        },
+        "id": 14,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_sendq_bytes\" or r._field == \"tcp_notsent_bytes\" or r._field == \"tcp_retrans\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_sendq_bytes\" then \"Send-Q\" else if r._field == \"tcp_notsent_bytes\" then \"notsent\" else \"retrans\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S5 MQTT",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "collapsed": false,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 25
+        },
+        "id": 30,
+        "panels": [],
+        "title": "Server DL TCP cwnd / rwnd (TO_CLIENT_IFACE)",
+        "type": "row"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "cwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "left"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 0,
+          "y": 26
+        },
+        "id": 31,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S1 FTP",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "cwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "left"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 5,
+          "y": 26
+        },
+        "id": 32,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S2 CCTV/YOLO",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "cwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "left"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 10,
+          "y": 26
+        },
+        "id": 33,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S3 OTT",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "cwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "left"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 15,
+          "y": 26
+        },
+        "id": 34,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S4 CPU offload",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "cwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "left"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                },
+                {
+                  "id": "unit",
+                  "value": "decbytes"
+                },
+                {
+                  "id": "custom.axisPlacement",
+                  "value": "right"
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 20,
+          "y": 26
+        },
+        "id": 35,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"server\")\n  |> filter(fn: (r) => r._field == \"tcp_cwnd\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_cwnd\" then \"cwnd\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S5 MQTT",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "collapsed": false,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 34
+        },
+        "id": 20,
+        "panels": [],
+        "title": "Client DL TCP Recv-Q / rwnd (TO_SERVER_IFACE)",
+        "type": "row"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Recv-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#73BF69",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 0,
+          "y": 35
+        },
+        "id": 21,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S1 FTP",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Recv-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#F2CC0C",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 5,
+          "y": 35
+        },
+        "id": 22,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S2 CCTV/YOLO",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Recv-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#5794F2",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 10,
+          "y": 35
+        },
+        "id": 23,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S3 OTT",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Recv-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#B877D9",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 15,
+          "y": 35
+        },
+        "id": 24,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S4 CPU offload",
+        "type": "timeseries",
+        "interval": "1s"
+      },
+      {
+        "datasource": {
+          "type": "influxdb",
+          "uid": "dfufcr74lgwzkf"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 12,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "showPoints": "auto",
+              "spanNulls": true
+            },
+            "min": 0,
+            "unit": "decbytes"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Recv-Q"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "rwnd"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#FF9830",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "fill": "dash",
+                    "dash": [
+                      8,
+                      4
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 4,
+          "x": 20,
+          "y": 35
+        },
+        "id": 25,
+        "options": {
+          "legend": {
+            "calcs": [
+              "lastNotNull",
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tcp_recvq_bytes\" or r._field == \"tcp_rwnd_bytes\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ r with _field: if r._field == \"tcp_recvq_bytes\" then \"Recv-Q\" else \"rwnd\" }))\n  |> yield()",
+            "queryType": "flux",
+            "refId": "A",
+            "resultFormat": "time_series"
+          }
+        ],
+        "title": "S5 MQTT",
         "type": "timeseries",
         "interval": "1s"
       },
@@ -873,7 +2927,7 @@
           "h": 1,
           "w": 24,
           "x": 0,
-          "y": 16
+          "y": 43
         },
         "id": 100,
         "panels": [
@@ -901,7 +2955,7 @@
               "h": 8,
               "w": 6,
               "x": 0,
-              "y": 17
+              "y": 44
             },
             "id": 201,
             "options": {
@@ -960,7 +3014,7 @@
               "h": 8,
               "w": 6,
               "x": 6,
-              "y": 17
+              "y": 44
             },
             "id": 202,
             "options": {
@@ -1019,7 +3073,7 @@
               "h": 8,
               "w": 6,
               "x": 12,
-              "y": 17
+              "y": 44
             },
             "id": 203,
             "options": {
@@ -1078,7 +3132,7 @@
               "h": 8,
               "w": 6,
               "x": 18,
-              "y": 17
+              "y": 44
             },
             "id": 204,
             "options": {
@@ -1135,9 +3189,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 0,
-              "y": 25
+              "y": 52
             },
             "id": 205,
             "options": {
@@ -1194,9 +3248,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
-              "x": 12,
-              "y": 25
+              "w": 6,
+              "x": 6,
+              "y": 52
             },
             "id": 206,
             "options": {
@@ -1227,7 +3281,125 @@
                 "resultFormat": "time_series"
               }
             ],
-            "title": "Client E2E latency (app t_send \u2192 client)",
+            "title": "Client application latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 52
+            },
+            "id": 207,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client transmission latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 52
+            },
+            "id": 208,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s1\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client E2E latency (app + tx)",
             "type": "timeseries",
             "interval": "1s"
           }
@@ -1241,7 +3413,7 @@
           "h": 1,
           "w": 24,
           "x": 0,
-          "y": 17
+          "y": 44
         },
         "id": 101,
         "panels": [
@@ -1269,7 +3441,7 @@
               "h": 8,
               "w": 6,
               "x": 0,
-              "y": 18
+              "y": 45
             },
             "id": 211,
             "options": {
@@ -1328,7 +3500,7 @@
               "h": 8,
               "w": 6,
               "x": 6,
-              "y": 18
+              "y": 45
             },
             "id": 212,
             "options": {
@@ -1387,7 +3559,7 @@
               "h": 8,
               "w": 6,
               "x": 12,
-              "y": 18
+              "y": 45
             },
             "id": 213,
             "options": {
@@ -1446,7 +3618,7 @@
               "h": 8,
               "w": 6,
               "x": 18,
-              "y": 18
+              "y": 45
             },
             "id": 214,
             "options": {
@@ -1503,9 +3675,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 0,
-              "y": 26
+              "y": 53
             },
             "id": 215,
             "options": {
@@ -1562,9 +3734,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
-              "x": 12,
-              "y": 26
+              "w": 6,
+              "x": 6,
+              "y": 53
             },
             "id": 216,
             "options": {
@@ -1595,7 +3767,125 @@
                 "resultFormat": "time_series"
               }
             ],
-            "title": "Client E2E latency (app t_send \u2192 client)",
+            "title": "Client application latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 53
+            },
+            "id": 217,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client transmission latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 53
+            },
+            "id": 218,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s2\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client E2E latency (app + tx)",
             "type": "timeseries",
             "interval": "1s"
           }
@@ -1609,7 +3899,7 @@
           "h": 1,
           "w": 24,
           "x": 0,
-          "y": 18
+          "y": 45
         },
         "id": 102,
         "panels": [
@@ -1637,7 +3927,7 @@
               "h": 8,
               "w": 6,
               "x": 0,
-              "y": 19
+              "y": 46
             },
             "id": 221,
             "options": {
@@ -1696,7 +3986,7 @@
               "h": 8,
               "w": 6,
               "x": 6,
-              "y": 19
+              "y": 46
             },
             "id": 222,
             "options": {
@@ -1755,7 +4045,7 @@
               "h": 8,
               "w": 6,
               "x": 12,
-              "y": 19
+              "y": 46
             },
             "id": 223,
             "options": {
@@ -1814,7 +4104,7 @@
               "h": 8,
               "w": 6,
               "x": 18,
-              "y": 19
+              "y": 46
             },
             "id": 224,
             "options": {
@@ -1871,9 +4161,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 0,
-              "y": 27
+              "y": 54
             },
             "id": 225,
             "options": {
@@ -1930,9 +4220,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
-              "x": 12,
-              "y": 27
+              "w": 6,
+              "x": 6,
+              "y": 54
             },
             "id": 226,
             "options": {
@@ -1963,7 +4253,125 @@
                 "resultFormat": "time_series"
               }
             ],
-            "title": "Client E2E latency (app t_send \u2192 client)",
+            "title": "Client application latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 54
+            },
+            "id": 227,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client transmission latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 54
+            },
+            "id": 228,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s3\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client E2E latency (app + tx)",
             "type": "timeseries",
             "interval": "1s"
           }
@@ -1977,7 +4385,7 @@
           "h": 1,
           "w": 24,
           "x": 0,
-          "y": 19
+          "y": 46
         },
         "id": 103,
         "panels": [
@@ -2005,7 +4413,7 @@
               "h": 8,
               "w": 6,
               "x": 0,
-              "y": 20
+              "y": 47
             },
             "id": 231,
             "options": {
@@ -2064,7 +4472,7 @@
               "h": 8,
               "w": 6,
               "x": 6,
-              "y": 20
+              "y": 47
             },
             "id": 232,
             "options": {
@@ -2123,7 +4531,7 @@
               "h": 8,
               "w": 6,
               "x": 12,
-              "y": 20
+              "y": 47
             },
             "id": 233,
             "options": {
@@ -2182,7 +4590,7 @@
               "h": 8,
               "w": 6,
               "x": 18,
-              "y": 20
+              "y": 47
             },
             "id": 234,
             "options": {
@@ -2239,9 +4647,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 0,
-              "y": 28
+              "y": 55
             },
             "id": 235,
             "options": {
@@ -2298,9 +4706,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
-              "x": 12,
-              "y": 28
+              "w": 6,
+              "x": 6,
+              "y": 55
             },
             "id": 236,
             "options": {
@@ -2331,7 +4739,125 @@
                 "resultFormat": "time_series"
               }
             ],
-            "title": "Client E2E latency (app t_send \u2192 client)",
+            "title": "Client application latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 55
+            },
+            "id": 237,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client transmission latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 55
+            },
+            "id": 238,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s4\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client E2E latency (app + tx)",
             "type": "timeseries",
             "interval": "1s"
           }
@@ -2345,7 +4871,7 @@
           "h": 1,
           "w": 24,
           "x": 0,
-          "y": 20
+          "y": 47
         },
         "id": 104,
         "panels": [
@@ -2373,7 +4899,7 @@
               "h": 8,
               "w": 6,
               "x": 0,
-              "y": 21
+              "y": 48
             },
             "id": 241,
             "options": {
@@ -2432,7 +4958,7 @@
               "h": 8,
               "w": 6,
               "x": 6,
-              "y": 21
+              "y": 48
             },
             "id": 242,
             "options": {
@@ -2491,7 +5017,7 @@
               "h": 8,
               "w": 6,
               "x": 12,
-              "y": 21
+              "y": 48
             },
             "id": 243,
             "options": {
@@ -2550,7 +5076,7 @@
               "h": 8,
               "w": 6,
               "x": 18,
-              "y": 21
+              "y": 48
             },
             "id": 244,
             "options": {
@@ -2607,9 +5133,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
+              "w": 6,
               "x": 0,
-              "y": 29
+              "y": 56
             },
             "id": 245,
             "options": {
@@ -2666,9 +5192,9 @@
             },
             "gridPos": {
               "h": 8,
-              "w": 12,
-              "x": 12,
-              "y": 29
+              "w": 6,
+              "x": 6,
+              "y": 56
             },
             "id": 246,
             "options": {
@@ -2699,7 +5225,125 @@
                 "resultFormat": "time_series"
               }
             ],
-            "title": "Client E2E latency (app t_send \u2192 client)",
+            "title": "Client application latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 12,
+              "y": 56
+            },
+            "id": 247,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"tx_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client transmission latency",
+            "type": "timeseries",
+            "interval": "1s"
+          },
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "dfufcr74lgwzkf"
+            },
+            "fieldConfig": {
+              "defaults": {
+                "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 12,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "auto",
+                  "spanNulls": true
+                },
+                "min": 0,
+                "unit": "ms"
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 8,
+              "w": 6,
+              "x": 18,
+              "y": 56
+            },
+            "id": 248,
+            "options": {
+              "legend": {
+                "calcs": [
+                  "lastNotNull",
+                  "mean",
+                  "max"
+                ],
+                "displayMode": "table",
+                "placement": "bottom",
+                "showLegend": true
+              },
+              "tooltip": {
+                "mode": "multi",
+                "sort": "desc"
+              }
+            },
+            "targets": [
+              {
+                "datasource": {
+                  "type": "influxdb",
+                  "uid": "dfufcr74lgwzkf"
+                },
+                "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"application_metrics\" and r.profile_name == \"exp4\" and r.app_type == \"exp4-s5\" and r.origin == \"client\")\n  |> filter(fn: (r) => r._field == \"e2e_latency_ms\")\n  |> filter(fn: (r) => r.scheme =~ /^${scheme}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield()",
+                "queryType": "flux",
+                "refId": "A",
+                "resultFormat": "time_series"
+              }
+            ],
+            "title": "Client E2E latency (app + tx)",
             "type": "timeseries",
             "interval": "1s"
           }
@@ -2785,5 +5429,5 @@
     "version": 1
   },
   "overwrite": true,
-  "message": "Exp4 all slices: 4 server + 2 client, all slices per graph"
+  "message": "Exp4: Send-Q/notsent/retrans, cwnd/rwnd, Recv-Q/rwnd"
 }

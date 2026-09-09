@@ -370,13 +370,14 @@ paper/exp4/
 ├── s2/                       # S2 +PL +PM
 ├── s3/                       # S3 +PL +PM +PS
 ├── simulate_exp4.py          # S0–S3 ablation on the INA PL/PM/PS model
+├── exp_start.py              # timed live run → <scheme>/data/ + SLA violation
 ├── plot_exp4.py              # waterfall + contribution + Pareto
-├── data/
+├── data/                     # simulation CSVs (committed)
 │   ├── exp4_scheme_metrics.csv
 │   ├── exp4_waterfall.csv
 │   ├── exp4_per_slice.csv
 │   └── exp4_timeseries.csv
-└── plots/
+├── s0/data/ … s3/data/       # live captures (gitignored)└── plots/
     ├── fig4a_sla_waterfall.png
     ├── fig4b_opex_waterfall.png
     ├── fig4c_throughput_efficiency.png

@@ -65,6 +65,12 @@ pre{font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:pre-wrap}
 .console-line.sum{color:var(--accent)}
 .console-line.err{color:var(--bad)}
 .console-line.sshd{color:var(--accent2)}
+.term-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:900px){.term-grid{grid-template-columns:1fr}}
+.iperf-ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.025)}
+.iperf-ctl button{padding:6px 12px;font-size:12px}
+.iperf-ctl .iperf-args-label{flex:1 1 220px;min-width:180px;margin:0;display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.iperf-ctl input{width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 8px;text-transform:none;letter-spacing:0;color:#eef2f9}
 .table-wrap{overflow:auto}
 table.clients{width:100%;border-collapse:collapse;font-size:13px}
 table.clients th,table.clients td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
@@ -92,6 +98,7 @@ def page(
     poll_js: str,
     grafana_url: str = "",
     show_clients: bool = False,
+    dual_terms: bool = False,
 ) -> str:
     grafana_link = ""
     if grafana_url:
@@ -116,6 +123,44 @@ def page(
         </table>
       </div>
     </section>"""
+    one_term = """
+      <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
+        <div class="console-bar">
+          <span class="console-dots"><span></span><span></span><span></span></span>
+          <span class="console-title" id="term-title">backend log</span>
+          <span class="console-meta" id="term-meta">0 lines</span>
+        </div>
+        <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
+      </div>"""
+    two_terms = """
+      <div class="term-grid" style="margin-top:4px">
+        <div class="console" style="border:1px solid var(--border);border-radius:10px">
+          <div class="console-bar">
+            <span class="console-dots"><span></span><span></span><span></span></span>
+            <span class="console-title" id="term-title">main application</span>
+            <span class="console-meta" id="term-meta">0 lines</span>
+          </div>
+          <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
+        </div>
+        <div class="console" style="border:1px solid var(--border);border-radius:10px">
+          <div class="console-bar">
+            <span class="console-dots"><span></span><span></span><span></span></span>
+            <span class="console-title" id="iperf-term-title">iperf3</span>
+            <span class="console-meta" id="iperf-term-meta">0 lines</span>
+          </div>
+          <div class="iperf-ctl">
+            <button onclick="iperfAct('start')">Start</button>
+            <button class="danger" onclick="iperfAct('stop')">Stop</button>
+            <button class="secondary" onclick="iperfAct('update')">Update</button>
+            <span id="iperf-pill" class="pill">iperf3 stopped</span>
+            <label class="iperf-args-label">arguments
+              <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 5 -b 10M -t 0 -i 1 --forceflush" onkeydown="if(event.key==='Enter'){event.preventDefault();iperfAct('start');}"/>
+            </label>
+          </div>
+          <div class="console-body" id="iperf-log"><div class="console-idle">iperf3 stopped until started</div></div>
+        </div>
+      </div>"""
+    term_html = two_terms if dual_terms else one_term
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -146,14 +191,7 @@ def page(
     <section class="card">
       <h2>Control</h2>
       {controls}
-      <div class="console" style="border:1px solid var(--border);border-radius:10px;margin-top:4px">
-        <div class="console-bar">
-          <span class="console-dots"><span></span><span></span><span></span></span>
-          <span class="console-title" id="term-title">backend log</span>
-          <span class="console-meta" id="term-meta">0 lines</span>
-        </div>
-        <div class="console-body" id="log"><div class="console-idle">waiting for backend…</div></div>
-      </div>
+      {term_html}
       <details style="border-top:1px solid var(--border);padding-top:10px;margin-top:8px">
         <summary style="cursor:pointer;color:var(--text-dim);font-size:13px;font-weight:600">Backend status</summary>
         <pre id="raw" style="margin-top:10px">waiting…</pre>
@@ -162,35 +200,64 @@ def page(
   </main>
   <script>
     const logEl = document.getElementById('log');
-    let lastSeq = 0;
     function esc(s) {{
       return String(s || '').replace(/[&<>]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c]));
     }}
-    function appendTerm(e) {{
-      if (!e) return;
-      const seq = Number(e.seq || 0);
-      if (seq && seq <= lastSeq) return;
-      const idle = logEl.querySelector('.console-idle');
-      if (idle) idle.remove();
-      const line = e.line || String(e);
-      const div = document.createElement('div');
-      div.className = 'console-line';
-      const kind = String(e.kind || '');
-      const low = line.toLowerCase();
-      if (/error|fail|denied|refused/.test(low)) div.classList.add('err');
-      else if (/\\[sum\\]|\\[ok\\]/i.test(line)) div.classList.add('sum');
-      else if (kind === 'sshd') div.classList.add('sshd');
-      div.innerHTML = '<span class="ts">' + esc(e.ts || '') + '</span>' + esc(line);
-      logEl.appendChild(div);
-      while (logEl.childElementCount > 500) logEl.removeChild(logEl.firstChild);
-      logEl.scrollTop = logEl.scrollHeight;
-      if (seq) lastSeq = seq;
-      const meta = document.getElementById('term-meta');
-      if (meta) meta.textContent = lastSeq + ' lines';
+    function makeTerm(elId, metaId) {{
+      const el = document.getElementById(elId);
+      let lastSeq = 0;
+      return function drain(logs) {{
+        (logs || []).forEach(e => {{
+          if (!e || !el) return;
+          const seq = Number(e.seq || 0);
+          if (seq && seq <= lastSeq) return;
+          const idle = el.querySelector('.console-idle');
+          if (idle) idle.remove();
+          const line = e.line || e.msg || String(e);
+          const div = document.createElement('div');
+          div.className = 'console-line';
+          const kind = String(e.kind || '');
+          const low = line.toLowerCase();
+          if (/error|fail|denied|refused/.test(low)) div.classList.add('err');
+          else if (/\\[sum\\]|\\[ok\\]/i.test(line)) div.classList.add('sum');
+          else if (kind === 'sshd') div.classList.add('sshd');
+          div.innerHTML = '<span class="ts">' + esc(e.ts || e.time || '') + '</span>' + esc(line);
+          el.appendChild(div);
+          while (el.childElementCount > 500) el.removeChild(el.firstChild);
+          el.scrollTop = el.scrollHeight;
+          if (seq) lastSeq = seq;
+          const meta = document.getElementById(metaId);
+          if (meta) meta.textContent = lastSeq + ' lines';
+        }});
+      }};
     }}
-    function drainLogs(logs) {{ (logs || []).forEach(appendTerm); }}
+    const drainApp = makeTerm('log', 'term-meta');
+    const drainIperf = document.getElementById('iperf-log') ? makeTerm('iperf-log', 'iperf-term-meta') : function(){{}};
+    function drainLogs(logs) {{ drainApp(logs); }}
     function log(msg) {{
-      appendTerm({{seq: lastSeq + 1, ts: new Date().toISOString().slice(11,19), line: msg}});
+      drainApp([{{ts: new Date().toISOString().slice(11,19), line: msg}}]);
+    }}
+    async function appAct(a) {{
+      try {{ await req('app/' + a, {{method:'POST'}}); }}
+      catch(e) {{ log(e.message); }}
+    }}
+    async function iperfAct(a) {{
+      const argsEl = document.getElementById('iperf-args');
+      const args = argsEl ? argsEl.value : '';
+      try {{ await req('iperf', {{method:'POST', body: JSON.stringify({{action:a, args}})}}); }}
+      catch(e) {{ log(e.message); }}
+    }}
+    function paintIperfPill(ip) {{
+      const el = document.getElementById('iperf-pill');
+      if (el) {{
+        const running = !!(ip && ip.running);
+        el.className = 'pill ' + (running ? 'ok' : '');
+        el.textContent = running ? 'iperf3 running' : 'iperf3 stopped';
+      }}
+      const argsEl = document.getElementById('iperf-args');
+      if (argsEl && document.activeElement !== argsEl && ip && ip.args != null) {{
+        argsEl.value = ip.args;
+      }}
     }}
     function clientStatus(c) {{
       if (c.connection_status) return String(c.connection_status);
@@ -366,34 +433,90 @@ SERVERS = (
         "exp4_s5_iot",
         "S5 Server Console: MQTT",
         "",
-        kpi("k_br", "Broker") + kpi("k_dev", "Devices") + kpi("k_dl", "DL period"),
+        kpi("k_br", "Broker")
+        + kpi("k_gen", "Generate")
+        + kpi("k_dev", "Devices")
+        + kpi("k_mps", "Target msgs/s")
+        + kpi("k_pay", "Payload")
+        + kpi("k_est", "Est. generate")
+        + kpi("k_pub", "Publish rate")
+        + kpi("k_pub_mbps", "Publish Mbps"),
         """<div class="row">
-          <input id="topic" value="slice_5/dl/ue1" style="min-width:220px"/>
-          <input id="payload" value="ping" style="min-width:160px"/>
-          <button onclick="pub()">Publish DL</button>
+          <button onclick="dlAct('start')">Start generate</button>
+          <button class="danger" onclick="dlAct('stop')">Stop generate</button>
+          <label style="margin:0">Msgs/s per device
+            <input id="mps" type="number" min="0" step="any" value="3000" style="width:110px;display:block"/>
+          </label>
+          <label style="margin:0">Payload bytes
+            <input id="pay" type="number" min="64" step="1" value="128" style="width:110px;display:block"/>
+          </label>
+          <button class="secondary" onclick="dlApply()">Apply rate</button>
           <button class="secondary" onclick="act()">Refresh</button>
         </div>
-        <p class="kicker">Mosquitto + downlink controller. Publish logs stream below.</p>""",
+        <div class="row">
+          <input id="topic" value="slice_5/dl/ue1" style="min-width:220px"/>
+          <input id="payload" value="ping" style="min-width:160px"/>
+          <button onclick="pub()">Publish once</button>
+        </div>
+        <p class="kicker">Target is requested rate; Publish rate is measured at the server. High targets (e.g. 20k msg/s) are often limited by Python/paho/Mosquitto. Msgs/s = 0 means max rate. Est. Mbps = target × payload × 8 × devices / 1e6.</p>""",
         """
     document.getElementById('term-title').textContent = 'MQTT log';
+    let seeded = false;
+    function fmtEst(s) {
+      if (!s.dl_running) return 'stopped';
+      if (s.dl_est_mbps_total == null) return 'max (unbounded)';
+      const per = s.dl_est_mbps_per_device != null ? Number(s.dl_est_mbps_per_device).toFixed(2) : '—';
+      return Number(s.dl_est_mbps_total).toFixed(2) + ' Mbit/s (' + per + '/dev)';
+    }
+    function fmtPub(s) {
+      const mps = s.dl_pub_msgs_per_s;
+      if (mps == null) return '—';
+      const err = Number(s.dl_pub_errors_per_s || 0);
+      const base = Number(mps).toFixed(0) + ' msg/s';
+      return err > 0.5 ? (base + ' (err ' + err.toFixed(0) + '/s)') : base;
+    }
     function paint(s) {
       document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.ok ? 'backend up' : 'down';
+      document.getElementById('pill').textContent = s.dl_running ? 'generating' : (s.ok ? 'stopped' : 'down');
       document.getElementById('k_br').textContent = s.broker_ok ? 'up' : 'down';
+      document.getElementById('k_gen').textContent = s.dl_running ? 'on' : 'off';
       document.getElementById('k_dev').textContent = s.device_count ?? (s.clients||[]).length;
-      document.getElementById('k_dl').textContent = (s.dl_fast_period_s||'—') + ' s';
+      const mps = s.dl_msgs_per_s;
+      document.getElementById('k_mps').textContent = (mps === 0 || mps === 0.0) ? 'max' : (mps != null ? mps : '—');
+      document.getElementById('k_pay').textContent = s.dl_payload_bytes != null ? (s.dl_payload_bytes + ' B') : '—';
+      document.getElementById('k_est').textContent = fmtEst(s);
+      document.getElementById('k_pub').textContent = fmtPub(s);
+      document.getElementById('k_pub_mbps').textContent =
+        s.dl_pub_mbps != null ? (Number(s.dl_pub_mbps).toFixed(2) + ' Mbit/s') : '—';
+      if (!seeded && s.dl_msgs_per_s != null) {
+        document.getElementById('mps').value = s.dl_msgs_per_s;
+        if (s.dl_payload_bytes != null) document.getElementById('pay').value = s.dl_payload_bytes;
+        seeded = true;
+      }
       renderClients(s);
       document.getElementById('raw').textContent = JSON.stringify(s, null, 2);
       drainLogs(s.log || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
     async function act() { await tick(); }
-    async function pub() {
-      const body = JSON.stringify({topic: document.getElementById('topic').value, payload: document.getElementById('payload').value});
-      try { await req('publish', {method:'POST', body}); log('published'); }
+    async function dlAct(which) {
+      try { paint(await req('dl/' + which, {method:'POST', body:'{}'})); log(which === 'start' ? 'generate started' : 'generate stopped'); }
       catch(e) { log(e.message); }
     }
-    tick(); setInterval(tick, 2000);
+    async function dlApply() {
+      const body = JSON.stringify({
+        msgs_per_s: Number(document.getElementById('mps').value),
+        payload_bytes: Number(document.getElementById('pay').value)
+      });
+      try { paint(await req('dl/config', {method:'POST', body})); log('rate applied'); }
+      catch(e) { log(e.message); }
+    }
+    async function pub() {
+      const body = JSON.stringify({topic: document.getElementById('topic').value, payload: document.getElementById('payload').value});
+      try { await req('publish', {method:'POST', body}); log('published once'); }
+      catch(e) { log(e.message); }
+    }
+    tick(); setInterval(tick, 1000);
         """,
     ),
 )
@@ -406,25 +529,31 @@ CLIENTS = (
         "",
         kpi("k_srv", "Server") + kpi("k_iperf", "iperf DL") + kpi("k_e2e", "SFTP e2e") + kpi("k_last", "Last SFTP") + kpi("k_gp", "SFTP goodput"),
         """<div class="row">
-          <button onclick="sftp()">SFTP one</button>
+          <button onclick="appAct('start')">Start SFTP</button>
+          <button class="danger" onclick="appAct('stop')">Stop SFTP</button>
+          <button class="secondary" onclick="sftp()">SFTP one</button>
         </div>
-        <p class="kicker">Autostarts SFTP of queued 1 MB files (e2e = generate start → last byte). iperf3 -R is optional extra load.</p>""",
+        <p class="kicker">SFTP queue and extra iperf3 DL (-R) are independent. Use the iperf3 terminal to start, stop, or update arguments.</p>""",
         """
-    document.getElementById('term-title').textContent = 'SFTP 1 MB queue / iperf3';
+    document.getElementById('term-title').textContent = 'SFTP 1 MB queue';
     function paint(s) {
-      document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
-      document.getElementById('k_srv').textContent = s.server || '—';
+      const ap = s.app || {};
       const ip = s.iperf || {};
+      document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
+      document.getElementById('pill').textContent = ap.running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
+      document.getElementById('k_srv').textContent = s.server || '—';
       document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
       document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
       document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
       document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
+      paintIperfPill(ip);
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.app) { slim.app = Object.assign({}, slim.app); delete slim.app.log; }
       if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || ip.log || []);
+      drainApp(ap.log || s.log || []);
+      drainIperf(ip.log || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
     async function sftp() { try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); log('sftp done'); } catch(e) { log(e.message); } }
@@ -438,25 +567,31 @@ CLIENTS = (
         "",
         kpi("k_srv", "Server") + kpi("k_iperf", "iperf DL") + kpi("k_e2e", "SFTP e2e") + kpi("k_last", "Last SFTP") + kpi("k_gp", "SFTP goodput"),
         """<div class="row">
-          <button onclick="sftp()">SFTP one</button>
+          <button onclick="appAct('start')">Start SFTP</button>
+          <button class="danger" onclick="appAct('stop')">Stop SFTP</button>
+          <button class="secondary" onclick="sftp()">SFTP one</button>
         </div>
-        <p class="kicker">Same SFTP 1 MB queue as S1, after server-side encrypt. E2E is generate-start → last byte (S4 &gt; S1).</p>""",
+        <p class="kicker">Same SFTP 1 MB queue as S1 after server-side encrypt. Use the iperf3 terminal to start, stop, or update arguments.</p>""",
         """
-    document.getElementById('term-title').textContent = 'SFTP encrypted 1 MB / iperf3';
+    document.getElementById('term-title').textContent = 'SFTP encrypted 1 MB';
     function paint(s) {
-      document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
-      document.getElementById('pill').textContent = s.sftp_running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
-      document.getElementById('k_srv').textContent = s.server || '—';
+      const ap = s.app || {};
       const ip = s.iperf || {};
+      document.getElementById('pill').className = 'pill ' + (s.ok ? 'ok' : 'bad');
+      document.getElementById('pill').textContent = ap.running ? 'sftp streaming' : (s.ok ? 'backend up' : 'down');
+      document.getElementById('k_srv').textContent = s.server || '—';
       document.getElementById('k_iperf').textContent = ip.running ? 'running' : (ip.error || 'stopped');
       document.getElementById('k_e2e').textContent = s.last && s.last.e2e_ms != null ? (Number(s.last.e2e_ms).toFixed(1) + ' ms') : '—';
       document.getElementById('k_last').textContent = s.last && s.last.transfer_s ? (s.last.transfer_s.toFixed(3)+' s') : '—';
       document.getElementById('k_gp').textContent = s.last && s.last.goodput_mbit ? (s.last.goodput_mbit.toFixed(2)+' Mbit/s') : '—';
+      paintIperfPill(ip);
       const slim = Object.assign({}, s);
       delete slim.log;
+      if (slim.app) { slim.app = Object.assign({}, slim.app); delete slim.app.log; }
       if (slim.iperf) { slim.iperf = Object.assign({}, slim.iperf); delete slim.iperf.log; }
       document.getElementById('raw').textContent = JSON.stringify(slim, null, 2);
-      drainLogs(s.log || ip.log || []);
+      drainApp(ap.log || s.log || []);
+      drainIperf(ip.log || []);
     }
     async function tick() { try { paint(await req('status')); } catch(e) { document.getElementById('pill').className='pill bad'; log(e.message); } }
     async function sftp() { try { const s = await req('sftp', {method:'POST', body:'{}'}); paint(s); log('sftp done'); } catch(e) { log(e.message); } }
@@ -475,6 +610,7 @@ def write_console(
     js: str,
     grafana_url: str = "",
     show_clients: bool = False,
+    dual_terms: bool = False,
 ) -> None:
     static = dest / "static"
     logos = static / "logos"
@@ -491,6 +627,7 @@ def write_console(
             js,
             grafana_url=grafana_url,
             show_clients=show_clients,
+            dual_terms=dual_terms,
         ),
         encoding="utf-8",
     )
@@ -522,6 +659,7 @@ def main() -> None:
             controls,
             js,
             grafana_url=grafana_dashboard_url(slice_id),
+            dual_terms=True,
         )
 
 

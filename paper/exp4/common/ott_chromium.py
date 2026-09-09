@@ -9,7 +9,11 @@ CHROME_CLI = (
     "--no-first-run --no-default-browser-check "
     "--disable-features=TranslateUI "
     "--autoplay-policy=no-user-gesture-required "
+    "--disable-backgrounding-occluded-windows "
+    "--disable-renderer-backgrounding "
+    "--disable-background-timer-throttling "
     "--disable-gpu --no-sandbox "
+    "--window-size=1920,1080 "
     "https://www.youtube.com"
 )
 
@@ -20,6 +24,14 @@ def extra_ott_env(console_ip: str) -> str:
           value: "chromium_5g"
         - name: OTT_PLAY_QUALITY
           value: "4k"
+        - name: OTT_MOSAIC
+          value: "1"
+        - name: OTT_MOSAIC_COUNT
+          value: "4"
+        - name: OTT_MOSAIC_WIDTH
+          value: "1920"
+        - name: OTT_MOSAIC_HEIGHT
+          value: "1080"
         - name: PDU_SOCKS_PORT
           value: "1080"
         - name: CHROME_CDP_HOST
@@ -43,6 +55,10 @@ def chromium_sidecar_yaml(ue_name: str) -> str:
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
           seccompProfile:
             type: Unconfined
         env:
@@ -78,11 +94,11 @@ def chromium_sidecar_yaml(ue_name: str) -> str:
           mountPath: /config
         resources:
           requests:
-            cpu: 200m
-            memory: 256Mi
-          limits:
-            cpu: 2000m
+            cpu: 500m
             memory: 2Gi
+          limits:
+            cpu: "8"
+            memory: 12Gi
 """
 
 
@@ -90,7 +106,7 @@ def chromium_volumes_yaml() -> str:
     return """      - name: dshm
         emptyDir:
           medium: Memory
-          sizeLimit: 1Gi
+          sizeLimit: 2Gi
       - name: chromium-config
         emptyDir: {}
 """

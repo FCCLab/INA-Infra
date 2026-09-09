@@ -10,6 +10,9 @@ allow_anonymous true
 listener 1884 127.0.0.1
 allow_anonymous true
 
-# Best-effort semantics: keep queued-message limits modest, no persistence.
+# Best-effort semantics: standing queue so the UE always has DL bytes
+# without buffering tens of seconds when the publisher is faster than 5G.
 persistence false
-max_queued_messages 1000
+queue_qos0_messages true
+max_queued_messages 256
+max_queued_bytes 4000000

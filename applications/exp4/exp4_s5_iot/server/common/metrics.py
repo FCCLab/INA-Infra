@@ -17,6 +17,7 @@ a process only exports the series it actually populates.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -98,6 +99,78 @@ DL_TIERS = ("fast", "slow")
 # --------------------------------------------------------------------------- #
 # Payload build / parse                                                       #
 # --------------------------------------------------------------------------- #
+
+# Fixed-width fields so the hot path only overwrites t_send (and seq) in place.
+# Space-pad (not zero-pad): JSON forbids leading zeros in numbers, but leading
+# whitespace before a number is valid and keeps the byte offsets stable.
+_SEQ_WIDTH = 10
+_TS_WIDTH = 17  # e.g. 1757347200.123456 (10+1+6) for current unix time
+
+
+@dataclass
+class PayloadTemplate:
+    """Prebuilt MQTT body; stamp() only rewrites fixed-width seq + t_send."""
+
+    buf: bytearray
+    seq_off: int
+    ts_off: int
+    nbytes: int
+    device_id: str
+    tier: str
+    size_bytes: int
+
+    def stamp(self, seq: int, t_send: Optional[float] = None) -> bytes:
+        if t_send is None:
+            t_send = time.time()
+        seq_s = format(seq % (10 ** _SEQ_WIDTH), f"{_SEQ_WIDTH}d").encode("ascii")
+        ts_s = format(t_send, f"{_TS_WIDTH}.6f").encode("ascii")
+        if len(ts_s) != _TS_WIDTH:
+            # Extreme clock values — fall back to regex stamp on a copy.
+            raw = bytes(self.buf)
+            raw = raw[: self.seq_off] + seq_s + raw[self.seq_off + _SEQ_WIDTH :]
+            return stamp_at_publish(raw)[0]
+        self.buf[self.seq_off : self.seq_off + _SEQ_WIDTH] = seq_s
+        self.buf[self.ts_off : self.ts_off + _TS_WIDTH] = ts_s
+        return bytes(self.buf)
+
+
+def make_payload_template(
+    device_id: str,
+    tier: str,
+    size_bytes: int,
+    sensor: Optional[dict] = None,
+) -> PayloadTemplate:
+    """Build a padded JSON body once; later publishes only rewrite seq + t_send."""
+    seq_ph = format(0, f"{_SEQ_WIDTH}d")
+    ts_ph = format(0.0, f"{_TS_WIDTH}.6f")
+    head = (
+        f'{{"device_id":{json.dumps(device_id, separators=(",", ":"))},'
+        f'"seq":{seq_ph},'
+        f'"t_send":{ts_ph},'
+        f'"tier":{json.dumps(tier, separators=(",", ":"))}'
+    )
+    if sensor is not None:
+        head += f',"sensor":{json.dumps(sensor, separators=(",", ":"))}'
+    head += ',"pad":"'
+    head_b = head.encode("utf-8")
+    tail_b = b'"}'
+    pad_len = max(0, int(size_bytes) - len(head_b) - len(tail_b))
+    raw = head_b + (b"x" * pad_len) + tail_b
+    seq_off = raw.find(seq_ph.encode("ascii"))
+    ts_off = raw.find(ts_ph.encode("ascii"))
+    if seq_off < 0 or ts_off < 0:
+        raise RuntimeError("payload template placeholders missing")
+    return PayloadTemplate(
+        buf=bytearray(raw),
+        seq_off=seq_off,
+        ts_off=ts_off,
+        nbytes=len(raw),
+        device_id=device_id,
+        tier=tier,
+        size_bytes=int(size_bytes),
+    )
+
+
 def build_payload(
     device_id: str,
     seq: int,
@@ -107,26 +180,21 @@ def build_payload(
 ) -> bytes:
     """Build a JSON payload padded to exactly ``size_bytes`` (when it fits).
 
-    ``t_send`` is stamped before pad/serialize work so E2E includes application
-    processing plus path delay. ``pad`` is sized last to hit the requested byte
-    count; if the fixed fields already exceed ``size_bytes`` the payload is
-    emitted unpadded (never truncated -- correctness over size).
+    ``t_send`` is a placeholder; the controller restamps it at ``publish()``.
+    Prefer ``make_payload_template`` + ``PayloadTemplate.stamp`` on the hot path.
     """
-    t_send = time.time()
-    payload: dict = {
-        "device_id": device_id,
-        "seq": seq,
-        "t_send": t_send,
-        "tier": tier,
-    }
-    if sensor is not None:
-        payload["sensor"] = sensor
-    payload["pad"] = ""
+    tmpl = make_payload_template(device_id, tier, size_bytes, sensor=sensor)
+    return tmpl.stamp(seq)
 
-    without_pad = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    pad_len = max(0, size_bytes - len(without_pad))
-    payload["pad"] = "x" * pad_len
-    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+_T_SEND_RE = re.compile(rb'"t_send":\s*[0-9.]+')
+
+
+def stamp_at_publish(raw: bytes) -> tuple[bytes, float]:
+    """Overwrite ``t_send`` with wall clock at MQTT publish (not generate)."""
+    t_send = time.time()
+    stamped = _T_SEND_RE.sub(f'"t_send":{t_send:.6f}'.encode(), raw, count=1)
+    return stamped, t_send
 
 
 def parse_payload(raw: bytes) -> Optional[dict]:

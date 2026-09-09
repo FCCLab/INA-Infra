@@ -3,8 +3,11 @@
 
 Influx measurement ``application_metrics`` (profile_name=exp4).
 
-Server (origin=server): cpu_m, mem_mb, gpu_pct, vram_mb
-Client (origin=client): throughput_dl_mbps, latency_ms
+Server (origin=server): cpu_m, mem_mb, gpu_pct, vram_mb,
+  tcp_sendq_bytes / tcp_notsent_bytes / tcp_retrans / tcp_cwnd / tcp_rwnd_bytes
+  (TO_CLIENT_IFACE only)
+Client (origin=client): throughput_dl_mbps, latency_ms, tx_latency_ms, e2e_latency_ms,
+  tcp_recvq_bytes / tcp_rwnd_bytes (TO_SERVER_IFACE only)
 
 ``app_type`` is exp4-s1 … exp4-s5. ``scheme`` is exp4-s0 … exp4-s3 or exp4-no5g.
 """
@@ -87,6 +90,128 @@ def flux_one(app_type: str, origin: str, field: str) -> str:
         "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
         "  |> yield()"
     )
+
+
+def flux_tcp_dl(app_type: str) -> str:
+    """Server DL TCP Send-Q + notsent + outstanding retrans on TO_CLIENT_IFACE."""
+    return (
+        'from(bucket: "default")\n'
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "application_metrics" '
+        f'and r.profile_name == "exp4" and r.app_type == "{app_type}" '
+        'and r.origin == "server")\n'
+        '  |> filter(fn: (r) => r._field == "tcp_sendq_bytes" or '
+        'r._field == "tcp_notsent_bytes" or r._field == "tcp_retrans")\n'
+        f"{_scheme_filter()}"
+        "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+        '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_sendq_bytes" '
+        'then "Send-Q" else if r._field == "tcp_notsent_bytes" then "notsent" '
+        'else "retrans" }))\n'
+        "  |> yield()"
+    )
+
+
+def flux_tcp_recv(app_type: str) -> str:
+    """Client DL TCP Recv-Q + rwnd on TO_SERVER_IFACE (oaitun / net1)."""
+    return (
+        'from(bucket: "default")\n'
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "application_metrics" '
+        f'and r.profile_name == "exp4" and r.app_type == "{app_type}" '
+        'and r.origin == "client")\n'
+        '  |> filter(fn: (r) => r._field == "tcp_recvq_bytes" or '
+        'r._field == "tcp_rwnd_bytes")\n'
+        f"{_scheme_filter()}"
+        "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+        '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_recvq_bytes" '
+        'then "Recv-Q" else "rwnd" }))\n'
+        "  |> yield()"
+    )
+
+
+def flux_tcp_wnd(app_type: str) -> str:
+    """Server DL TCP cwnd + peer rwnd on TO_CLIENT_IFACE."""
+    return (
+        'from(bucket: "default")\n'
+        "  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n"
+        '  |> filter(fn: (r) => r._measurement == "application_metrics" '
+        f'and r.profile_name == "exp4" and r.app_type == "{app_type}" '
+        'and r.origin == "server")\n'
+        '  |> filter(fn: (r) => r._field == "tcp_cwnd" or '
+        'r._field == "tcp_rwnd_bytes")\n'
+        f"{_scheme_filter()}"
+        "  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n"
+        '  |> map(fn: (r) => ({ r with _field: if r._field == "tcp_cwnd" '
+        'then "cwnd" else "rwnd" }))\n'
+        "  |> yield()"
+    )
+
+
+def tcp_overrides(color: str) -> list[dict]:
+    return [
+        {
+            "matcher": {"id": "byName", "options": "Send-Q"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+            ],
+        },
+        {
+            "matcher": {"id": "byName", "options": "notsent"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+                {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [8, 4]}},
+            ],
+        },
+        {
+            "matcher": {"id": "byName", "options": "retrans"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}},
+                {"id": "custom.lineStyle", "value": {"fill": "dot", "dash": [2, 4]}},
+                {"id": "unit", "value": "short"},
+                {"id": "custom.axisPlacement", "value": "right"},
+            ],
+        },
+    ]
+
+
+def tcp_wnd_overrides(color: str) -> list[dict]:
+    return [
+        {
+            "matcher": {"id": "byName", "options": "cwnd"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+                {"id": "unit", "value": "short"},
+                {"id": "custom.axisPlacement", "value": "left"},
+            ],
+        },
+        {
+            "matcher": {"id": "byName", "options": "rwnd"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+                {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [8, 4]}},
+                {"id": "unit", "value": "decbytes"},
+                {"id": "custom.axisPlacement", "value": "right"},
+            ],
+        },
+    ]
+
+
+def tcp_recv_overrides(color: str) -> list[dict]:
+    return [
+        {
+            "matcher": {"id": "byName", "options": "Recv-Q"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+            ],
+        },
+        {
+            "matcher": {"id": "byName", "options": "rwnd"},
+            "properties": [
+                {"id": "color", "value": {"fixedColor": color, "mode": "fixed"}},
+                {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [8, 4]}},
+            ],
+        },
+    ]
 
 
 def color_overrides() -> list[dict]:
@@ -198,25 +323,43 @@ def slice_detail_panels(base_id: int, app_type: str, y: int) -> list[dict]:
             "Client DL throughput",
             0,
             y + 8,
-            12,
+            6,
             "Mbps",
             flux_one(app_type, "client", "throughput_dl_mbps"),
         ),
         timeseries(
             base_id + 6,
-            "Client E2E latency (app t_send → client)",
-            12,
+            "Client application latency",
+            6,
             y + 8,
-            12,
+            6,
             "ms",
             flux_one(app_type, "client", "latency_ms"),
+        ),
+        timeseries(
+            base_id + 7,
+            "Client transmission latency",
+            12,
+            y + 8,
+            6,
+            "ms",
+            flux_one(app_type, "client", "tx_latency_ms"),
+        ),
+        timeseries(
+            base_id + 8,
+            "Client E2E latency (app + tx)",
+            18,
+            y + 8,
+            6,
+            "ms",
+            flux_one(app_type, "client", "e2e_latency_ms"),
         ),
     ]
 
 
 def dashboard() -> dict:
     colors = color_overrides()
-    # Same 4+2 layout as the per-app boards; each panel overlays all slices.
+    # Same 4+4 layout as the per-app boards; each panel overlays all slices.
     panels: list[dict] = [
         timeseries(1, "Server CPU (millicores)", 0, 0, 6, "suffix:m", flux_all("server", "cpu_m"), overrides=colors),
         timeseries(2, "Server RAM (MB)", 6, 0, 6, "decmbytes", flux_all("server", "mem_mb"), overrides=colors),
@@ -227,24 +370,92 @@ def dashboard() -> dict:
             "Client DL throughput",
             0,
             8,
-            12,
+            6,
             "Mbps",
             flux_all("client", "throughput_dl_mbps"),
             overrides=colors,
         ),
         timeseries(
             6,
-            "Client E2E latency (app t_send → client)",
-            12,
+            "Client application latency",
+            6,
             8,
-            12,
+            6,
             "ms",
             flux_all("client", "latency_ms"),
             overrides=colors,
         ),
+        timeseries(
+            7,
+            "Client transmission latency",
+            12,
+            8,
+            6,
+            "ms",
+            flux_all("client", "tx_latency_ms"),
+            overrides=colors,
+        ),
+        timeseries(
+            8,
+            "Client E2E latency (app + tx)",
+            18,
+            8,
+            6,
+            "ms",
+            flux_all("client", "e2e_latency_ms"),
+            overrides=colors,
+        ),
     ]
 
-    row_y = 16
+    panels.append(row(9, "Server DL TCP Send-Q / notsent / retrans (TO_CLIENT_IFACE)", 16, [], collapsed=False))
+    for i, (app_type, label, color, *_rest) in enumerate(APPS):
+        panels.append(
+            timeseries(
+                10 + i,
+                label,
+                i * 5,
+                17,
+                4,
+                "decbytes",
+                flux_tcp_dl(app_type),
+                h=8,
+                overrides=tcp_overrides(color),
+            )
+        )
+
+    panels.append(row(30, "Server DL TCP cwnd / rwnd (TO_CLIENT_IFACE)", 25, [], collapsed=False))
+    for i, (app_type, label, color, *_rest) in enumerate(APPS):
+        panels.append(
+            timeseries(
+                31 + i,
+                label,
+                i * 5,
+                26,
+                4,
+                "short",
+                flux_tcp_wnd(app_type),
+                h=8,
+                overrides=tcp_wnd_overrides(color),
+            )
+        )
+
+    panels.append(row(20, "Client DL TCP Recv-Q / rwnd (TO_SERVER_IFACE)", 34, [], collapsed=False))
+    for i, (app_type, label, color, *_rest) in enumerate(APPS):
+        panels.append(
+            timeseries(
+                21 + i,
+                label,
+                i * 5,
+                35,
+                4,
+                "decbytes",
+                flux_tcp_recv(app_type),
+                h=8,
+                overrides=tcp_recv_overrides(color),
+            )
+        )
+
+    row_y = 43
     for i, (app_type, label, _color, t_bar, d_bar, url) in enumerate(APPS):
         inner_y = row_y + 1
         panels.append(
@@ -298,7 +509,7 @@ def dashboard() -> dict:
             "version": 1,
         },
         "overwrite": True,
-        "message": "Exp4 all slices: 4 server + 2 client, all slices per graph",
+        "message": "Exp4: Send-Q/notsent/retrans, cwnd/rwnd, Recv-Q/rwnd",
     }
 
 
@@ -311,16 +522,21 @@ def write_json() -> Path:
         "`profile_name=exp4`.\n\n"
         "| Slice | `app_type` | Server | Client |\n"
         "| :---: | :--- | :--- | :--- |\n"
-        "| 1 | `exp4-s1` | CPU / RAM / GPU / VRAM | DL throughput, E2E latency |\n"
+        "| 1 | `exp4-s1` | CPU / RAM / GPU / VRAM; DL Send-Q / notsent on `TO_CLIENT_IFACE` | DL throughput, latencies, Recv-Q / rwnd on `TO_SERVER_IFACE` |\n"
         "| 2 | `exp4-s2` | same | same |\n"
         "| 3 | `exp4-s3` | same | same |\n"
         "| 4 | `exp4-s4` | same | same |\n"
         "| 5 | `exp4-s5` | same | same |\n\n"
         "**Scheme** dropdown filters `scheme` (`exp4-s0` … `exp4-s3`, `exp4-no5g`). "
         "One scheme is live at a time; All overlays history.\n\n"
-        "Top group: same 4+2 layout as the per-app boards, all five slices "
-        "overlaid on each graph. Expand a slice row for that app only. "
-        "Client latency is application E2E (`t_send` → client), not ICMP ping.\n\n"
+        "Top group: same 4+4 layout as the per-app boards, all five slices "
+        "overlaid on each graph. Next rows: one pane per application for server "
+        "DL TCP **Send-Q** / **notsent** on `TO_CLIENT_IFACE` (`net1`), then client "
+        "DL TCP **Recv-Q** / **rwnd** on `TO_SERVER_IFACE` (`oaitun*`). "
+        "Expand a slice row for that app only. "
+        "Application latency is app work (`t_send` → client). Transmission latency is "
+        "ICMP RTT on `TO_SERVER_IFACE` (TCP connect fallback). E2E is application + "
+        "transmission.\n\n"
         "Regenerate:\n\n"
         "```bash\n"
         "python3 paper/exp4/dashboard/generate.py\n"

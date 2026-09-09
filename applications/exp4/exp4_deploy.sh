@@ -21,9 +21,10 @@ source "${REPO_ROOT}/scripts/cluster_lib.sh"
 
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
 # Newest tags. IMAGE_TAG=... overrides every slice.
-DEFAULT_IMAGE_TAG="nws-v0.14-amd64"
-DEFAULT_IMAGE_TAG_S2="nws-v0.21-amd64"
-DEFAULT_IMAGE_TAG_S4="nws-v0.15-amd64"
+DEFAULT_IMAGE_TAG="nws-v0.16-amd64"
+DEFAULT_IMAGE_TAG_S1="nws-v0.27-amd64"
+DEFAULT_IMAGE_TAG_S2="nws-v0.22-amd64"
+DEFAULT_IMAGE_TAG_S4="nws-v0.27-amd64"
 CLUSTER="${CLUSTER:-edge}"
 NAMESPACE="${NAMESPACE:-exp4-apps}"
 GW="${GW:-10.1.137.1}"
@@ -90,10 +91,43 @@ image_tag_for() {
     return
   fi
   case "${sid}" in
+    1) printf '%s' "${DEFAULT_IMAGE_TAG_S1}" ;;
     2) printf '%s' "${DEFAULT_IMAGE_TAG_S2}" ;;
     4) printf '%s' "${DEFAULT_IMAGE_TAG_S4}" ;;
     *) printf '%s' "${DEFAULT_IMAGE_TAG}" ;;
   esac
+}
+
+# Burst cap for app servers (requests stay at SLICES_DEF so pods still schedule).
+SERVER_CPU_LIMIT="${SERVER_CPU_LIMIT:-8}"
+SERVER_MEM_LIMIT="${SERVER_MEM_LIMIT:-8Gi}"
+
+mem_to_mib() {
+  local raw="${1^^}"
+  case "${raw}" in
+    *GI) awk -v v="${raw%GI}" 'BEGIN { printf "%.0f", v * 1024 }' ;;
+    *G) awk -v v="${raw%G}" 'BEGIN { printf "%.0f", v * 1024 }' ;;
+    *MI) printf '%s' "${raw%MI}" ;;
+    *M) printf '%s' "${raw%M}" ;;
+    *) printf '%s' "${raw}" ;;
+  esac
+}
+
+server_cpu_limit() {
+  local req="$1"
+  awk -v req="${req}" -v cap="${SERVER_CPU_LIMIT}" 'BEGIN { print (req+0 > cap+0) ? req : cap }'
+}
+
+server_mem_limit() {
+  local req="$1"
+  local req_mib cap_mib
+  req_mib="$(mem_to_mib "${req}")"
+  cap_mib="$(mem_to_mib "${SERVER_MEM_LIMIT}")"
+  if [[ "${req_mib}" -gt "${cap_mib}" ]]; then
+    printf '%s' "${req}"
+  else
+    printf '%s' "${SERVER_MEM_LIMIT}"
+  fi
 }
 
 print_plan() {
@@ -101,7 +135,7 @@ print_plan() {
   if [[ -n "${IMAGE_TAG:-}" ]]; then
     tag_note="tag=${IMAGE_TAG} (all slices)"
   else
-    tag_note="tags s1/s3/s5=${DEFAULT_IMAGE_TAG}  s2=${DEFAULT_IMAGE_TAG_S2}  s4=${DEFAULT_IMAGE_TAG_S4}"
+    tag_note="tags s1=${DEFAULT_IMAGE_TAG_S1}  s2=${DEFAULT_IMAGE_TAG_S2}  s3/s5=${DEFAULT_IMAGE_TAG}  s4=${DEFAULT_IMAGE_TAG_S4}"
   fi
   cat <<EOF
 Exp4 dual-Multus plan  (master ${MASTER}  console gw ${GW})
@@ -229,7 +263,7 @@ Y
         - name: LOCAL_BROKER_PORT
           value: "1884"
         - name: DL_FAST_PERIOD_S
-          value: "0.002"
+          value: "0"
         - name: DL_PAYLOAD_BYTES
           value: "5000"
         - name: DL_DEVICE_IDS
@@ -300,7 +334,7 @@ ott_chromium_volumes() {
       - name: dshm
         emptyDir:
           medium: Memory
-          sizeLimit: 1Gi
+          sizeLimit: 2Gi
 Y
 }
 
@@ -340,7 +374,7 @@ extra_client_env() {
         - name: IPERF_TIME
           value: "0"
         - name: IPERF_AUTOSTART
-          value: "1"
+          value: "0"
         - name: IPERF_PORT_COUNT
           value: "8"
 Y
@@ -366,6 +400,10 @@ Y
         - name: PDU_WAIT_TIMEOUT
           value: "5"
         - name: EXP4_LATENCY_HTTP
+          value: "0"
+        - name: IPERF_HOST
+          value: "${sip}"
+        - name: IPERF_AUTOSTART
           value: "0"
 Y
       ;;
@@ -405,6 +443,10 @@ Y
           value: "https://${cip}/chrome/"
         - name: HTTPS_PORT
           value: "443"
+        - name: IPERF_HOST
+          value: "${sip}"
+        - name: IPERF_AUTOSTART
+          value: "0"
 Y
       ;;
     4)
@@ -422,7 +464,7 @@ Y
         - name: IPERF_TIME
           value: "0"
         - name: IPERF_AUTOSTART
-          value: "1"
+          value: "0"
         - name: IPERF_PORT_COUNT
           value: "8"
 Y
@@ -442,6 +484,12 @@ Y
         - name: SEND_ENABLED
           value: "0"
         - name: LATENCY_PROBE_ENABLED
+          value: "0"
+        - name: EXP4_LATENCY_HTTP
+          value: "0"
+        - name: IPERF_HOST
+          value: "${sip}"
+        - name: IPERF_AUTOSTART
           value: "0"
 Y
       ;;
@@ -491,6 +539,11 @@ apply_workload() {
   if [[ "${role}" == "server" && "${sid}" == "2" ]]; then
     gpu_res=$'\n            nvidia.com/gpu: "1"'
     runtime_extra=$'\n      runtimeClassName: nvidia'
+  fi
+  local lim_cpu="${cpu}" lim_mem="${mem}"
+  if [[ "${role}" == "server" ]]; then
+    lim_cpu="$(server_cpu_limit "${cpu}")"
+    lim_mem="$(server_mem_limit "${mem}")"
   fi
   if [[ -n "${PIN_NODE}" ]]; then
     node_extra=$'\n        kubernetes.io/hostname: '"${PIN_NODE}"
@@ -653,8 +706,8 @@ ${extra_mounts}
             cpu: "${cpu}"
             memory: ${mem}${gpu_res}
           limits:
-            cpu: "${cpu}"
-            memory: ${mem}${gpu_res}
+            cpu: "${lim_cpu}"
+            memory: ${lim_mem}${gpu_res}
 ${extra_containers}
 ${extra_volumes}
 EOF

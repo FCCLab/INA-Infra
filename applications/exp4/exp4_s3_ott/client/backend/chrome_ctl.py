@@ -849,25 +849,19 @@ def play_mosaic(slots: List[dict], quality: Optional[str] = None) -> Dict[str, A
 
 
 def page_for_slot(slot: dict, index: Optional[int] = None) -> Optional[dict]:
+    """Resolve this mosaic slot's tab only — never fall back to a different video."""
+    del index  # index mapping collapses onto one tab after Chromium OOM
     tid = str(slot.get("target_id") or "")
     if tid:
         for p in _usable_pages():
             if p.get("id") == tid:
                 return p
-    yt = str(slot.get("youtube_id") or "").strip()
+    yt = str(slot.get("youtube_id") or "").strip().lower()
     if yt:
-        page = _pick_page(prefer_video_id=yt)
-        if page:
-            return page
-    pages = _usable_pages()
-    idx = slot.get("index") if index is None else index
-    if idx is not None:
-        try:
-            i = int(idx)
-        except (TypeError, ValueError):
-            i = -1
-        if 0 <= i < len(pages):
-            return pages[i]
+        for p in _usable_pages():
+            u = (p.get("url") or "").lower()
+            if yt in u and "watch" in u:
+                return p
     return None
 
 
@@ -921,6 +915,17 @@ def heal_mosaic(slots: List[dict], quality: Optional[str] = None) -> List[dict]:
         yt = str(slot.get("youtube_id") or "").strip()
         idx = slot.get("index") if slot.get("index") is not None else i
         page = page_for_slot(slot, index=idx)
+        if not page:
+            out.append({
+                "ok": False,
+                "enabled": True,
+                "playing": False,
+                "page_loaded": False,
+                "detail": "tab missing",
+                "slot_video_id": slot.get("video_id") or "",
+                "slot_youtube_id": yt,
+            })
+            continue
         res = check_and_heal_playback(quality=quality, video_id=yt or None, page=page)
         res["slot_video_id"] = slot.get("video_id") or ""
         res["slot_youtube_id"] = yt

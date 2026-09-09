@@ -21,8 +21,13 @@ wait_iface() {
 }
 
 log info "to_client=${TO_CLIENT_IFACE} console=${CONSOLE_IFACE}"
-wait_iface "$TO_CLIENT_IFACE"
-wait_iface "$CONSOLE_IFACE"
+for _p in /exp4/ifaces.sh /app/common/ifaces.sh; do
+  [ -f "$_p" ] || continue
+  # shellcheck disable=SC1090
+  . "$_p"
+  exp4_server_ifaces || true
+  break
+done
 if ip link show dev "$TO_CLIENT_IFACE" >/dev/null 2>&1; then
   CIP="$(ip -4 -o addr show dev "$TO_CLIENT_IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
   if [ -n "$CIP" ] && command -v arping >/dev/null 2>&1; then
@@ -42,4 +47,7 @@ export SSHD_LOG="${SSHD_LOG:-/tmp/sshd.log}"
 : > "${SSHD_LOG}"
 python3 /app/control_api.py &
 python3 /app/frontend-console/frontend.py &
+# Allow the UE to open many parallel SFTP sessions (32-file list).
+grep -q '^MaxStartups' /etc/ssh/sshd_config 2>/dev/null \
+  || printf '\nMaxStartups 64:30:128\nMaxSessions 64\n' >> /etc/ssh/sshd_config
 exec /usr/sbin/sshd -D -E "${SSHD_LOG}"

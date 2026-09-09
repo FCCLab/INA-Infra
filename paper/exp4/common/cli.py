@@ -44,6 +44,13 @@ def copy_into_repos() -> None:
         for item in src.glob("*.yaml"):
             shutil.copy2(item, dst / item.name)
         print(f"Synced {src} → {dst}")
+        cluster_src = OUT / repo / "cluster"
+        if cluster_src.exists():
+            cluster_dst = repos_dir / repo / "cluster"
+            cluster_dst.mkdir(parents=True, exist_ok=True)
+            for item in cluster_src.glob("*.yaml"):
+                shutil.copy2(item, cluster_dst / item.name)
+                print(f"Synced {item.name} → {cluster_dst}")
 
 
 def push_gitea(message: str) -> None:
@@ -87,12 +94,26 @@ def main_undeploy() -> None:
     parser = argparse.ArgumentParser(description=f"Undeploy {scheme.SCHEME_ID}")
     parser.add_argument("--no-push", action="store_true")
     parser.add_argument("--ue-only", action="store_true")
+    parser.add_argument(
+        "--ue",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="UE/slice id for --ue-only (repeatable or comma-separated; default all)",
+    )
+    parser.add_argument(
+        "ues",
+        nargs="*",
+        help="UE/slice ids for --ue-only (default: all)",
+    )
     args = parser.parse_args()
     print_banner("Undeploy")
-    from ue_teardown import undeploy_ues
+    from ue_teardown import parse_ue_ids, undeploy_ues
 
-    undeploy_ues(namespace=scheme.NAMESPACE, context="edge@edge")
-    if args.ue_only:
+    ue_filter = list(args.ues) + list(args.ue)
+    sids = parse_ue_ids(ue_filter)
+    undeploy_ues(namespace=scheme.NAMESPACE, context="edge@edge", sids=sids)
+    if args.ue_only or ue_filter:
         return
     removed = False
     for cluster in scheme.CLUSTERS:
@@ -101,6 +122,12 @@ def main_undeploy() -> None:
             shutil.rmtree(ns_dir)
             print(f"  removed {ns_dir}")
             removed = True
+        cluster_dir = REPO_ROOT / "repos" / scheme.REPO_FOR[cluster] / "cluster"
+        if cluster_dir.exists():
+            for item in cluster_dir.glob(f"clusterrolebinding-*-operator-{scheme.NAMESPACE}.yaml"):
+                item.unlink()
+                print(f"  removed {item}")
+                removed = True
     if removed and not args.no_push:
         push_gitea(f"exp4: undeploy {scheme.SCHEME_ID} from {scheme.NAMESPACE}")
     for cluster in scheme.CLUSTERS:

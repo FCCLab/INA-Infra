@@ -20,6 +20,9 @@ WORKDIR /app
 COPY backend/ /app/backend/
 COPY frontend-console/ /app/frontend-console/
 COPY influx_publish.py /usr/local/bin/exp4_influx_publish.py
+COPY to_server.py /usr/local/bin/to_server.py
+COPY ue_control.py /usr/local/bin/ue_control.py
+COPY ifaces.sh /app/common/ifaces.sh
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /usr/local/bin/exp4_influx_publish.py
 RUN chmod +x /app/entrypoint.sh

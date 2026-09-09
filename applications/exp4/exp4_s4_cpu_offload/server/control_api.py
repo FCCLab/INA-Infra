@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exp4 S4 server backend: same as S1 (iperf3 -s + queued SFTP) plus encrypt.
 
-t_send is stamped at generate start (filename). Encrypt runs before the 1 MB
-file is queued, so SFTP E2E (last-byte − t_send) is higher than slice 1.
+Application time is create-random + encrypt + enqueue (encoded in the filename).
+Queue wait is not part of application latency; the UE pulls every listed file.
 """
 
 from __future__ import annotations
@@ -50,9 +50,11 @@ SFTP_AUTOSTART = os.environ.get("SFTP_AUTOSTART", "1").strip().lower() not in (
 )
 BLOB_BYTES = int(os.environ.get("EXP4_BLOB_BYTES", str(1 * 1024 * 1024)))
 PBKDF2_ITERS = int(os.environ.get("EXP4_PBKDF2_ITERS", "80000"))
-READY_DEPTH = max(1, int(os.environ.get("EXP4_READY_QUEUE_DEPTH", "8")))
+READY_DEPTH = max(1, int(os.environ.get("EXP4_READY_QUEUE_DEPTH", "32")))
 DOWNLOAD_DIR = Path(os.environ.get("EXP4_DOWNLOAD_DIR", "/home/ina/download"))
-FILE_RE = re.compile(r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)\.bin$")
+FILE_RE = re.compile(
+    r"^q-(\d+)-([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?\.bin$"
+)
 
 _SFTP_WANTED = SFTP_AUTOSTART
 _FILE_SEQ = 0
@@ -62,6 +64,7 @@ _SFTP_STATS: dict[str, Any] = {
     "last_file": "",
     "last_error": "",
     "last_encrypt_ms": None,
+    "last_app_ms": None,
 }
 
 _LOCK = threading.Lock()
@@ -115,28 +118,34 @@ def _encrypt_blob(plain: bytes) -> bytes:
 
 
 def _generate_one() -> Path:
+    """Application work: create a random 1 MB file, encrypt it, enqueue it."""
     global _FILE_SEQ
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    t_send = time.time()
+    t0 = time.time()
     with _LOCK:
         _FILE_SEQ += 1
         seq = _FILE_SEQ
-    path = DOWNLOAD_DIR / f"q-{seq:06d}-{t_send:.6f}.bin"
     plain = os.urandom(BLOB_BYTES)
     t_enc = time.time()
-    path.write_bytes(_encrypt_blob(plain))
+    blob = _encrypt_blob(plain)
     encrypt_ms = (time.time() - t_enc) * 1000.0
+    tmp = DOWNLOAD_DIR / f".w-{seq:06d}"
+    tmp.write_bytes(blob)
     uid, gid = _ina_ids()
-    os.chown(path, uid, gid)
-    os.chmod(path, 0o644)
+    os.chown(tmp, uid, gid)
+    os.chmod(tmp, 0o644)
+    app_ms = max(0.0, (time.time() - t0) * 1000.0)
+    path = DOWNLOAD_DIR / f"q-{seq:06d}-{t0:.6f}-{app_ms:.3f}.bin"
+    tmp.replace(path)
     with _LOCK:
         _SFTP_STATS["generated"] = int(_SFTP_STATS["generated"]) + 1
         _SFTP_STATS["last_file"] = path.name
         _SFTP_STATS["last_error"] = ""
         _SFTP_STATS["last_encrypt_ms"] = encrypt_ms
+        _SFTP_STATS["last_app_ms"] = app_ms
     _append_log(
         f"generate+encrypt {path.name} bytes={BLOB_BYTES} encrypt_ms={encrypt_ms:.1f} "
-        f"q={len(_ready_files())}/{READY_DEPTH}",
+        f"app_ms={app_ms:.3f} q={len(_ready_files())}/{READY_DEPTH}",
         "sftp",
     )
     return path

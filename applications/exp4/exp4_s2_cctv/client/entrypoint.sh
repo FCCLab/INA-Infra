@@ -17,6 +17,13 @@ case "${SCHEME_ID:-}${EXP4_NO5G:-}" in
     ;;
 esac
 export TO_SERVER_IFACE CONSOLE_IFACE DS_NUM_STREAMS
+for _p in /exp4/ifaces.sh /app/common/ifaces.sh; do
+  [ -f "$_p" ] || continue
+  # shellcheck disable=SC1090
+  . "$_p"
+  exp4_client_ifaces || true
+  break
+done
 export EXP4_METRICS_ORIGIN="${EXP4_METRICS_ORIGIN:-client}"
 export EXP4_APP_TYPE="${EXP4_APP_TYPE:-exp4-s2}"
 export SLICE_ID="${SLICE_ID:-2}"
@@ -79,6 +86,8 @@ dst.write_text(text)
 print(f'wrote {dst} streams=${DS_NUM_STREAMS} host=${MTX_SOURCE_HOST}')
 PY
   echo "{\"level\":\"info\",\"event\":\"entrypoint\",\"msg\":\"starting UE MediaMTX N=${DS_NUM_STREAMS} host=${MTX_SOURCE_HOST} ice=${ICE_HOST}\"}"
+  pkill -TERM mediamtx 2>/dev/null || true
+  sleep 0.4
   mediamtx "${dst}" &
   PIDS+=($!)
   local i
@@ -93,7 +102,27 @@ PY
 }
 
 if [ "${START_MEDIAMTX:-true}" != "false" ] && [ "${ROLE}" != "frontend" ]; then
-  start_mediamtx
+  (
+    # Pulls must start after PDU + /32 pin; otherwise TCP sticks to net2 forever.
+    while true; do
+      if command -v exp4_detect_to_server >/dev/null 2>&1; then
+        live="$(exp4_detect_to_server || true)"
+      else
+        live=""
+        ip -4 addr show dev "${TO_SERVER_IFACE}" 2>/dev/null | grep -q 'inet ' && live="${TO_SERVER_IFACE}"
+      fi
+      if [ -n "${live}" ]; then
+        exp4_pin_to_server "${live}" 2>/dev/null || true
+        start_mediamtx
+        wait || true
+        echo "{\"level\":\"warn\",\"event\":\"entrypoint\",\"msg\":\"UE MediaMTX exited; restarting after pin\"}"
+        sleep 1
+        continue
+      fi
+      sleep 1
+    done
+  ) &
+  PIDS+=($!)
 fi
 
 if [ "${ROLE}" = "frontend" ]; then

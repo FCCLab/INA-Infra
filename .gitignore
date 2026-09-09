@@ -83,8 +83,14 @@ htmlcov/
 coverage.xml
 *.cover
 
-# Exp4 S2 TensorRT engines (harvested from gpu-a40 at image build)
+# Exp4 TensorRT engines (harvested from gpu-a40 at image build)
 applications/exp4/exp4_s2_cctv/server/ds_engines/*.engine
+
+# Exp4 live experiment captures (per-scheme)
+paper/exp4/s0/data/
+paper/exp4/s1/data/
+paper/exp4/s2/data/
+paper/exp4/s3/data/
 
 # --- Misc -------------------------------------------------------------------
 *.bak

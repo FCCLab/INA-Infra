@@ -20,6 +20,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+import sys
+
+for _p in ("/usr/local/bin", "/app/backend", "/app"):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    from to_server import (
+        connect_tcp,
+        detect_to_server_iface,
+        ensure_pin_watch,
+        pin_to_server,
+    )
+except ImportError:
+    connect_tcp = None  # type: ignore
+    detect_to_server_iface = None  # type: ignore
+    ensure_pin_watch = None  # type: ignore
+    pin_to_server = None  # type: ignore
+from ue_control import (
+    Iperf3Client,
+    LogBuffer,
+    app_fields,
+    attach_app_routes,
+    attach_iperf_routes,
+)
+
 try:
     from backend.yt_proxy import extract_youtube_id
     from backend.pdu_socks import PDU_SOCKS
@@ -132,6 +157,8 @@ app.add_middleware(
 
 # RLock: _log_event also takes this lock; a nested acquire must not deadlock.
 _lock = threading.RLock()
+APP_LOG = LogBuffer(kind="ott")
+IPERF = Iperf3Client()
 # Serialise Chromium CDP so heartbeat never shares a WS with the watchdog.
 _cdp_lock = threading.RLock()
 _state: Dict[str, Any] = {
@@ -259,6 +286,7 @@ def _log_event(event_type: str, msg: str, **kwargs):
     }
     with _lock:
         _recent_events.appendleft(entry)
+    APP_LOG.append(f"[{event_type}] {msg}")
     logger.info(f"[{event_type}] {msg}")
 
 
@@ -294,6 +322,8 @@ def _resolve_api_iface() -> str:
 
 def _discover_pdu_iface() -> Optional[str]:
     """Prefer configured TO_SERVER iface; with 5G also auto-detect oaitun*."""
+    if detect_to_server_iface is not None:
+        return detect_to_server_iface()
     candidates = []
     preferred = (TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, "net1") if _NO5G else (
         TO_SERVER_IFACE_CFG, PDU_IFACE_CFG, f"oaitun_ue{SLICE_ID}", "oaitun_ue1", "oaitun_ue2", "oaitun_ue3", "oaitun_ue4", "oaitun_ue5"
@@ -329,6 +359,8 @@ _resolve_to_server_iface = _discover_pdu_iface
 
 def _pin_server_via_pdu(iface: str) -> bool:
     """Force application-server destinations out the 5G PDU (not Multus console)."""
+    if pin_to_server is not None:
+        return pin_to_server(iface) is not None
     hosts = []
     for h in PDU_ROUTE_HOSTS.split(","):
         h = h.strip()
@@ -392,6 +424,29 @@ def _http_json(method: str, path: str, body: Optional[dict] = None, timeout: flo
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if connect_tcp is not None:
+        from urllib.parse import urlparse
+        import http.client
+
+        u = urlparse(url)
+        host = u.hostname or ""
+        port = u.port or (443 if u.scheme == "https" else 80)
+        req_path = u.path or "/"
+        if u.query:
+            req_path = f"{req_path}?{u.query}"
+        conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        try:
+            conn.sock = connect_tcp(host, port, timeout)
+            conn.request(method, req_path, body=data, headers=headers)
+            resp = conn.getresponse()
+            raw = resp.read().decode("utf-8")
+            if resp.status >= 400:
+                raise RuntimeError(f"HTTP {resp.status} {path}: {raw}")
+            return json.loads(raw) if raw else {}
+        except OSError as exc:
+            raise RuntimeError(f"{method} {path} failed: {exc}") from exc
+        finally:
+            conn.close()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1047,6 +1102,8 @@ def on_startup():
         PDU_SOCKS.start(pdu_ip="")
     except Exception as exc:
         logger.warning("PDU SOCKS start failed: %s", exc)
+    if ensure_pin_watch is not None:
+        ensure_pin_watch()
     threading.Thread(target=_wait_for_pdu, daemon=True).start()
     threading.Thread(target=_heartbeat_loop, daemon=True).start()
     threading.Thread(target=_video_stream_loop, daemon=True).start()
@@ -1056,6 +1113,7 @@ def on_startup():
     threading.Thread(
         target=_playback_watchdog_loop, daemon=True, name="ott-playback-watchdog"
     ).start()
+    IPERF.start_supervisor()
 
 
 def _socks_pdu_refresh_loop() -> None:
@@ -1153,6 +1211,13 @@ def get_status():
         "socks": socks,
         "state": st,
         "recent_events": list(_recent_events),
+        "app": app_fields(
+            running=bool(st.get("streaming_enabled")),
+            wanted=bool(st.get("streaming_enabled")),
+            log=APP_LOG,
+            extra={"kind": "ott"},
+        ),
+        "iperf": IPERF.snapshot(),
     }
 
 
@@ -1624,7 +1689,7 @@ def _play_chromium(video_id: str, quality: str | None = None) -> Dict[str, Any]:
 
 
 def _chrome_autostart_loop() -> None:
-    """Once CDP + PDU are up, play the assigned/first video. Frontend refresh must not re-trigger this."""
+    """Keep mosaic (or single play) after Chromium CDP/OOM restarts. Do not fight Stop."""
     logger.info("Autostart: waiting for Chromium CDP + 5G PDU…")
     while True:
         try:
@@ -1643,30 +1708,39 @@ def _chrome_autostart_loop() -> None:
                 yt = str(_state.get("youtube_id") or "")
                 streaming = bool(_state.get("streaming_enabled"))
                 mosaic = bool(_state.get("mosaic"))
-            if mosaic and yt_pages >= MOSAIC_COUNT and streaming:
-                _log_event("autostart", f"Chromium already mosaic ({yt_pages} YouTube tabs); skip")
-                return
-            # Chromium may already be playing (backend restart, frontend refresh never reaches here).
-            if "youtube.com/watch" in cur and not MOSAIC_DEFAULT:
-                if yt and f"watch?v={yt}" in cur and streaming:
-                    _log_event("autostart", f"Chromium already on {yt}; skip navigate")
-                    return
-                _log_event("autostart", f"Chromium already on YouTube ({cur[:80]}); skip navigate")
-                with _lock:
-                    _state["streaming_enabled"] = True
-                    _state["play_mode"] = "chromium_5g"
-                    _state["chrome_url"] = cur
-                return
+                slots = list(_state.get("mosaic_slots") or [])
+            want_on = sum(1 for s in slots if s.get("enabled", True)) if slots else MOSAIC_COUNT
 
             q = DEFAULT_PLAY_QUALITY
             if MOSAIC_DEFAULT:
-                _log_event("autostart", f"CDP+PDU ready — playing {MOSAIC_COUNT}×{q} YouTube mosaic")
+                first_boot = not mosaic and not streaming
+                lost_tabs = streaming and want_on > 0 and yt_pages < want_on
+                if not first_boot and not lost_tabs:
+                    time.sleep(8.0)
+                    continue
+                _log_event(
+                    "autostart",
+                    f"CDP+PDU ready — playing {MOSAIC_COUNT}×{q} YouTube mosaic "
+                    f"(tabs={yt_pages}/{want_on})",
+                )
                 _play_chromium_mosaic(quality=q)
-            else:
-                video_id = _pick_autostart_video_id()
-                _log_event("autostart", f"CDP+PDU ready — playing {video_id} quality={q}")
-                _play_chromium(video_id, quality=q)
-            return
+                time.sleep(8.0)
+                continue
+
+            if "youtube.com/watch" in cur:
+                if yt and f"watch?v={yt}" in cur and streaming:
+                    time.sleep(8.0)
+                    continue
+                if streaming:
+                    time.sleep(8.0)
+                    continue
+            if streaming:
+                time.sleep(8.0)
+                continue
+            video_id = _pick_autostart_video_id()
+            _log_event("autostart", f"CDP+PDU ready — playing {video_id} quality={q}")
+            _play_chromium(video_id, quality=q)
+            time.sleep(8.0)
         except Exception as exc:
             logger.warning("autostart retry: %s", exc)
             time.sleep(5.0)
@@ -1818,6 +1892,23 @@ def toggle_watchdog(req: Optional[WatchdogToggleIn] = None):
         "periodic_check_enabled": current,
         "msg": f"Watchdog periodic check {status_str}",
     }
+
+
+def _app_start() -> None:
+    with _lock:
+        has = _state.get("youtube_id") or _state.get("mosaic_slots") or _state.get("hls_url")
+    if not has:
+        play_video(PlayIn(mosaic=True))
+        return
+    enable_streaming()
+
+
+def _app_stop() -> None:
+    disable_streaming()
+
+
+attach_iperf_routes(app, IPERF)
+attach_app_routes(app, start_fn=_app_start, stop_fn=_app_stop, log=APP_LOG)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+# Rendered by python3 paper/exp4/s*/deploy.py (and generate_gitops.py)
+**/gitops_manifests/
+
+# Rendered UE YAML from python3 paper/exp4/s*/deploy_ue.py
+**/manifests/

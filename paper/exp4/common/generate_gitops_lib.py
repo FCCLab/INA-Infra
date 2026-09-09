@@ -12,6 +12,13 @@ import shutil
 import types
 from pathlib import Path
 
+import yaml
+
+# gNB Slices default: dedicated / min / max PRB % for every NSSAI (incl. default SD).
+GNB_SLICE_DEDICATED = 0.0
+GNB_SLICE_MIN = 0.0
+GNB_SLICE_MAX = 100.0
+
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 OUT = HERE / "gitops_manifests"
@@ -83,6 +90,7 @@ def write_text(path: Path, text: str) -> None:
 
 def transform_ns(text: str) -> str:
     text = re.sub(r"\bexp1-a\b", NAMESPACE, text)
+    text = text.replace("--namespace=ina-infra", f"--namespace={NAMESPACE}")
     text = re.sub(r"app\.kubernetes\.io/part-of:\s*exp1\b", f"app.kubernetes.io/part-of: {PART_OF}", text)
     text = re.sub(r"app\.kubernetes\.io/part-of:\s*exp1-a\b", f"app.kubernetes.io/part-of: {PART_OF}", text)
     text = re.sub(r"ina\.lab/scheme:\s*\S+", f"ina.lab/scheme: {SCHEME_ID}", text)
@@ -117,6 +125,11 @@ def rewrite_slice_token(text: str, src: int, dst: int) -> str:
         (rf"ina\.lab/slice:\s*['\"]?{src}['\"]?", f"ina.lab/slice: '{dst}'"),
         (rf"ina-infra\.nephio\.lab/slice:\s*['\"]?{src}['\"]?", f'ina-infra.nephio.lab/slice: "{dst}"'),
         (rf"slice:\s*['\"]?{src}['\"]?", f'slice: "{dst}"'),
+        # Hex CU-UP id / S-NSSAI are not covered by oaiN / 10.140.N rewrites.
+        (rf"gNB_CU_UP_ID\s*=\s*0xe0{src}\b", f"gNB_CU_UP_ID = 0xe0{dst}"),
+        (rf"sd\s*=\s*0x{src:06x}\b", f"sd = 0x{dst:06x}"),
+        (rf"sd:\s*'0*{src}'", f"sd: '{dst:06d}'"),
+        (rf'sd:\s*"0*{src}"', f'sd: "{dst:06d}"'),
     ]
     for pat, repl in pairs:
         text = re.sub(pat, repl, text)
@@ -379,6 +392,7 @@ data:
 
 def sync_exp4_app_code() -> None:
     """Overwrite remapped ConfigMaps from applications/exp4_* (dedicated trees)."""
+    common_influx = APPS_ROOT / "exp4" / "common" / "influx_publish.py"
     cctv = APPS_ROOT / "exp4" / "exp4_s2_cctv" / "server"
     write_app_code_configmap(
         2,
@@ -386,7 +400,7 @@ def sync_exp4_app_code() -> None:
         "application-cctv",
         "cctv",
         "60-app-2-application-cctv-code-configmap.yaml",
-        {name: cctv / name for name in (
+        {name: (common_influx if name == "influx_publish.py" else cctv / name) for name in (
             "cctv.py",
             "yolo_worker.py",
             "state.py",
@@ -405,7 +419,7 @@ def sync_exp4_app_code() -> None:
         "application-ott",
         "ott",
         "60-app-3-application-ott-code-configmap.yaml",
-        {name: ott / name for name in (
+        {name: (common_influx if name == "influx_publish.py" else ott / name) for name in (
             "main.py",
             "ott.py",
             "api.py",
@@ -419,8 +433,18 @@ def sync_exp4_app_code() -> None:
     )
 
 
+def _uses_gpu(sid: int) -> bool:
+    return float(SLICES[sid].get("gpu_app") or 0) > 0
+
+
+def _multus_master(sid: int) -> str:
+    """N6 parent NIC. GPU apps pin to edge gpu-a40 (ens12f0); CPU apps use VM enp7s0."""
+    return "ens12f0" if _uses_gpu(sid) else "enp7s0"
+
+
 def _multus_nad(sid: int) -> str:
     s = SLICES[sid]
+    master = _multus_master(sid)
     return f"""apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -432,7 +456,7 @@ metadata:
     ina.lab/slice: '{sid}'
     ina-infra.nephio.lab/role: app
 spec:
-  config: '{{"cniVersion": "0.3.1", "name": "app-slice{sid}-multus", "plugins": [{{"type": "macvlan", "capabilities": {{"ips": true, "mac": true}}, "master": "enp7s0", "mode": "bridge", "ipam": {{"type": "static", "addresses": [{{"address": "{s['app_ip']}/24", "gateway": "10.1.137.1"}}]}}}}, {{"type": "tuning", "capabilities": {{"mac": true}}, "ipam": {{}}, "sysctl": {{"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}}}]}}'
+  config: '{{"cniVersion": "0.3.1", "name": "app-slice{sid}-multus", "plugins": [{{"type": "macvlan", "capabilities": {{"ips": true, "mac": true}}, "master": "{master}", "mode": "bridge", "ipam": {{"type": "static", "addresses": [{{"address": "{s['app_ip']}/24", "gateway": "10.1.137.1"}}]}}}}, {{"type": "tuning", "capabilities": {{"mac": true}}, "ipam": {{}}, "sysctl": {{"net.ipv4.conf.IFNAME.arp_ignore": "1", "net.ipv4.conf.IFNAME.arp_announce": "2"}}}}]}}'
 """
 
 
@@ -453,7 +477,7 @@ def _route_init(ip: str) -> str:
 def _server_influx_env(sid: int, app_type: str, cluster: str, app_name: str) -> str:
     """Influx + probe env for the application server container."""
     return f"""        - name: INFLUXDB_URL
-          value: http://10.1.137.104:8086
+          value: http://influxdb.influxdb.svc:8086
         - name: INFLUXDB_TOKEN
           value: ina-infra-influxdb-token
         - name: INFLUXDB_ORG
@@ -477,9 +501,19 @@ def _server_influx_env(sid: int, app_type: str, cluster: str, app_name: str) -> 
         - name: TO_CLIENT_IFACE
           value: "net1"
         - name: CONSOLE_IFACE
-          value: "eth0"
+          value: "net1"
+        - name: CONSOLE_IP
+          value: {SLICES[sid]['app_ip']}
+        - name: MULTUS_GW
+          value: "10.1.137.1"
         - name: TARGET_CLUSTER
           value: {cluster}
+        - name: EXP4_METRICS_ORIGIN
+          value: server
+        - name: PUBLIC_BASE_URL
+          value: http://{SLICES[sid]['app_ip']}
+        - name: MULTUS_IP
+          value: {SLICES[sid]['app_ip']}
 """
 
 
@@ -651,22 +685,10 @@ spec:
 
 
 def write_cpu_offload_app() -> None:
-    """Slice 4: frozen-peak CPU pipeline (encrypt/zip/scan/LUT) then DL."""
+    """Slice 4: same SFTP+iperf path as slice 1, plus encrypt (baked Exp4 image)."""
     s = SLICES[4]
     repo = REPO_FOR[s["app"]]
     write_text(ns_dir(repo) / "60-app-4-app-slice4-multus-networkattachmentdefinition.yaml", _multus_nad(4))
-    write_app_code_configmap(
-        4,
-        "application-cpu-offload-code",
-        "application-cpu-offload",
-        "cpu-offload",
-        "60-app-4-application-cpu-offload-code-configmap.yaml",
-        {
-            "server.py": APPS_ROOT / "exp4" / "exp4_s4_cpu_offload" / "server" / "server.py",
-            "influx_publish.py": APPS_ROOT / "exp4" / "exp4_s4_cpu_offload" / "server" / "influx_publish.py",
-            "entrypoint.sh": APPS_ROOT / "exp4" / "exp4_s4_cpu_offload" / "server" / "entrypoint.sh",
-        },
-    )
     write_text(
         ns_dir(repo) / "60-app-4-application-cpu-offload.yaml",
         f"""apiVersion: v1
@@ -689,7 +711,13 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: 8080
+    targetPort: 80
+  - name: sftp
+    port: 22
+    targetPort: 22
+  - name: iperf
+    port: 5201
+    targetPort: 5201
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -732,19 +760,18 @@ spec:
           limits: {{cpu: 100m, memory: 64Mi}}
       containers:
       - name: pipeline
-        image: docker.io/library/python:3.12-slim
-        imagePullPolicy: IfNotPresent
+        image: 10.1.132.30:5000/exp4-s4-cpu-offload-server:nws-v0.30-amd64
+        imagePullPolicy: Always
         env:
-{_server_influx_env(4, "exp4-s4", s["app"], "application-cpu-offload")}        command: ["bash", "-c", "python3 /app/influx_publish.py & exec python3 /app/server.py"]
+{_server_influx_env(4, "exp4-s4", s["app"], "application-cpu-offload")}        - name: IPERF_AUTOSTART
+          value: "1"
+        - name: SFTP_AUTOSTART
+          value: "1"
         ports:
+        - containerPort: 80
+        - containerPort: 22
+        - containerPort: 5201
         - containerPort: 8080
-        volumeMounts:
-        - name: code
-          mountPath: /app/server.py
-          subPath: server.py
-        - name: code
-          mountPath: /app/influx_publish.py
-          subPath: influx_publish.py
         resources:
           requests:
             cpu: "{s['cpu_app']}"
@@ -752,10 +779,6 @@ spec:
           limits:
             cpu: "{s['cpu_app']}"
             memory: {s['mem_app']}
-      volumes:
-      - name: code
-        configMap:
-          name: application-cpu-offload-code
 """,
     )
 
@@ -771,6 +794,120 @@ NSSAI_SLICE5 = """
 """
 
 
+def _gnb_slice_sd(sid: int) -> str:
+    return "0xffffff" if sid == 0 else f"0x{sid:06x}"
+
+
+def _nssai_sd(sid: int) -> str:
+    return "0xFFFFFF" if sid == 0 else f"0x{sid:06x}"
+
+
+def _build_gnb_slices_block() -> str:
+    sids = [0, *sorted(SLICES)]
+    rows = []
+    for i, sid in enumerate(sids):
+        comma = "," if i < len(sids) - 1 else ""
+        rows.append(
+            "  { slice_id = "
+            f"{sid}; sst = 1; sd = {_gnb_slice_sd(sid)}; "
+            f"dedicated_prb_ratio = {GNB_SLICE_DEDICATED:.1f}; "
+            f"min_prb_ratio = {GNB_SLICE_MIN:.1f}; "
+            f"max_prb_ratio = {GNB_SLICE_MAX:.1f}; }}{comma}"
+        )
+    return "Slices = (\n" + "\n".join(rows) + "\n)"
+
+
+def _build_snssai_list() -> str:
+    items = [f"{{ sst = 1, sd = {_nssai_sd(sid)} }}" for sid in (0, *sorted(SLICES))]
+    return "snssaiList = (" + ", ".join(items) + ")"
+
+
+def _patch_gnb_conf(conf: str, *, slices: bool) -> str:
+    if slices:
+        conf, n = re.subn(r"Slices\s*=\s*\(.*?\n\)", _build_gnb_slices_block(), conf, count=1, flags=re.S)
+        if n != 1:
+            raise SystemExit("failed to patch gNB Slices block")
+    conf, n = re.subn(r"snssaiList\s*=\s*\([^)]*\)", _build_snssai_list(), conf, count=1)
+    if n != 1:
+        raise SystemExit("failed to patch gNB snssaiList")
+    return conf
+
+
+def _rewrite_cm_gnb_conf(path: Path, conf: str) -> None:
+    raw = path.read_text()
+    m = re.search(r"(?m)^data:\s*$", raw)
+    if not m:
+        raise SystemExit(f"{path.name}: missing data: key")
+    write_text(path, raw[: m.start()] + "data:\n  gnb.conf: " + json.dumps(conf) + "\n")
+
+
+def patch_gnb_slices() -> None:
+    """Force every gNB slice to dedicated/min/max = 0/0/100 and include slice 5."""
+    du = ns_dir("edge-repo") / "44-configmap-oai-du-configmap.yaml"
+    cucp = ns_dir("edge-repo") / "41-configmap-oai-cu-cp-configmap.yaml"
+    du_doc = yaml.safe_load(du.read_text())
+    _rewrite_cm_gnb_conf(du, _patch_gnb_conf(du_doc["data"]["gnb.conf"], slices=True))
+    cucp_doc = yaml.safe_load(cucp.read_text())
+    _rewrite_cm_gnb_conf(cucp, _patch_gnb_conf(cucp_doc["data"]["gnb.conf"], slices=False))
+    print(
+        f"  gNB slices default dedicated/min/max="
+        f"{GNB_SLICE_DEDICATED:.0f}/{GNB_SLICE_MIN:.0f}/{GNB_SLICE_MAX:.0f} "
+        f"(ids 0,{','.join(str(s) for s in sorted(SLICES))})"
+    )
+
+
+def _mysql_sql_json(obj: object) -> str:
+    """JSON as stored in 05-configmap-mysql-initialization.yaml (quotes backslash-escaped)."""
+    return json.dumps(obj, separators=(", ", ": ")).replace('"', r"\"")
+
+
+def patch_mysql_ues() -> None:
+    """Map scheme IMSIs to per-slice DNN/NSSAI and expand AM defaultSingleNssais."""
+    path = ns_dir("central-repo") / "05-configmap-mysql-initialization.yaml"
+    if not path.exists():
+        print("  warn: mysql initialization ConfigMap missing; skip UDR patch")
+        return
+    text = path.read_text()
+    am_obj = {
+        "defaultSingleNssais": [{"sst": 1, "sd": f"{sid:06d}"} for sid in sorted(SLICES)]
+    }
+    am_new = f"('00101', '', '{_mysql_sql_json(am_obj)}');"
+    text, am_n = re.subn(
+        r"\('00101', '', '\{\\\"defaultSingleNssais\\\": \[.*?\]\}'\);",
+        am_new,
+        text,
+        count=1,
+    )
+    if am_n:
+        print(f"  mysql AM defaultSingleNssais → slices {','.join(str(s) for s in sorted(SLICES))}")
+    else:
+        print("  warn: mysql AM defaultSingleNssais row not patched")
+
+    for sid, s in sorted(SLICES.items()):
+        imsi = s["imsi"]
+        dnn = s["dnn"]
+        old = (
+            f"('{imsi}', '00101', '"
+            + _mysql_sql_json({"sst": 1, "sd": "1"})
+            + "', '"
+            + '{"oai1":'.replace('"', r"\"")
+        )
+        new = (
+            f"('{imsi}', '00101', '"
+            + _mysql_sql_json({"sst": 1, "sd": str(sid)})
+            + "', '"
+            + ('{"' + dnn + '":').replace('"', r"\"")
+        )
+        if old == new:
+            continue
+        if old not in text:
+            print(f"  warn: mysql SM row for {imsi} not found (already patched?)")
+            continue
+        text = text.replace(old, new, 1)
+        print(f"  mysql SM {imsi} → sd={sid} dnn={dnn}")
+    write_text(path, text)
+
+
 def patch_core_nssai() -> None:
     """AMF/SMF templates only list slices 1–4; append slice 5."""
     for name in ("24-nfconfig-amf.yaml", "25-nfconfig-smf.yaml"):
@@ -784,6 +921,31 @@ def patch_core_nssai() -> None:
             continue
         text = text.replace(needle, needle + NSSAI_SLICE5, 1)
         write_text(path, text)
+
+
+def patch_smf_upf_slice5() -> None:
+    """Exp1 SMF NFDeployment only refs UPF Configs 1–4; attach slice 5."""
+    path = ns_dir("central-repo") / "25-nfdeployment-smf.yaml"
+    if not path.exists():
+        print("  warn: SMF NFDeployment missing; skip slice-5 parametersRef")
+        return
+    text = path.read_text()
+    if "smf-core-upf-slice-5" in text:
+        return
+    needle = """  - name: smf-core-upf-slice-4
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+"""
+    extra = needle + """
+  - name: smf-core-upf-slice-5
+    apiVersion: ref.nephio.org/v1alpha1
+    kind: Config
+"""
+    if needle not in text:
+        print("  warn: SMF NFDeployment missing slice-4 parametersRef")
+        return
+    write_text(path, text.replace(needle, extra, 1))
+    print("  SMF NFDeployment parametersRefs += smf-core-upf-slice-5")
 
 
 def clone_slice5_nf() -> None:
@@ -858,6 +1020,37 @@ data:
         )
 
 
+def write_operator_rbac() -> None:
+    """Bind OAI kopf operators in this scheme namespace to the existing ClusterRoles."""
+    central_nfs = ("amf", "ausf", "nrf", "smf", "udm", "udr", "upf")
+    upf_only = ("upf",)
+    for repo, nfs in (
+        ("central-repo", central_nfs),
+        ("regional-repo", upf_only),
+        ("edge-repo", upf_only),
+    ):
+        for nf in nfs:
+            write_text(
+                OUT / repo / "cluster" / f"clusterrolebinding-{nf}-operator-{NAMESPACE}.yaml",
+                f"""apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {nf}-operator-{NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: {PART_OF}
+    ina.lab/scheme: {SCHEME_ID}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: oai-{nf}-operator-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: oai-{nf}-operator
+  namespace: {NAMESPACE}
+""",
+            )
+
+
 def render(scheme: types.ModuleType | None = None, out_dir: Path | None = None) -> None:
     if scheme is not None and out_dir is not None:
         _bind(scheme, out_dir)
@@ -874,11 +1067,14 @@ def render(scheme: types.ModuleType | None = None, out_dir: Path | None = None) 
         write_placement(repo)
         write_scheme_cm(repo)
     copy_shared_and_nfs()
-    copy_existing_apps()
-    patch_copied_app_metrics()
-    write_iperf_app()
-    write_cpu_offload_app()
+    from baked_apps import write_baked_apps
+
+    write_baked_apps()
+    write_operator_rbac()
     clone_slice5_nf()
     patch_core_nssai()
+    patch_smf_upf_slice5()
+    patch_mysql_ues()
+    patch_gnb_slices()
     write_slice_ips_extras()
     print(f"Rendered into {OUT}")

@@ -9,7 +9,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-10.1.132.30:5000}"
-IMAGE_TAG="${IMAGE_TAG:-nws-v0.14-amd64}"
+IMAGE_TAG="${IMAGE_TAG:-nws-v0.30-amd64}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 PUSH=0
 export DOCKER_BUILDKIT=1
@@ -118,9 +118,10 @@ stage_s2_trt_engine() {
 
 install_shared() {
   local dest="$1" kind="$2"
-  case "${kind}" in
+    case "${kind}" in
     server)
       cp -f "${HERE}/common/connected_clients.py" "${dest}/connected_clients.py"
+      cp -f "${HERE}/common/ifaces.sh" "${dest}/ifaces.sh"
       if [[ -f "${dest}/influx_publish.py" ]]; then
         cp -f "${HERE}/common/influx_publish.py" "${dest}/influx_publish.py"
       fi
@@ -129,6 +130,11 @@ install_shared() {
       mkdir -p "${dest}/backend"
       cp -f "${HERE}/common/heartbeat.py" "${dest}/backend/heartbeat.py"
       cp -f "${HERE}/common/influx_publish.py" "${dest}/influx_publish.py"
+      cp -f "${HERE}/common/ifaces.sh" "${dest}/ifaces.sh"
+      cp -f "${HERE}/common/to_server.py" "${dest}/to_server.py"
+      cp -f "${HERE}/common/to_server.py" "${dest}/backend/to_server.py"
+      cp -f "${HERE}/common/ue_control.py" "${dest}/ue_control.py"
+      cp -f "${HERE}/common/ue_control.py" "${dest}/backend/ue_control.py"
       ;;
   esac
 }
@@ -148,6 +154,12 @@ for sid in "${SLICES[@]}"; do
     s2)
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s2_cctv/client/influx_publish.py"
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s2_cctv/server/influx_publish.py"
+      cp -f "${HERE}/common/ifaces.sh" "${HERE}/exp4_s2_cctv/server/common/ifaces.sh"
+      cp -f "${HERE}/common/ifaces.sh" "${HERE}/exp4_s2_cctv/client/ifaces.sh"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s2_cctv/client/to_server.py"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s2_cctv/client/backend/to_server.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s2_cctv/client/ue_control.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s2_cctv/client/backend/ue_control.py"
       stage_s2_trt_engine
       build_one exp4-s2-cctv-server \
         "${HERE}/exp4_s2_cctv/server" \
@@ -159,6 +171,12 @@ for sid in "${SLICES[@]}"; do
     s3)
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s3_ott/client/influx_publish.py"
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s3_ott/server/influx_publish.py"
+      cp -f "${HERE}/common/ifaces.sh" "${HERE}/exp4_s3_ott/server/common/ifaces.sh"
+      cp -f "${HERE}/common/ifaces.sh" "${HERE}/exp4_s3_ott/client/ifaces.sh"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s3_ott/client/to_server.py"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s3_ott/client/backend/to_server.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s3_ott/client/ue_control.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s3_ott/client/backend/ue_control.py"
       build_one exp4-s3-ott-server \
         "${HERE}/exp4_s3_ott/server" \
         "${HERE}/exp4_s3_ott/server/Dockerfile"
@@ -180,6 +198,11 @@ for sid in "${SLICES[@]}"; do
       install_shared "${HERE}/exp4_s5_iot/server" server
       install_shared "${HERE}/exp4_s5_iot/client" client
       cp -f "${HERE}/common/influx_publish.py" "${HERE}/exp4_s5_iot/client/influx_publish.py"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s5_iot/client/to_server.py"
+      cp -f "${HERE}/common/to_server.py" "${HERE}/exp4_s5_iot/client/backend/to_server.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s5_iot/client/ue_control.py"
+      cp -f "${HERE}/common/ue_control.py" "${HERE}/exp4_s5_iot/client/backend/ue_control.py"
+      cp -f "${HERE}/common/ifaces.sh" "${HERE}/exp4_s5_iot/server/common/ifaces.sh"
       build_one exp4-s5-iot-server \
         "${HERE}/exp4_s5_iot/server" \
         "${HERE}/exp4_s5_iot/server/Dockerfile"
