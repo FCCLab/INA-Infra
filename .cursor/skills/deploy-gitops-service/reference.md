@@ -44,6 +44,7 @@ Legacy / alternate OAI renders (prefer `render_oai_slice_deployment_gitops.sh` f
 | `render_oai_operators_gitops.sh` | **central** | CN/RAN operators |
 | `render_oai_core_gitops.sh` | **central** | `oai-cn` NFDeployments |
 | `render_oai_slice_deployment_gitops.sh` | central+regional+edge | Current slice design |
+| `render_open5gs_gitops.sh` | **edge** | Open5GS 5GC (`open5gs`); pin `edge-1` / `edge-2` |
 
 ## OAI namespace map
 

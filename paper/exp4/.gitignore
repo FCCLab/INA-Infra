@@ -6,3 +6,8 @@
 
 # Generated figures (compare_schemes.py, plot_exp4.py, exp_plot.py)
 plots/
+
+report.html
+report.jpeg
+report.png
+report.pdf

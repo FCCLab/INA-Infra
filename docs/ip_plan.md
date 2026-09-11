@@ -49,6 +49,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.104` | edge InfluxDB | Multus macvlan on `edge-0` (port 8086) |
 | `.105` | edge Grafana | Multus macvlan on `edge-0` (port 3000) |
 | `.106` | central DynDNS | `/32` on `central-0` + hostPort 53/8088 |
+| `.107` | edge Open5GS 5GC | Multus macvlan on `cpu-edge-1` (NGAP `:38412`, GTP-U `:2152`) |
 | `.110`–`.111` | `central-0`, `central-1` | K8s VMs |
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
 | `.130`–`.131` | `edge-0`, `edge-1` | K8s VMs |
@@ -154,6 +155,18 @@ Lab login: user `inainfra` / password `inainfra`.
 
 Zone `central.inainfra` · admin `inainfra` / `inainfra`.
 
+### Workload Open5GS 5GC (`10.1.137.107`)
+
+Monolithic Open5GS from [FCCLab/5gc-open5gs](https://github.com/FCCLab/5gc-open5gs) on **edge**. **Multus macvlan** on `cpu-edge-1` `enp7s0` (static `10.1.137.107/24`). Privileged pod (TUN `ogstun`, UE pool `10.45.0.0/24`). Does not replace OAI 5GC on central. GitOps: `./scripts/render_open5gs_gitops.sh`. Build: `./services/open5gs/build_push.sh`.
+
+| Address | Cluster | Node | Ports | URL | DNS |
+|---------|---------|------|-------|-----|-----|
+| 10.1.137.107 | edge | `cpu-edge-1` | 38412/sctp, 2152/udp | AMF N2 / UPF N3 | `open5gs.edge.inainfra` |
+
+Web UI (Next.js) binds the pod Flannel IP. From the operator host: `kubectl --context edge@edge -n open5gs port-forward svc/open5gs-5gc 9999:9999` then [http://127.0.0.1:9999](http://127.0.0.1:9999).
+
+RAN must use PLMN 001/01 and TAC 81. Pin to `edge-2` with `./scripts/render_open5gs_gitops.sh edge-2` once that host is a Kubernetes worker.
+
 ### Other workload MetalLB VIPs (`10.1.138.0/24`)
 
 Cross-cluster publish range remains `10.1.138.100`–`10.1.138.199` (see pools above).
@@ -250,6 +263,7 @@ VM default route: `via 10.1.132.1` · DNS: `10.1.132.200`. Reach workload APIs o
 | MetalLB (GitOps render) | [scripts/render_metallb_gitops.sh](../scripts/render_metallb_gitops.sh) |
 | Flannel / Multus / Dashboard (GitOps) | [scripts/render_flannel_gitops.sh](../scripts/render_flannel_gitops.sh) · [render_multus_gitops.sh](../scripts/render_multus_gitops.sh) · [render_dashboard_gitops.sh](../scripts/render_dashboard_gitops.sh) |
 | OAI (GitOps) | [render_oai_operators_gitops.sh](../scripts/render_oai_operators_gitops.sh) · [render_oai_core_gitops.sh](../scripts/render_oai_core_gitops.sh) · [render_oai_slice_deployment_gitops.sh](../scripts/render_oai_slice_deployment_gitops.sh) |
+| Open5GS 5GC (GitOps, edge) | [render_open5gs_gitops.sh](../scripts/render_open5gs_gitops.sh) · [services/open5gs/build_push.sh](../services/open5gs/build_push.sh) |
 | Push GitOps to Gitea | [bringup/03_push_to_git_repos/push_git_repos.sh](../bringup/03_push_to_git_repos/push_git_repos.sh) |
 | Config Sync status | [scripts/check-configsync.sh](../scripts/check-configsync.sh) |
 | Site / mgmt netplan (VMs) | [scripts/setup_ip.sh](../scripts/setup_ip.sh) |

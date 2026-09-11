@@ -86,6 +86,15 @@ declare -A CLUSTER_DDNS_VIP=(
 declare -A CLUSTER_DDNS_NODE=(
   [central]=cpu-central-0
 )
+# Open5GS 5GC (FCCLab/5gc-open5gs) on site L2. Multus macvlan on CLUSTER_OPEN5GS_NODE
+# (pod IP = VIP/24 on the node's site NIC). Default node is cpu-edge-1; edge-2 is
+# not currently a Kubernetes worker.
+declare -A CLUSTER_OPEN5GS_VIP=(
+  [edge]=10.1.137.107
+)
+declare -A CLUSTER_OPEN5GS_NODE=(
+  [edge]=cpu-edge-1
+)
 # OAI macvlan on 10.1.139.0/24 (Multus / enp7s0). See docs/oai.md; IPs in docs/ip_plan.md.
 OAI_MACVLAN_GW="${OAI_MACVLAN_GW:-10.1.139.1}"
 OAI_MACVLAN_PREFIX="${OAI_MACVLAN_PREFIX:-10.1.139}"
@@ -278,6 +287,29 @@ grafana_vip() {
 ddns_vip() {
   local cluster="$1"
   printf '%s' "${CLUSTER_DDNS_VIP[$cluster]:-}"
+}
+
+open5gs_vip() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_OPEN5GS_VIP[$cluster]:-}"
+}
+
+open5gs_node() {
+  local cluster="$1"
+  printf '%s' "${CLUSTER_OPEN5GS_NODE[$cluster]:-}"
+}
+
+# Site NIC used as Multus macvlan master for a given node hostname / SSH alias.
+open5gs_site_iface() {
+  local node="$1"
+  node="$(canonicalize_node_host "$node")"
+  case "$node" in
+    cpu-edge-0|cpu-edge-1) printf 'enp7s0' ;;
+    edge-2) printf 'eno1' ;;
+    gpu-a40|edge-3) printf 'ens12f0' ;;
+    usrp) printf '%s' "${USRP_SITE_IFACE}" ;;
+    *) printf '%s' "${SITE_IFACE}" ;;
+  esac
 }
 
 amf_n2_vip() {

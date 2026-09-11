@@ -7,7 +7,7 @@ regional=2, central=1). See ``paper/exp4/cost_model.py``.
 
 Violation score = delay overshoot max(0, d/D̄−1) plus rate shortfall
 max(0, 1 − rate/(0.95·T̄)). Zero means the sample meets both budgets.
-D̄/T̄ are SX uncontended means (paper/exp4/sx/data/traffic_requirements.json).
+D̄/T̄ are the contended five-UE bars in exp_start.SLICES (not SX isolated means).
 
 Usage:
   python3 paper/exp4/compare_schemes.py
@@ -97,7 +97,7 @@ def _viol_score(run: "SchemeRun", sid: int) -> float:
 def mean_violation_scores(samples: List[dict]) -> Tuple[Dict[int, float], float]:
     """Per-slice and strict-index mean violation scores from samples.csv.
 
-    Uses current ``SLICES`` D̄/T̄ (SX-measured), not the bars baked into the CSV.
+    Uses current ``SLICES`` D̄/T̄ (contended five-UE bars), not bars baked into the CSV.
     """
     sums: Dict[int, float] = {}
     counts: Dict[int, int] = {}

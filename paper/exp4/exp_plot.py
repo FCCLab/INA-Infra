@@ -272,8 +272,8 @@ def plot_run(
             if row.get("mean_throughput_mbps") is not None
             else float("nan")
         )
-        d_bar.append(float(row.get("d_bar_ms") or SLICES[sid]["d_bar_ms"]))
-        t_bar.append(float(row.get("t_bar_mbps") or SLICES[sid]["t_bar_mbps"]))
+        d_bar.append(float(SLICES[sid]["d_bar_ms"]))
+        t_bar.append(float(SLICES[sid]["t_bar_mbps"]))
     ax1.bar([i - 0.18 for i in x], mean_d, width=0.36, color="#4C72B0", label="mean delay", zorder=3)
     ax1.bar([i + 0.18 for i in x], d_bar, width=0.36, color="#C44E52", alpha=0.55, label="D̄", zorder=3)
     ax1.set_xticks(x, labels)

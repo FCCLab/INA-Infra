@@ -101,6 +101,7 @@ Verify:
 ./scripts/render_metallb_gitops.sh mgmt central regional edge
 ./scripts/render_dashboard_gitops.sh mgmt central regional edge
 ./scripts/render_metrics_server_gitops.sh mgmt central regional edge
+./scripts/render_open5gs_gitops.sh         # optional: Open5GS 5GC on cpu-edge-1
 ./bringup/03_push_to_git_repos/push_git_repos.sh
 ./scripts/check-configsync.sh
 ```

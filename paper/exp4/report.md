@@ -1,513 +1,338 @@
-# Experiment 4 — Synergy of PL, PM, and PS
+# Exp4 test report — PL / PM / PS ablation
 
-Testbed ablation of the three INA control layers on five concurrent downlink
-slices. This report uses the **live cluster captures** (not the analytical
-preview in `simulate_exp4.py`). Headline plots live in
-[`plots/s0_vs_s1_vs_s2_vs_s3/`](plots/s0_vs_s1_vs_s2_vs_s3/).
-
-**Takeaway.** Placement (PL) is the layer that moves the needle on this
-testbed: it cuts the N6 hairpin, recovers YOLO goodput, and drops MQTT
-delay by more than half while lowering OPEX. Right-sizing (PM) then cuts
-allocated cost with little SLA change. Radio slicing (PS) is OPEX-neutral
-and does **not** clear the remaining violations on a 300 s contended-cell
-capture — binary SLA rates stay near 100 % because \(\bar T\) comes from
-*uncontended* SX runs.
+| Field | Value |
+| :--- | :--- |
+| DUT | Nephio 5G slicing testbed, one shared DU, five concurrent DL UEs |
+| Date | 2026-09-09 |
+| Capture | 300 s, 1 Hz, after settle |
+| Evaluator | `compare_schemes.py` + `exp_start.SLICES` |
+| Plots | [`plots/s0_vs_s1_vs_s2_vs_s3/`](plots/s0_vs_s1_vs_s2_vs_s3/) |
 
 ---
 
-## 1. Objective
+## 1. Test conditions
 
-Quantify the **marginal** contribution of each layer, with the other
-layers held fixed, on one shared RAN (one DU, five UEs):
+### 1.1 Clusters and RAN
 
-| Layer | Timescale | Decision | What it can change |
-| :--- | :--- | :--- | :--- |
-| **PL** | long-term | *where* CU-UP, UPF, and APP sit | transport delay, site-price OPEX |
-| **PM** | medium-term | *how much* CPU / RAM / GPU is reserved | queueing, idle-compute OPEX |
-| **PS** | short-term | *how* DL PRBs track the channel | fade-induced rate / delay misses |
+| Cluster | Context | Role |
+| :--- | :--- | :--- |
+| mgmt | `mgmt@mgmt` | GitOps |
+| central | `central@central` | 5G core; S1–S3 UPF/APP slices 1, 4, 5 |
+| regional | `regional@regional` | S1–S3 UPF/APP slice 3 (OTT) |
+| edge | `edge@edge` | CU-CP, DU, UEs; S1–S3 UPF/APP slice 2 (YOLO GPU) |
 
-The layers are not substitutes: PL cannot absorb a fade, PM cannot move a
-function across clusters, and PS cannot shrink an idle GPU.
+| Item | Value |
+| :--- | :--- |
+| RAN | OAI rfsim, one DU, five NR-UEs |
+| N6 | Multus macvlan `10.1.137.0/24` |
+| UE rfsim | `10.1.140.141`–`145` |
+| Duration | 300 s |
+| Sample rate | 1 Hz |
+| Load | five DL slices concurrent (no diurnal / fade replay) |
 
----
+### 1.2 Slices (same workloads in every scheme)
 
-## 2. Setup
+| Slice | App | DNN | IMSI | APP IP | UE console | Delay metric |
+| :---: | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | FTP (iperf3 `-R` + SFTP 5 MB) | oai1 | 001010000000101 | 10.1.137.211 | 10.1.137.221 | last-byte − first-byte |
+| 2 | YOLO CCTV DL | oai2 | 001010000000102 | 10.1.137.212 | 10.1.137.222 | compose ts → first RTP/GST |
+| 3 | OTT gstreamer watch | oai3 | 001010000000103 | 10.1.137.213 | 10.1.137.223 | \(t_{\mathrm{rx}}-t_{\mathrm{tx}}\) |
+| 4 | CPU-OFF (encrypt→zip→scan→LUT→5 MB) | oai4 | 001010000000104 | 10.1.137.214 | 10.1.137.224 | complete − request-start |
+| 5 | MQTT Get | oai5 | 001010000000105 | 10.1.137.215 | 10.1.137.225 | PUBLISH ts → UE delivery |
 
-### 2.1 Four schemes
+### 1.3 Schemes
 
 Schemes are **control configurations**, not slices. The same five DL
-workloads run under every scheme.
+workloads (§1.2) run under every scheme on one shared DU.
 
-| Scheme | NS | PL | PM | PS | Placement (CU-UP / UPF / APP) | Compute | Radio |
-| :---: | :--- | :---: | :---: | :---: | :--- | :--- | :--- |
-| **S0** | `exp4-s0` | ✗ | ✗ | ✗ | all slices **C / C / E** (N6 hairpin) | frozen peak requests | equal PRB |
-| **S1** | `exp4-s1` | ✓ | ✗ | ✗ | PL sites (table below) | same frozen peak | equal PRB |
-| **S2** | `exp4-s2` | ✓ | ✓ | ✗ | same as S1 | PM requests = S1 usage × 1.25 | equal PRB |
-| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | same as S1 | same as S2 | DL `dl_min_prb_ratio` 20/20/20/20/10 %, dedicated 0, `nws-xapp` on |
+| Layer | Timescale | Decision | What is configured |
+| :--- | :--- | :--- | :--- |
+| **PL** | long-term | *where* CU-UP, UPF, and APP sit | site per slice (§1.4) |
+| **PM** | medium-term | *how much* CPU / RAM / GPU is reserved | K8s requests (§1.5) |
+| **PS** | short-term | *how* DL PRBs are shared | scheduler + min-PRB (§1.6) |
 
-S0 is the expensive *and* high-latency anti-pattern: core-centric UPF with
-MEC-everywhere apps. That is why **one** PL step can improve both SLA and
-OPEX.
+| Scheme | NS | PL | PM | PS | What this run is | Capture |
+| :---: | :--- | :---: | :---: | :---: | :--- | :--- |
+| **S0** | `exp4-s0` | ✗ | ✗ | ✗ | Static baseline: all APP on edge, UPF on central (N6 hairpin), peak compute, equal PRB | `20260909-224603_300s` |
+| **S1** | `exp4-s1` | ✓ | ✗ | ✗ | S0 + **placement only**: CU-UP / UPF / APP co-located per slice; same peak requests and equal PRB | `20260909-231724_300s` |
+| **S2** | `exp4-s2` | ✓ | ✓ | ✗ | S1 + **right-size compute**: requests = S1 measured usage × 1.25; still equal PRB | `20260909-233004_300s` |
+| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | S2 + **radio slicing**: NSDL, DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on | `20260909-160900_300s` |
 
-### 2.2 Five downlink slices
+Each step adds one layer and holds the others fixed (ablation). S1 vs S0 isolates PL; S2 vs S1 isolates PM; S3 vs S2 isolates PS.
 
-All flows are DL. E2E delay is **application** latency (radio + F1 + N3 +
-N6 + processing). Throughput is application goodput, not MAC bitrate.
+### 1.4 Placement (CU-UP / UPF / APP)
 
-| Slice | App | PL site (S1–S3) | Strict SLA? | How \(d_{\mathrm{e2e}}\) is measured |
-| :---: | :--- | :--- | :---: | :--- |
-| **1** FTP | iperf3 `-R` + SFTP 5 MB | C / C / **C** | no (background) | last-byte − first-byte at the UE |
-| **2** YOLO | annotated CCTV stream **to the UE** | **E / E / E** | **yes** | compose timestamp → first RTP/GST buffer |
-| **3** OTT | gstreamer file-replay watch | **R / R / R** | **yes** | one-way \(t_{\mathrm{rx}}-t_{\mathrm{tx}}\) |
-| **4** CPU-OFF | encrypt → zip → scan → LUT → 5 MB DL | C / C / **C** | no (relaxed) | download-complete − request-start |
-| **5** MQTT | MQTT Get (UE pulls telemetry) | C / C / **C** | **yes** (delay) | PUBLISH timestamp → delivery at the UE |
+C = central, R = regional, E = edge.
 
-Slice 1 occupies PRBs and N6 but is excluded from the strict SLA index.
+| Slice | S0 | S1 / S2 / S3 |
+| :---: | :---: | :---: |
+| 1 FTP | C / C / **E** | C / C / **C** |
+| 2 YOLO | C / C / **E** | **E / E / E** |
+| 3 OTT | C / C / **E** | **R / R / R** |
+| 4 CPU-OFF | C / C / **E** | C / C / **C** |
+| 5 MQTT | C / C / **E** | C / C / **C** |
 
-### 2.3 SLA budgets (from SX, not the paper-draft table)
+### 1.5 Compute requests
 
-\(\bar D\) and \(\bar T\) are the **uncontended** means from scheme SX
-(one UE at a time, S1 placement, frozen compute, equal PRB):
+S0/S1: frozen peak. S2/S3: PM = S1 measured usage × 1.25 (run `20260909-110400_300s`). Limits 8 CPU / 8 GiB. GPU not fractional.
 
-| Slice | \(\bar D\) (ms) | \(\bar T\) (Mbps) | SX run | In strict index? |
-| :---: | ---: | ---: | :--- | :---: |
-| 1 FTP | 88.5 | 20.2 | `slice1_20260909-205106_300` | no |
-| 2 YOLO | 130.5 | 16.8 | `slice2_20260909-205713_300` | **yes** |
-| 3 OTT | 66.0 | 56.9 | `slice3_20260909-210323_300` | **yes** |
-| 4 CPU-OFF | 309.7 | 18.3 | `slice4_20260909-210939_300` | no |
-| 5 MQTT | 75.2 | 3.67 | `slice5_20260909-211600_300` | **yes** |
+| Slice | S0 / S1 CPU | S0 / S1 RAM | S0 / S1 GPU | S2 / S3 CPU | S2 / S3 RAM | S2 / S3 GPU |
+| :---: | ---: | :--- | ---: | ---: | :--- | ---: |
+| 1 FTP | 2.0 | 1 Gi | 0 | 0.30 | 320 Mi | 0 |
+| 2 YOLO | 4.0 | 12 Gi | 1 | 7.1 | 2 Gi | 1 |
+| 3 OTT | 2.0 | 2 Gi | 0 | 0.10 | 128 Mi | 0 |
+| 4 CPU-OFF | 2.0 | 1 Gi | 0 | 0.50 | 320 Mi | 0 |
+| 5 MQTT | 0.5 (S0) / 1.0 (S1) | 512 Mi | 0 | 1.05 | 192 Mi | 0 |
 
-A sample is a **violation** if \(d_{\mathrm{e2e}}>\bar D\) **or** delivered
-rate \(<0.95\,\bar T\). The **violation score** (used when the binary rate
-saturates) is
+### 1.6 Radio (PS)
 
-\[
-\max\bigl(0,\; d/\bar D - 1\bigr) + \max\bigl(0,\; 1 - r/(0.95\,\bar T)\bigr).
-\]
+| Item | S0 / S1 / S2 | S3 |
+| :--- | :--- | :--- |
+| DL scheduler | equal PRB | NSDL `dl_scheduler_type=1` |
+| UL scheduler | PF | PF `ul_scheduler_type=0` |
+| `dedicated_prb_ratio` | — | 0 |
+| `dl_min_prb_ratio` % | equal share | 20 / 20 / 20 / 20 / 10 (slices 1–5) |
+| `nws-xapp` | idle | replicas = 1 |
 
-Zero means the sample meets both budgets. These bars are **optimistic**
-once five UEs share the cell: SX \(\bar T\) is isolated-slice goodput.
-OTT at 56.9 Mbps in particular cannot be five-way fair-shared.
+### 1.7 Isolated baseline (SX, one UE at a time)
 
-Paper-draft budgets (250 / 45 / 58 / 400 / 80 ms and 20 / 12 / 22 / 8 /
-2 Mbps) appear only in the **S3** capture’s own `summary.json`. Cross-scheme
-plots recompute every sample against the SX bars above.
-
-### 2.4 OPEX model
-
-Allocated-request cost, not measured usage:
-
-\[
-C = \rho_{\mathrm{site}}\sum_{k\in\{\mathrm{cpu,ram,gpu,vram}\}}
-\tfrac14\cdot u_k / U_k
-\]
-
-with \(\rho\): central = 1, regional = 2, edge = 4. Units \(U\): 4 CPU,
-12 GiB RAM, 1 GPU, 48 GiB A40 VRAM. S0/S1 bill frozen peak requests;
-S2/S3 bill the PM-resized requests in `s2/scheme.py` / `s3/scheme.py`.
-A reserved GPU bills the full A40 VRAM even if the process uses ~0.7 GiB.
-
-### 2.5 Captures used in this report
-
-Each live run is **300 s** at 1 Hz after a settle window. Two campaigns
-on 9 Sep 2026:
-
-| Campaign | Role in this report | S0 | S1 | S2 | S3 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **A** (morning–afternoon) | complete S0–S3 ablation; evaluation figures | `20260909-102816_300s` | `20260909-110400_300s` | `20260909-121245_300s` | `20260909-160900_300s` |
-| **B** (evening) | latest S0–S2 with SX \(\bar D/\bar T\) baked into per-scheme plots | `20260909-224603_300s` | `20260909-231724_300s` | `20260909-233004_300s` | *not re-run* |
-
-S3 has not been repeated after the SX calibration. Campaign **A** is the
-only four-scheme comparison. Campaign **B** is the cleaner S0→S1→S2
-walk against SX bars.
-
-There is **no 24 h diurnal + fade replay** in these CSVs. Night / lunch /
-afternoon-burst / 15 dB fade windows from the experiment design were not
-applied. PM and PS are therefore tested as *static* request and PRB
-policies, not as closed-loop traces.
-
----
-
-## 3. Isolated baseline (SX)
-
-SX measures what each app can do with the cell to itself at S1 sites.
-Those means **are** \(\bar D\) and \(\bar T\).
-
-| Slice | Mean delay (ms) | Mean DL (Mbps) | Paper-draft \(\bar T\) |
-| :---: | ---: | ---: | ---: |
-| 1 FTP | 88.5 | 20.2 | 20 |
-| 2 YOLO | 130.5 | 16.8 | 12 |
-| 3 OTT | 66.0 | 56.9 | 22 |
-| 4 CPU-OFF | 309.7 | 18.3 | 8 |
-| 5 MQTT | 75.2 | 3.67 | 2 |
-
-Isolated OTT already sits at 66 ms / 57 Mbps — so any contended OTT run
-will miss \(\bar D\) and \(\bar T\) unless the other four UEs are quiet.
-Isolated MQTT delay is 75 ms; contended MQTT is 0.8–2.4 s, so most of
-that gap is the broker / Get path, not radio.
-
----
-
-## 4. Per-scheme results (Campaign B, latest S0–S2)
-
-### 4.1 S0 — static hairpin (PL ✗ PM ✗ PS ✗)
-
-Every APP on edge, every UPF on central. Frozen 2 CPU / 1–12 GiB (YOLO:
-4 CPU + 1 GPU). Equal PRBs.
-
-![S0 mean delay and throughput vs SX SLA](s0/data/20260909-224603_300s/plots/means_vs_sla.png)
-
-![S0 300 s timeseries vs SX budgets](s0/data/20260909-224603_300s/plots/timeseries_sla.png)
-
-![S0 per-slice violation rate](s0/data/20260909-224603_300s/plots/violation_rates.png)
-
-| Slice | Delay (ms) | \(\bar D\) | DL (Mbps) | \(\bar T\) | Viol. score | Viol. % |
-| :---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 FTP | 169 | 88.5 | 11.2 | 20.2 | 1.33 | 100 |
-| 2 YOLO* | 211 | 130.5 | **4.7** | 16.8 | 1.32 | 100 |
-| 3 OTT* | 205 | 66.0 | 34.2 | 56.9 | 2.48 | 100 |
-| 4 CPU-OFF | 376 | 309.7 | 11.1 | 18.3 | 0.58 | 100 |
-| 5 MQTT* | **2359** | 75.2 | 1.99 | 3.67 | **30.8** | 100 |
-
-Strict index (slices 2, 3, 5): **100 %** of samples violate, mean score
-**11.41**. YOLO is starved on the hairpin (4.7 Mbps vs 16.8 isolated).
-MQTT delay is ~30× \(\bar D\).
-
-### 4.2 S1 — +PL only
-
-UPF+APP co-located: YOLO at edge, OTT at regional, FTP / CPU-OFF / MQTT
-at central. Same frozen requests and equal PRBs as S0.
-
-![S1 mean delay and throughput vs SX SLA](s1/data/20260909-231724_300s/plots/means_vs_sla.png)
-
-![S1 300 s timeseries vs SX budgets](s1/data/20260909-231724_300s/plots/timeseries_sla.png)
-
-![S1 per-slice violation rate](s1/data/20260909-231724_300s/plots/violation_rates.png)
-
-| Slice | Delay (ms) | DL (Mbps) | Viol. score | Viol. % | vs S0 |
-| :---: | ---: | ---: | ---: | ---: | :--- |
-| 1 FTP | 153 | 9.31 | 1.25 | 100 | delay ↓, rate slightly ↓ |
-| 2 YOLO* | **156** | **16.8** | **0.24** | **89.7** | delay −55 ms; rate restored to SX \(\bar T\) |
-| 3 OTT* | 176 | **41.5** | 1.94 | 100 | delay −29 ms; +7.3 Mbps |
-| 4 CPU-OFF | 356 | 8.42 | 0.67 | 100 | delay ↓; rate ↓ (central sharing) |
-| 5 MQTT* | **1132** | 2.57 | **14.3** | 100 | delay −1.2 s (−52 %) |
-
-Strict index: **96.6 %** violate, mean score **5.61** (−51 % vs S0).
-YOLO is the PL exhibit: co-locating CU-UP / UPF / APP / GPU at edge
-recovers isolated-slice goodput even with four other UEs on the cell.
-The binary rate stays high because OTT and MQTT still miss SX \(\bar D\).
-
-### 4.3 S2 — +PL +PM
-
-Same sites as S1. Requests resized from S1 measured usage × 1.25
-(run `20260909-110400_300s`): FTP 300m/320Mi, YOLO 7.1 CPU/2Gi/1 GPU,
-OTT 100m/128Mi, CPU-OFF 500m/320Mi, MQTT 1.05 CPU/192Mi. Limits still
-burst to 8 CPU / 8Gi. PRBs still equal.
-
-![S2 mean delay and throughput vs SX SLA](s2/data/20260909-233004_300s/plots/means_vs_sla.png)
-
-![S2 300 s timeseries vs SX budgets](s2/data/20260909-233004_300s/plots/timeseries_sla.png)
-
-| Slice | Delay (ms) | DL (Mbps) | Viol. score | Viol. % | vs S1 |
-| :---: | ---: | ---: | ---: | ---: | :--- |
-| 1 FTP | 164 | 9.14 | 1.38 | 100 | ≈ same |
-| 2 YOLO* | 166 | 16.5 | 0.34 | 92.0 | slightly worse delay |
-| 3 OTT* | 187 | 37.4 | 2.16 | 100 | slightly worse |
-| 4 CPU-OFF | 363 | 8.79 | 0.67 | 100 | ≈ same |
-| 5 MQTT* | **891** | 2.71 | **11.1** | 100 | delay −241 ms vs S1 |
-
-Strict index: **97.2 %** violate, mean score **4.46** (better than S1
-on MQTT, which dominates the score). On a 300 s flat load, PM does not
-have a diurnal signal to track; it is a **one-shot right-size**. YOLO
-GPU stays 1.0 (cannot fraction an A40), so compute SLA barely moves.
-The PM win is OPEX (next section).
-
-### 4.4 S3 — +PL +PM +PS (Campaign A only)
-
-Same sites and PM requests as S2. DL-only min-PRB floors summing to 95 %
-of the cell, sized from the **paper-draft** \(\bar T\) (20+12+22+8+2 =
-64 Mbps), *not* from SX 20.2+16.8+56.9+18.3+3.67. `nws-xapp` replicas = 1.
-Capture `20260909-160900_300s` (afternoon; native plot still draws the
-old 45 / 58 / 80 ms and 12 / 22 / 2 Mbps bars).
-
-Means recomputed against SX bars (from the four-scheme table):
-
-| Slice | Delay (ms) | DL (Mbps) | vs S2 (Campaign A) |
+| Slice | Mean delay (ms) | Mean DL (Mbps) | SX run |
 | :---: | ---: | ---: | :--- |
-| 1 FTP | 227 | 6.58 | delay ↑, rate ↓ (leftover PRBs) |
-| 2 YOLO* | 187 | 11.7 | delay ↑, rate ↓ |
-| 3 OTT* | 204 | 25.3 | delay ↑ vs S2 171 ms / 23.4 Mbps |
-| 4 CPU-OFF | 463 | 6.51 | leftover |
-| 5 MQTT* | 824 | 2.89 | delay ↓ vs S2 905 ms; rate ↑ |
-
-PS did **not** produce the analytical fade-recovery. OTT’s floor is 32.6 %
-of the cell from draft \(\bar T=22\), while SX \(\bar T=56.9\) would
-demand a much larger share. This capture also has no injected 15 dB
-fades, so there is little for PS to steal PRBs *from*.
+| 1 FTP | 88.5 | 20.2 | `slice1_20260909-205106_300` |
+| 2 YOLO | 130.5 | 16.8 | `slice2_20260909-205713_300` |
+| 3 OTT | 66.0 | 56.9 | `slice3_20260909-210323_300` |
+| 4 CPU-OFF | 309.7 | 18.3 | `slice4_20260909-210939_300` |
+| 5 MQTT | 75.2 | 3.67 | `slice5_20260909-211600_300` |
 
 ---
 
-## 5. Cross-scheme evaluation (Campaign A, S0–S3)
+## 2. Coefficients
 
-Figures from `python3 paper/exp4/compare_schemes.py --schemes s0 s1 s2 s3`
-on the morning/afternoon runs. Violation score and rate are recomputed
-with current SX \(\bar D/\bar T\). Source table:
-[`plots/s0_vs_s1_vs_s2_vs_s3/means.csv`](plots/s0_vs_s1_vs_s2_vs_s3/means.csv).
+### 2.1 SLA
 
-### 5.1 One-page evaluation
+Source: `paper/exp4/exp_start.py` (`SLICES`, `RATE_FLOOR`).
 
-![Exp4 evaluation: delay, throughput, violation, resources, OPEX](plots/s0_vs_s1_vs_s2_vs_s3/evaluation.png)
+| Symbol | Slice | Value |
+| :--- | :---: | ---: |
+| \(\bar D\) | 1 FTP | 250 ms |
+| \(\bar D\) | 2 YOLO | 250 ms |
+| \(\bar D\) | 3 OTT | 100 ms |
+| \(\bar D\) | 4 CPU-OFF | 400 ms |
+| \(\bar D\) | 5 MQTT | 900 ms |
+| \(\bar T\) | 1 FTP | 20 Mbps |
+| \(\bar T\) | 2 YOLO | 9 Mbps |
+| \(\bar T\) | 3 OTT | 18 Mbps |
+| \(\bar T\) | 4 CPU-OFF | 8 Mbps |
+| \(\bar T\) | 5 MQTT | 2.2 Mbps |
+| \(\alpha\) | rate floor | 0.95 |
+| — | strict index | slices **2, 3, 5** |
 
-### 5.2 Delay, throughput, violation, OPEX
+Violation (binary): \(d_{\mathrm{e2e}} > \bar D\) **or** \(r < \alpha\,\bar T\).
 
-![Means: delay, throughput, violation, OPEX](plots/s0_vs_s1_vs_s2_vs_s3/means_delay_throughput_violation_opex.png)
+Violation score:
 
-**Means (Campaign A)**
+\[
+s = \max\bigl(0,\; d/\bar D - 1\bigr) + \max\bigl(0,\; 1 - r/(\alpha\,\bar T)\bigr)
+\]
 
-| Slice | | S0 | S1 | S2 | S3 | S0→S1 |
-| :---: | :--- | ---: | ---: | ---: | ---: | :--- |
-| 1 FTP | delay ms | 217 | 216 | 214 | 227 | ~0 |
-| | Mbps | 9.37 | 6.89 | 7.20 | 6.58 | −2.5 |
-| | viol. score | 1.96 | 2.08 | 2.05 | 2.22 | |
-| 2 YOLO* | delay ms | 229 | **177** | 176 | 187 | **−52** |
-| | Mbps | 4.23 | **12.9** | 12.8 | 11.7 | **+8.7** |
-| | viol. score | 1.49 | **0.58** | 0.59 | 0.70 | |
-| 3 OTT* | delay ms | 219 | **191** | **171** | 204 | −28 |
-| | Mbps | 18.7 | **31.3** | 23.4 | 25.3 | **+12.5** |
-| | viol. score | 2.97 | 2.32 | 2.16 | 2.65 | |
-| 4 CPU-OFF | delay ms | 435 | 438 | 451 | 463 | ~0 |
-| | Mbps | 9.16 | 6.69 | 6.96 | 6.51 | −2.5 |
-| | viol. score | 0.88 | 1.03 | 1.06 | 1.12 | |
-| 5 MQTT* | delay ms | **2085** | **758** | 905 | 824 | **−1327** |
-| | Mbps | 2.14 | 2.69 | 2.63 | 2.89 | +0.54 |
-| | viol. score | **27.1** | **9.33** | 11.3 | 10.2 | |
+Strict binary % = fraction of strict-slice samples with \(s>0\).  
+Strict score = mean \(s\) over strict-slice samples.
 
-**Strict index (slices 2 / 3 / 5)**
+### 2.2 OPEX
 
-| | S0 static | S1 +PL | S2 +PL+PM | S3 +PL+PM+PS |
+Source: `paper/exp4/cost_model.py`.
+
+\[
+C = \rho_{\mathrm{site}}\bigl(p_{\mathrm{cpu}}\,vCPU + p_{\mathrm{ram}}\,GiB + p_{\mathrm{gpu}}\,GPU + p_{\mathrm{vram}}\,GiB_{\mathrm{vram}}\bigr)
+\quad [\$/h]
+\]
+
+| Coefficient | Symbol | Value |
+| :--- | :--- | ---: |
+| Site price, central | \(\rho_C\) | 1 |
+| Site price, regional | \(\rho_R\) | 2 |
+| Site price, edge | \(\rho_E\) | 4 |
+| CPU | \(p_{\mathrm{cpu}}\) | 0.80 \$/core·h |
+| RAM | \(p_{\mathrm{ram}}\) | 0.08 \$/GiB·h |
+| GPU | \(p_{\mathrm{gpu}}\) | 1.20 \$/GPU·h |
+| VRAM | \(p_{\mathrm{vram}}\) | 0.00625 \$/GiB·h |
+| A40 VRAM | \(U_{\mathrm{vram}}\) | 48 GiB |
+
+Billing: S0/S1 = peak requests. S2/S3 = measured CPU/RAM (capped at S1 peak); GPU/VRAM = S1 allocation.
+
+### 2.3 PM / PS / slice model
+
+| Coefficient | Value |
+| :--- | :--- |
+| PM request factor | 1.25 × S1 mean usage |
+| PS min-PRB (S3) | 20, 20, 20, 20, 10 % |
+| PS dedicated (S3) | 0 |
+| Slice \(\eta_{t0}\) | FTP 2.4, YOLO 2.2, OTT 2.5, CPU-OFF 2.3, MQTT 2.6 |
+| Slice \(h_s\) | YOLO 1, others 0 |
+
+---
+
+## 3. Results
+
+### 3.1 Strict SLA (slices 2, 3, 5)
+
+| | S0 | S1 | S2 | S3 |
 | :--- | ---: | ---: | ---: | ---: |
-| Binary violation | ~100 % | ~100 % | ~100 % | ~100 % |
-| Mean violation score | **10.75** | **4.15** | 4.67 | 4.52 |
-| Score vs S0 | 100 % | **39 %** | 43 % | 42 % |
+| Binary violation (%) | 97.3 | 52.2 | 48.2 | 44.8 |
+| Mean score | 1.11 | 0.41 | 0.37 | 0.42 |
+| OPEX (\$/h) | 6.00 | 4.70 | 4.09 | 4.09 |
 
-The binary rate is the wrong headline: almost every sample misses SX
-\(\bar D\) or \(0.95\bar T\) once five UEs share the cell. The **score**
-is the waterfall: PL removes ~61 % of the strict miss; PM and PS then
-move the residual by a few points, and not always in the designed
-direction (Campaign A PM slightly *raises* the score because MQTT delay
-regressed 758 → 905 ms; Campaign B PM *lowers* it 5.61 → 4.46 on the
-same MQTT term).
+### 3.2 Per-slice means
 
-FTP and CPU-OFF **lose** goodput under PL (9.4 → 6.9 and 9.2 → 6.7 Mbps).
-That is expected: S0 parked those APPs on the edge with a dedicated N6
-hairpin onto a less-loaded path; S1 puts them on central with YOLO’s
-siblings, and they are best-effort under PS. They are not in the strict
-index.
+| Slice | Metric | S0 | S1 | S2 | S3 |
+| :---: | :--- | ---: | ---: | ---: | ---: |
+| 1 FTP | delay (ms) | 169 | 153 | 164 | 227 |
+| | DL (Mbps) | 11.2 | 9.31 | 9.14 | 6.58 |
+| | viol. % | 98.3 | 100 | 100 | 100 |
+| | score | 0.41 | 0.51 | 0.52 | 0.72 |
+| 2 YOLO* | delay (ms) | 211 | 156 | 166 | 187 |
+| | DL (Mbps) | 4.72 | 16.8 | 16.5 | 11.7 |
+| | viol. % | 100 | 1.3 | 5.7 | 24.8 |
+| | score | 0.46 | 0.00 | 0.01 | 0.04 |
+| 3 OTT* | delay (ms) | 205 | 176 | 187 | 204 |
+| | DL (Mbps) | 34.2 | 41.5 | 37.4 | 25.3 |
+| | viol. % | 100 | 86.1 | 96.1 | 79.2 |
+| | score | 1.06 | 0.80 | 0.90 | 1.11 |
+| 4 CPU-OFF | delay (ms) | 376 | 356 | 363 | 463 |
+| | DL (Mbps) | 11.1 | 8.42 | 8.79 | 6.51 |
+| | viol. % | 31.1 | 40.6 | 43.4 | 95.4 |
+| | score | 0.03 | 0.05 | 0.05 | 0.34 |
+| 5 MQTT* | delay (ms) | 2359 | 1132 | 891 | 824 |
+| | DL (Mbps) | 1.99 | 2.57 | 2.71 | 2.90 |
+| | viol. % | 91.9 | 68.0 | 48.1 | 33.1 |
+| | score | 1.82 | 0.41 | 0.24 | 0.14 |
 
-### 5.3 Timeseries (delay / throughput)
+\* strict SLA.
 
-![300 s delay and throughput, all schemes](plots/s0_vs_s1_vs_s2_vs_s3/timeseries_throughput_latency.png)
-
-Read slice by slice:
-
-- **FTP** — all schemes sit above \(\bar D=88.5\) ms and below
-  \(\bar T=20.2\) Mbps. S0 actually has the highest FTP rate (grey).
-- **YOLO** — S0 (grey) is a flat ~4–6 Mbps band; S1/S2 (blue/orange)
-  jump to the SX \(\bar T\) line. S3 (green) lands in between. Delay
-  remains a noisy band around 150–250 ms, often above 130.5 ms.
-- **OTT** — S1 (blue) is the throughput winner (~30 Mbps, touching 80
-  in bursts). S0 and S3 stay lower. Delay is always above 66 ms.
-- **CPU-OFF** — S3 delay is systematically higher (green, ~450–550 ms):
-  leftover PRBs. Pipeline time (~90 ms encrypt/zip/scan/LUT) is inside
-  every sample, so this slice is never radio-only.
-- **MQTT** — log delay axis. S0 is a 1–4 s cloud; S1–S3 drop to ~0.5–2 s
-  but never approach 75 ms. Throughput hovers around 2–4 Mbps for all
-  schemes (near SX \(\bar T=3.67\)).
-
-### 5.4 Server usage
-
-![Measured CPU, RAM, GPU, VRAM](plots/s0_vs_s1_vs_s2_vs_s3/means_usage.png)
-
-Measured usage is **almost scheme-invariant**:
+### 3.3 Server usage (measured)
 
 | Slice | CPU (m) | RAM (MiB) | GPU % | VRAM (MiB) |
 | :---: | ---: | ---: | ---: | ---: |
-| FTP | ~200–260 | ~240 | 0 | 0 |
-| YOLO | ~5600–5650 | 1450–1760 | ~8.9 | ~665 |
+| FTP | 200–260 | ~240 | 0 | 0 |
+| YOLO | 5600–5650 | 1450–1760 | ~8.9 | ~665 |
 | OTT | ~64 | ~94 | 0 | 0 |
-| CPU-OFF | ~360–480 | ~240 | 0 | 0 |
-| MQTT | ~820–840 | ~106–118 | 0 | 0 |
+| CPU-OFF | 360–480 | ~240 | 0 | 0 |
+| MQTT | 820–840 | 106–118 | 0 | 0 |
 
-YOLO is the only GPU user, and it uses ~9 % of the A40 / ~0.65 GiB of
-48 GiB. PM cannot return that GPU (device plugin is 1-or-0), so the
-dominant OPEX term is structural, not a utilization loop.
+### 3.4 Allocated OPEX (\$/h)
 
-### 5.5 Allocated OPEX
+| Slice | \(\rho\) S0→S1 | S0 | S1 | S2 / S3 |
+| :---: | :--- | ---: | ---: | ---: |
+| 1 FTP | 4→1 | 0.58 | 0.15 | 0.03 |
+| 2 YOLO | 4→4 | 4.00 | 4.00 | 3.94 |
+| 3 OTT | 4→2 | 0.67 | 0.33 | 0.02 |
+| 4 CPU-OFF | 4→1 | 0.58 | 0.15 | 0.04 |
+| 5 MQTT | 4→1 | 0.17 | 0.07 | 0.07 |
+| **Total** | | **6.00** | **4.70** | **4.09** |
 
-![Per-slice and resource-class OPEX](plots/s0_vs_s1_vs_s2_vs_s3/means_cost.png)
-
-![OPEX timeseries (flat: requests × site, not live usage)](plots/s0_vs_s1_vs_s2_vs_s3/timeseries_cost.png)
-
-OPEX is a **step**, not a trace: it bills requests × \(\rho_{\mathrm{site}}\).
-The timeseries is therefore a horizontal line per scheme.
-
-| Slice | Site S0 → S1 | S0 | S1 | S2 / S3 | What changed |
-| :---: | :--- | ---: | ---: | ---: | :--- |
-| 1 FTP | edge→central | 0.58 | 0.15 | **0.03** | \(\rho\) 4→1, then 2 CPU→300m |
-| 2 YOLO | edge (stays) | **4.00** | **4.00** | **3.94** | GPU+VRAM pinned; RAM 12Gi→2Gi |
-| 3 OTT | edge→regional | 0.67 | 0.33 | **0.02** | \(\rho\) 4→2, then 2 CPU→100m |
-| 4 CPU-OFF | edge→central | 0.58 | 0.15 | **0.04** | \(\rho\) 4→1, then 2 CPU→500m |
-| 5 MQTT | edge→central | 0.17 | 0.07 | 0.07 | \(\rho\) 4→1; CPU actually *up* 500m→1050m |
-| **Total** | | **6.00** | **4.70** | **4.09** | S0=100 %, S1=78 %, S2=S3=68 % |
-
-YOLO is ~67 % of S0 cost and still ~96 % of S2 cost. PL cannot move it
-off the edge (GPU). PM’s OPEX cut is almost entirely **right-sizing
-CPU/RAM on slices 1, 3, 4** after they leave the edge. PS does not
-change requests, so S3 OPEX = S2 OPEX.
+CSV: [`plots/s0_vs_s1_vs_s2_vs_s3/means.csv`](plots/s0_vs_s1_vs_s2_vs_s3/means.csv).
 
 ---
 
-## 6. Layer-by-layer evaluation
+## 4. Figures
 
-### 6.1 PL (S0 → S1) — the large step
+Each figure is one 300 s capture (or the four-scheme overlay). Bars/lines are the measured series; dashed marks are the SLA coefficients in §2.1.
 
-Both campaigns agree.
+### 4.1 Per scheme
 
-| Effect | Campaign A | Campaign B (evening) |
-| :--- | :--- | :--- |
-| YOLO delay | 229 → 177 ms | 211 → 156 ms |
-| YOLO goodput | 4.2 → 12.9 Mbps | 4.7 → **16.8 Mbps** (= SX \(\bar T\)) |
-| OTT delay | 219 → 191 ms | 205 → 176 ms |
-| OTT goodput | 18.7 → 31.3 Mbps | 34.2 → 41.5 Mbps |
-| MQTT delay | 2085 → 758 ms | 2359 → 1132 ms |
-| Strict score | 10.75 → 4.15 (−61 %) | 11.41 → 5.61 (−51 %) |
-| Total OPEX | 6.00 → 4.70 (−22 %) | same request model |
+**S0** — static (PL ✗ PM ✗ PS ✗), run `20260909-224603_300s`. Five DL UEs concurrent. Placement: CU-UP/UPF central, APP edge. Frozen peak requests. Equal PRB.
 
-Mechanism: kill the N6 hairpin and put delay-sensitive GPU work next to
-the radio. Best-effort APPs leave the expensive edge. That is the
-“one step improves SLA **and** OPEX” story, and the testbed shows it.
+![S0 means vs SLA](s0/data/20260909-224603_300s/plots/means_vs_sla.png)
 
-FTP/CPU-OFF goodput falling is the other side of the same placement:
-they no longer get an edge-local hairpin, and they are not SLA-protected.
+*Mean E2E delay (ms) and mean DL goodput (Mbps) per slice vs \(\bar D\) and \(\bar T\).*
 
-### 6.2 PM (S1 → S2) — OPEX, not SLA
+![S0 timeseries](s0/data/20260909-224603_300s/plots/timeseries_sla.png)
 
-On a flat 300 s load there is no night/lunch/1.2× afternoon burst, so PM
-cannot demonstrate the designed queue-clearing. What it *does*
-demonstrate is request hygiene:
+*1 Hz traces of E2E delay and DL goodput for slices 1–5 over the 300 s window. Dashed: \(\bar D\); dashed/dotted: \(\bar T\) and \(0.95\,\bar T\).*
 
-- Total OPEX 4.70 → 4.09 (−13 % vs S1, −32 % vs S0).
-- Measured CPU/RAM/GPU **do not drop** — the apps already fit in the
-  smaller requests (S1 YOLO used 5.6 CPU / 1.6 GiB inside a 4 CPU / 12 GiB
-  ask; S2 asks 7.1 CPU / 2 GiB).
-- SLA: Campaign B MQTT delay 1132 → 891 ms (score 5.61 → 4.46);
-  Campaign A MQTT 758 → 905 ms (score 4.15 → 4.67). Noise on a
-  broker-dominated path, not a compute-queue story.
-- YOLO GPU stays 1.0, so the dominant cost and the YOLO `d_{\mathrm{proc}}`
-  term are unchanged.
+![S0 violation rates](s0/data/20260909-224603_300s/plots/violation_rates.png)
 
-PM is doing the job the cost model can see. It is not doing the job the
-analytical waterfall assigned it (afternoon 1.2× queue overflow), because
-that load shape was not replayed.
+*Per-slice binary violation rate (% of samples with \(d>\bar D\) or \(r<0.95\,\bar T\)). Slices 2, 3, 5 are the strict index.*
 
-### 6.3 PS (S2 → S3) — not visible on this capture
+**S1** — +PL only, run `20260909-231724_300s`. Same workloads, peak requests, and equal PRB as S0. Placement: PL sites (§1.4).
 
-Designed role: steal PRBs from slices 1 and 4 during ~15 dB fades on
-slices 2 and 3. Observed on Campaign A:
+![S1 means vs SLA](s1/data/20260909-231724_300s/plots/means_vs_sla.png)
 
-- OPEX unchanged (no request change).
-- Strict score 4.67 → 4.52 (noise).
-- YOLO and FTP goodput **down**; CPU-OFF delay **up** (consistent with
-  leftover / low-priority PRBs, but without a compensating boost on 2/3).
-- PRB floors were computed from draft \(\bar T\) (OTT 22 Mbps → 32.6 %),
-  not SX OTT 56.9 Mbps.
-- No fade schedule in the 300 s window.
+*Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S1).*
 
-Until S3 is re-run (a) against SX \(\bar T\) floors, (b) with the fade
-trace, (c) in the same session as S2, PS should not be claimed as the
-last drop of the SLA waterfall.
+![S1 timeseries](s1/data/20260909-231724_300s/plots/timeseries_sla.png)
 
-### 6.4 Against the analytical preview
+*1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S1).*
 
-`simulate_exp4.py` on the designed 24 h + fade trace:
+![S1 violation rates](s1/data/20260909-231724_300s/plots/violation_rates.png)
 
-| | S0 | S1 (+PL) | S2 (+PM) | S3 (+PS) |
-| :--- | ---: | ---: | ---: | ---: |
-| SLA residual (sim) | 100 % | 20.7 % | 7.1 % | 0.2 % |
-| OPEX residual (sim) | 100 % | 58.7 % | 48.3 % | 48.3 % |
-| Strict score (testbed A) | 100 % | 39 % | 43 % | 42 % |
-| OPEX (testbed A) | 100 % | 78 % | 68 % | 68 % |
+*Per-slice binary violation rate (S1).*
 
-OPEX has the same *shape* (PL large, PM medium, PS flat) but a smaller
-PL cut, because YOLO’s GPU stays on the edge in every scheme. SLA does
-**not** follow 100 → 21 → 7 → 0.2: the testbed PL step is real (~40 %
-residual score) and the PM/PS steps are not, for the reasons above.
-Do not overlay sim and cluster points on one figure.
+**S2** — +PL +PM, run `20260909-233004_300s`. Same placement as S1. Compute requests = S1 usage × 1.25. Equal PRB.
 
----
+![S2 means vs SLA](s2/data/20260909-233004_300s/plots/means_vs_sla.png)
 
-## 7. What a reviewer should take
+*Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S2).*
 
-| Layer | Primary benefit on this testbed | Look at | Do not claim (yet) |
-| :--- | :--- | :--- | :--- |
-| **PL** | Co-locate UPF+APP; get GPU off the hairpin; move best-effort off the edge | YOLO Mbps, MQTT delay, OPEX 6.00→4.70 | “SLA index to 0” |
-| **PM** | Right-size CPU/RAM to measured usage | OPEX 4.70→4.09; usage vs requests | “clears afternoon queues” (no diurnal trace) |
-| **PS** | Policy is deployed (DL min-PRB + xApp) | leftover on FTP/CPU-OFF | “clears fades” (no fade trace; floors from draft \(\bar T\)) |
-| **PL+PM+PS** | Pareto walk is **down-left on OPEX**, **down on score at PL only** | evaluation figure | sim waterfall heights |
+![S2 timeseries](s2/data/20260909-233004_300s/plots/timeseries_sla.png)
 
-**Campaign B one-slide numbers (latest S0–S2, SX bars):**
+*1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S2).*
 
-| | S0 | S1 | S2 |
-| :--- | ---: | ---: | ---: |
-| YOLO Mbps | 4.7 | **16.8** | 16.5 |
-| MQTT delay (ms) | 2359 | 1132 | **891** |
-| Strict violation score | 11.41 | 5.61 | **4.46** |
-| Strict binary viol. % | 100 | 96.6 | 97.2 |
-| OPEX (allocated, same model as A) | 6.00 | 4.70 | 4.09 |
+**S3** — +PL +PM +PS, run `20260909-160900_300s`. Same placement and PM requests as S2. DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on.
+
+![S3 means vs SLA](s3/data/20260909-160900_300s/plots/means_vs_sla.png)
+
+*Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S3).*
+
+![S3 timeseries](s3/data/20260909-160900_300s/plots/timeseries_sla.png)
+
+*1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S3).*
+
+![S3 violation rates](s3/data/20260909-160900_300s/plots/violation_rates.png)
+
+*Per-slice binary violation rate (S3).*
+
+### 4.2 Cross-scheme (S0 vs S1 vs S2 vs S3)
+
+Same five slices and SLA coefficients. Overlay of the four captures in §1.3.
+
+![evaluation](plots/s0_vs_s1_vs_s2_vs_s3/evaluation.png)
+
+*One-page board: per-slice mean delay, DL goodput, binary violation rate, violation score, CPU, RAM, GPU, VRAM, and OPEX; last panel is total OPEX per scheme. Marks on delay/throughput panels are \(\bar D\) / \(\bar T\).*
+
+![delay throughput violation OPEX](plots/s0_vs_s1_vs_s2_vs_s3/means_delay_throughput_violation_opex.png)
+
+*Grouped bars per slice: mean E2E delay, mean DL goodput, per-slice OPEX, binary violation rate, violation score; last panel is the strict-index mean score (slices 2/3/5). One bar group per scheme.*
+
+![timeseries](plots/s0_vs_s1_vs_s2_vs_s3/timeseries_throughput_latency.png)
+
+*Aligned 300 s traces: E2E delay (left) and DL goodput (right) for slices 1–5, four schemes overlaid. Horizontal lines: \(\bar D\), \(\bar T\).*
+
+![usage](plots/s0_vs_s1_vs_s2_vs_s3/means_usage.png)
+
+*Mean application-server usage per slice and scheme: CPU (millicores), RAM (MiB), GPU (%), VRAM (MiB). S0/S1 show allocated requests; S2/S3 show measured usage.*
+
+![OPEX](plots/s0_vs_s1_vs_s2_vs_s3/means_cost.png)
+
+*Allocated OPEX (\$/h): per-slice total (left) and stack of CPU / RAM / GPU / VRAM shares (right), using \(\rho\) and prices in §2.2.*
+
+![OPEX timeseries](plots/s0_vs_s1_vs_s2_vs_s3/timeseries_cost.png)
+
+*OPEX vs time (\$/h) for each slice. Flat because cost is requests × \(\rho_{\mathrm{site}}\), not live utilization.*
 
 ---
 
-## 8. Caveats and follow-ups
-
-1. **Five UEs vs SX \(\bar T\).** Binary violation against isolated-slice
-   goodput will stay near 100 % for OTT (\(\bar T=56.9\)) and MQTT delay
-   (\(\bar D=75\) ms). Report **score**, means, and timeseries — not the
-   binary index — as the SLA figure.
-2. **300 s, not 24 h.** PM and PS need the shared diurnal + fade file
-   from the experiment design before their waterfall drops can be
-   measured.
-3. **S3 not in Campaign B.** Re-run S3 in the same session as evening
-   S0–S2, with `dl_min_prb_ratio` 20/20/20/20/10 % (slices 1–5).
-4. **MQTT delay is application-dominated.** PL halves it (hairpin gone)
-   but the residual is still 10× \(\bar D\). Fixing Get/broker timestamping
-   would change the strict score more than PS.
-5. **YOLO GPU is 1.0 in every scheme.** PM cannot return it; PL cannot
-   place YOLO on cheap central. That caps the OPEX waterfall at ~68 % of
-   S0.
-6. **Do not mix** these CSVs with Exp1–3, or sim points with cluster
-   points.
-
----
-
-## 9. How the figures were produced
+## 5. Reproduce
 
 ```bash
-# Per-scheme plots (already written next to each run)
 python3 paper/exp4/exp_plot.py --scheme s0 --run-id 20260909-224603_300s
 python3 paper/exp4/exp_plot.py --scheme s1 --run-id 20260909-231724_300s
 python3 paper/exp4/exp_plot.py --scheme s2 --run-id 20260909-233004_300s
+python3 paper/exp4/exp_plot.py --scheme s3 --run-id 20260909-160900_300s
 
-# Four-scheme evaluation (Campaign A) → paper/exp4/plots/s0_vs_s1_vs_s2_vs_s3/
 python3 paper/exp4/compare_schemes.py --schemes s0 s1 s2 s3 \
-    --s0-run-id 20260909-102816_300s \
-    --s1-run-id 20260909-110400_300s \
-    --s2-run-id 20260909-121245_300s \
+    --s0-run-id 20260909-224603_300s \
+    --s1-run-id 20260909-231724_300s \
+    --s2-run-id 20260909-233004_300s \
     --s3-run-id 20260909-160900_300s
-```
-
-Analytical preview only (not used as paper numbers):
-
-```bash
-python3 paper/exp4/simulate_exp4.py
-python3 paper/exp4/plot_exp4.py
 ```

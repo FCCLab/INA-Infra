@@ -95,10 +95,10 @@ utilization ratio (M/M/1-style queue). That is the PM term in the SLA waterfall.
 | Slice | Delay budget \(\bar D\) | Rate budget \(\bar T\) | Counted in SLA index? |
 | :---: | ---: | ---: | :---: |
 | 1 Best-effort DL | 250 ms (informational) | 20 Mbps | No (best effort) |
-| 2 YOLO bbox DL | 45 ms | 12 Mbps | **Yes** |
-| 3 Video watch DL | 58 ms | 22 Mbps | **Yes** |
+| 2 YOLO bbox DL | 250 ms | 9 Mbps | **Yes** |
+| 3 Video watch DL | 100 ms | 18 Mbps | **Yes** |
 | 4 CPU offload DL | 400 ms (relaxed) | 8 Mbps | No (reported separately) |
-| 5 MQTT Get | 80 ms | 2 Mbps | **Yes** |
+| 5 MQTT Get | 900 ms | 2.2 Mbps | **Yes** |
 
 A strict-slice sample (2, 3, 5) is a **violation** if
 \(d_\text{e2e} > \bar D\) **or** delivered rate \(< 0.95\,\bar T_\text{offered}\).
