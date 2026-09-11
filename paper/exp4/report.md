@@ -43,7 +43,7 @@ workloads run under every scheme.
 | **S0** | `exp4-s0` | ✗ | ✗ | ✗ | all slices **C / C / E** (N6 hairpin) | frozen peak requests | equal PRB |
 | **S1** | `exp4-s1` | ✓ | ✗ | ✗ | PL sites (table below) | same frozen peak | equal PRB |
 | **S2** | `exp4-s2` | ✓ | ✓ | ✗ | same as S1 | PM requests = S1 usage × 1.25 | equal PRB |
-| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | same as S1 | same as S2 | DL `dl_min_prb_ratio` 20/20/20/20/10 %, `nws-xapp` on |
+| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | same as S1 | same as S2 | DL `dl_min_prb_ratio` 20/20/20/20/10 %, dedicated 0, `nws-xapp` on |
 
 S0 is the expensive *and* high-latency anti-pattern: core-centric UPF with
 MEC-everywhere apps. That is why **one** PL step can improve both SLA and

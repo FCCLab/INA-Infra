@@ -1,7 +1,8 @@
 """Exp4 Scheme 3 (S3): +PL +PM +PS — five DL slices.
 
 PL + PM same as S2. PS on: NSDL (dl_scheduler_type=1, ul_scheduler_type=0)
-with DL min PRB 20/20/20/20/10 % (slices 1–5, sum 90%). nws-xapp replicas = 1.
+with DL min PRB 20/20/20/20/10 % (slices 1–5, sum 90%). dedicated stays 0.
+nws-xapp replicas = 1.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ SLICES = {
         "cpu_app": 0.30,
         "mem_app": "320Mi",
         "gpu_app": 0.0,
+        "dedicated_prb_ratio": 0.0,
         "min_prb_ratio": 20.0,
         "b_min": 20.0,
     },
@@ -61,6 +63,7 @@ SLICES = {
         "cpu_app": 7.1,
         "mem_app": "2Gi",
         "gpu_app": 1.0,
+        "dedicated_prb_ratio": 0.0,
         "min_prb_ratio": 20.0,
         "b_min": 20.0,
     },
@@ -86,6 +89,7 @@ SLICES = {
         "cpu_app": 0.10,
         "mem_app": "128Mi",
         "gpu_app": 0.0,
+        "dedicated_prb_ratio": 0.0,
         "min_prb_ratio": 20.0,
         "b_min": 20.0,
     },
@@ -111,6 +115,7 @@ SLICES = {
         "cpu_app": 0.50,
         "mem_app": "320Mi",
         "gpu_app": 0.0,
+        "dedicated_prb_ratio": 0.0,
         "min_prb_ratio": 20.0,
         "b_min": 20.0,
     },
@@ -136,6 +141,7 @@ SLICES = {
         "cpu_app": 1.05,
         "mem_app": "192Mi",
         "gpu_app": 0.0,
+        "dedicated_prb_ratio": 0.0,
         "min_prb_ratio": 10.0,
         "b_min": 10.0,
     },

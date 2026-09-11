@@ -936,11 +936,15 @@ def patch_gnb_slices() -> None:
     _rewrite_cm_gnb_conf(du, _patch_gnb_conf(du_doc["data"]["gnb.conf"], slices=True))
     cucp_doc = yaml.safe_load(cucp.read_text())
     _rewrite_cm_gnb_conf(cucp, _patch_gnb_conf(cucp_doc["data"]["gnb.conf"], slices=False))
+    deds = ", ".join(
+        f"{sid}={_gnb_prb_ratios(sid)[0]:.1f}" for sid in (0, *sorted(SLICES))
+    )
     mins = ", ".join(
         f"{sid}={_gnb_prb_ratios(sid)[1]:.1f}" for sid in (0, *sorted(SLICES))
     )
     sch = "NSDL (DL NS / UL PF)" if PS_ENABLED else "NSBOTH"
-    print(f"  gNB {sch} min_prb_ratio %: {mins} (max=100, dedicated=0)")
+    print(f"  gNB {sch} dedicated_prb_ratio %: {deds}")
+    print(f"  gNB {sch} min_prb_ratio %: {mins} (max=100)")
 
 
 def _mysql_sql_json(obj: object) -> str:

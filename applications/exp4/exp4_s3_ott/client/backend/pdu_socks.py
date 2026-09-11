@@ -14,6 +14,20 @@ from typing import Optional, Tuple
 logger = logging.getLogger("ott.ue.pdu_socks")
 
 SOCKS_PORT = int(__import__("os").environ.get("PDU_SOCKS_PORT", "1080"))
+_TCP_BUF = 4 * 1024 * 1024
+
+
+def _tune_tcp_conn(sock: socket.socket) -> None:
+    """Make the SOCKS TCP hop closer to UDP: no Nagle, large window."""
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
+    for opt in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, opt, _TCP_BUF)
+        except OSError:
+            pass
 
 
 class PduSocksProxy:
@@ -110,6 +124,8 @@ class PduSocksProxy:
 
             pdu = self.pdu_ip()
             remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _tune_tcp_conn(client)
+            _tune_tcp_conn(remote)
             if pdu:
                 remote.bind((pdu, 0))
             remote.settimeout(45.0)

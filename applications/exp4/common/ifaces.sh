@@ -32,14 +32,19 @@ exp4_is_cluster_iface() {
   return 1
 }
 
+# TCP knobs (txqueuelen / initcwnd) stay off rfsim, console, and cluster eth.
+exp4_skip_tcp_iface() {
+  case "${1:-}" in
+    eth0|eth1|rf|net2|"") return 0 ;;
+  esac
+  return 1
+}
+
 # Write a namespaced sysctl via /proc (images often have no sysctl binary).
-# Refuses net.core.* and tcp_adv_win_scale (host-global / unsafe).
+# Pod netns only — never SSH these onto the node (that took down usrp/gpu-a40).
 exp4_sysctl_write() {
   local key="${1:-}" val="${2:-}" path
   [ -z "$key" ] && return 0
-  case "$key" in
-    net.core.*|*.tcp_adv_win_scale) return 0 ;;
-  esac
   path="/proc/sys/${key//./\/}"
   [ -w "$path" ] || return 0
   printf '%s\n' "$val" >"$path" 2>/dev/null || true
@@ -123,6 +128,7 @@ exp4_sim5g_subnet() {
 }
 
 exp4_server_ifaces() {
+  # App-server pod has no rfsim. Netns TCP is OK (N6 to-client).
   exp4_tune_tcp
   TO_CLIENT_IFACE="${TO_CLIENT_IFACE:-${OTA_IFACE:-net1}}"
   if exp4_no5g; then
@@ -264,12 +270,20 @@ exp4_watch_to_server_pin() {
   exp4_log info "auto-detect to-server iface and pin app-server /32 (background)"
 }
 
-# Pod netns only. Do not touch net.core.* or tcp_adv_win_scale (those are
-# host-global / unsafe and took down usrp + gpu-a40). Host rmem_max still
-# caps actual socket memory (~208KiB unless the node raises it).
+# Pod netns only. Uncap TCP so DL goodput can approach UDP (no ACK-clocked
+# tiny window). Writes stay in this pod's netns — do not sysctl the node.
+# Missing /proc keys (masked net.core in unprivileged pods) are skipped.
 exp4_tune_tcp() {
-  exp4_sysctl_write net.ipv4.tcp_rmem "4096 131072 16777216"
-  exp4_sysctl_write net.ipv4.tcp_wmem "4096 16384 16777216"
+  local m=67108864
+  exp4_sysctl_write net.core.rmem_max "$m"
+  exp4_sysctl_write net.core.wmem_max "$m"
+  exp4_sysctl_write net.core.rmem_default 16777216
+  exp4_sysctl_write net.core.wmem_default 16777216
+  exp4_sysctl_write net.core.optmem_max 65536
+  exp4_sysctl_write net.ipv4.tcp_rmem "4096 16777216 ${m}"
+  exp4_sysctl_write net.ipv4.tcp_wmem "4096 16777216 ${m}"
+  exp4_sysctl_write net.ipv4.tcp_adv_win_scale -31
+  exp4_sysctl_write net.ipv4.tcp_moderate_rcvbuf 0
   exp4_sysctl_write net.ipv4.tcp_window_scaling 1
   exp4_sysctl_write net.ipv4.tcp_timestamps 1
   exp4_sysctl_write net.ipv4.tcp_sack 1
@@ -277,15 +291,17 @@ exp4_tune_tcp() {
   exp4_sysctl_write net.ipv4.tcp_no_metrics_save 1
   exp4_sysctl_write net.ipv4.tcp_mtu_probing 1
   exp4_sysctl_write net.ipv4.tcp_autocorking 0
+  exp4_sysctl_write net.ipv4.tcp_notsent_lowat 4294967295
+  exp4_sysctl_write net.ipv4.tcp_limit_output_bytes 104857600
   exp4_sysctl_write net.ipv4.tcp_congestion_control cubic
-  exp4_log info "tcp netns cubic rmem/wmem max=16M (host rmem_max still caps)"
+  exp4_log info "tcp netns cubic rmem/wmem max=64M adv_win_scale=-31 (this netns only)"
 }
 
-# Per-iface, pod netns: when to-server / to-client has IPv4.
+# Per-iface only: to-client (net1) / to-server (oaitun*). Never rf or net2.
 exp4_tune_tcp_iface() {
   local iface="${1:-}" line
   [ -z "$iface" ] && return 0
-  exp4_is_cluster_iface "$iface" && return 0
+  exp4_skip_tcp_iface "$iface" && return 0
   ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet ' || return 0
   if [ "${EXP4_TCP_IFACE_DONE:-}" = "$iface" ]; then
     return 0
@@ -301,7 +317,9 @@ exp4_tune_tcp_iface() {
 }
 
 exp4_client_ifaces() {
-  exp4_tune_tcp
+  # Do NOT call exp4_tune_tcp here. UE `ue` + `app-client` share a netns with
+  # rfsimulator TCP to the DU (10.1.140.14x). Window blast / adv_win_scale=-31
+  # stalls UL/DL (BLER~1, goodput 0). Data-plane knobs are iface-only on oaitun*.
   if exp4_no5g; then
     TO_SERVER_IFACE="${TO_SERVER_IFACE:-${PDU_IFACE:-net1}}"
     CONSOLE_IFACE="${CONSOLE_IFACE:-net2}"

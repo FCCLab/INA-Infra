@@ -790,6 +790,7 @@ def _paho_loop_read_drain(self, max_packets: int = 1):
 def _mqtt_on_socket_open(_client, _userdata, sock):
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, MQTT_SO_RCVBUF)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, MQTT_SO_RCVBUF)
     except OSError:
         pass
     try:
