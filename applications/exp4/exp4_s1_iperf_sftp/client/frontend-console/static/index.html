@@ -124,7 +124,7 @@ table.clients a:hover{text-decoration:underline}
             <button class="secondary" onclick="iperfAct('update')">Update</button>
             <span id="iperf-pill" class="pill">iperf3 stopped</span>
             <label class="iperf-args-label">arguments
-              <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 5 -b 10M -t 0 -i 1 --forceflush" onkeydown="if(event.key==='Enter'){event.preventDefault();iperfAct('start');}"/>
+              <input id="iperf-args" type="text" spellcheck="false" autocomplete="off" placeholder="-c HOST -p 5201 -R -P 2 -b 1M -t 0 -i 1 --forceflush -u" onkeydown="if(event.key==='Enter'){event.preventDefault();iperfAct('start');}"/>
             </label>
           </div>
           <div class="console-body" id="iperf-log"><div class="console-idle">iperf3 stopped until started</div></div>

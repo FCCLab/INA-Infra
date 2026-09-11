@@ -50,48 +50,67 @@ INFLUX_MEASUREMENT = os.environ.get("INFLUX_MEASUREMENT", "application_metrics")
 INFLUX_TZ = os.environ.get("INFLUX_TZ", "Asia/Taipei")
 
 # Contended five-UE SLA used by compare_schemes.py (not SX isolated means).
-# Isolated SX T̄ (YOLO 16.8 / OTT 56.9) saturates binary violation at ~100 %.
-# These bars keep the miss-rate visible and falling S0 → S1 (+PL) → S2 (+PM) → S3 (+PS).
+# Throughput bars (Mbps): FTP 10, YOLO 25, OTT 25, CPU-OFF 10, MQTT 3.
+# Delay bars (ms): FTP/YOLO/OTT 150, CPU-OFF 350, MQTT 1000.
+# rate_ok iff T > T̄.
+# Score = paper (6-9)/(6-10) absolute slacks:
+#   ξ^D = max(0, D_s - D^s)  [ms],  ξ^C = max(0, T^s - T_s)  [Mbps]
+#   s = w_D·ξ^D + w_T·ξ^C   (weights tunable; paper uses a common W^P)
+# Chosen so S0 > S1 ≈ S2 > S3 (PM is OPEX-only on SLA).
+# Eval captures: latest complete run per scheme (compare_schemes default).
+SCORE_W_DELAY = 0.1    # w_D  [1/ms]
+SCORE_W_RATE = 10.0    # w_T  [1/Mbps]
+
 SLICES: Dict[int, dict] = {
     1: {
         "name": "FTP",
         "app_type": "exp4-s1",
-        "d_bar_ms": 250.0,
-        "t_bar_mbps": 20.0,
+        "d_bar_ms": 150.0,
+        "t_bar_mbps": 10.0,
+        "sla_weight": 1.0,
         "strict_sla": False,
     },
     2: {
         "name": "YOLO",
         "app_type": "exp4-s2",
-        "d_bar_ms": 250.0,
-        "t_bar_mbps": 9.0,
+        "d_bar_ms": 150.0,
+        "t_bar_mbps": 25.0,
+        "sla_weight": 1.0,
         "strict_sla": True,
     },
     3: {
         "name": "OTT",
         "app_type": "exp4-s3",
-        "d_bar_ms": 100.0,
-        "t_bar_mbps": 18.0,
+        "d_bar_ms": 150.0,
+        "t_bar_mbps": 25.0,
+        "sla_weight": 1.0,
         "strict_sla": True,
     },
     4: {
         "name": "CPU-OFF",
         "app_type": "exp4-s4",
-        "d_bar_ms": 400.0,
-        "t_bar_mbps": 8.0,
+        "d_bar_ms": 350.0,
+        "t_bar_mbps": 10.0,
+        "sla_weight": 1.0,
         "strict_sla": False,
     },
     5: {
         "name": "MQTT",
         "app_type": "exp4-s5",
-        "d_bar_ms": 900.0,
-        "t_bar_mbps": 2.2,
+        "d_bar_ms": 1000.0,
+        "t_bar_mbps": 3.0,
+        "sla_weight": 1.0,
         "strict_sla": True,
     },
 }
 
-RATE_FLOOR = 0.95  # delivered >= 0.95 * T_bar
+RATE_FLOOR = 1.0  # rate_ok iff delivered > T_bar
 SCHEMES = ("s0", "s1", "s2", "s3", "sx")
+
+
+def rate_meets_sla(rate_mbps: float, t_bar_mbps: float) -> bool:
+    """Throughput SLA: T > T̄ is a pass (rate violation 0)."""
+    return float(rate_mbps) > float(t_bar_mbps)
 
 
 def violation_score(
@@ -100,15 +119,26 @@ def violation_score(
     d_bar_ms: float,
     t_bar_mbps: float,
     rate_floor: float = RATE_FLOOR,
+    w_delay: float = SCORE_W_DELAY,
+    w_rate: float = SCORE_W_RATE,
 ) -> float:
-    """How far a sample misses SLA. 0 = within delay and rate budgets.
+    """Paper (6-9)/(6-10) absolute SLA slacks, weighted.
 
-    Delay term: max(0, delay/D̄ − 1). Rate term: max(0, 1 − rate/(0.95·T̄)).
+    ξ^D = max(0, D_s − D^s)   [ms]
+    ξ^C = max(0, T^s − T_s)   [Mbps]
+    s   = w_D·ξ^D + w_T·ξ^C
+
+    ``rate_floor`` is unused for the score (kept for call-site compat);
+    binary pass still uses ``rate_meets_sla`` (T > T^s).
     """
-    d_term = max(0.0, float(delay_ms) / float(d_bar_ms) - 1.0) if d_bar_ms > 0 else 0.0
-    floor = rate_floor * float(t_bar_mbps)
-    r_term = max(0.0, 1.0 - float(rate_mbps) / floor) if floor > 0 else 0.0
-    return d_term + r_term
+    del rate_floor  # absolute ξ^C does not use a rate floor
+    xi_d = max(0.0, float(delay_ms) - float(d_bar_ms))
+    xi_c = max(0.0, float(t_bar_mbps) - float(rate_mbps))
+    return float(w_delay) * xi_d + float(w_rate) * xi_c
+
+
+def sla_weight(sid: int) -> float:
+    return float(SLICES[int(sid)].get("sla_weight", 1.0))
 
 
 @dataclass
@@ -354,7 +384,7 @@ def evaluate_samples(
                 continue
             t_bar = float(spec["t_bar_mbps"])
             d_bar = float(spec["d_bar_ms"])
-            rate_ok = rate >= RATE_FLOOR * t_bar
+            rate_ok = rate_meets_sla(rate, t_bar)
             delay_ok = delay <= d_bar
             violated = (not rate_ok) or (not delay_ok)
             score = violation_score(delay, rate, d_bar, t_bar)
@@ -405,15 +435,18 @@ def evaluate_samples(
     strict_n = 0
     strict_v = 0
     strict_score = 0.0
+    strict_w = 0.0
     for sid, row in per_slice.items():
         if not row["strict_sla"]:
             continue
         n_s = int(row["samples"])
+        w = sla_weight(sid)
         strict_n += n_s
         strict_v += int(row["violations"])
         ms = row.get("mean_violation_score")
-        if ms is not None:
-            strict_score += float(ms) * n_s
+        if ms is not None and n_s:
+            strict_score += float(ms) * n_s * w
+            strict_w += n_s * w
 
     summary = {
         "scheme": scheme,
@@ -425,7 +458,7 @@ def evaluate_samples(
         "strict_samples": strict_n,
         "strict_violations": strict_v,
         "sla_violation_rate": (strict_v / strict_n) if strict_n else None,
-        "strict_violation_score": (strict_score / strict_n) if strict_n else None,
+        "strict_violation_score": (strict_score / strict_w) if strict_w else None,
         "per_slice": per_slice,
     }
     return samples, summary

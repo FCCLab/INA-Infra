@@ -129,8 +129,8 @@ class Iperf3Client:
         self._started = False
         self._restart_pending = False
         self.cfg: dict[str, Any] = {
-            "parallel": int(_env("IPERF_PARALLEL", "5") or "5"),
-            "bandwidth": _env("IPERF_BANDWIDTH", "10M") or "10M",
+            "parallel": int(_env("IPERF_PARALLEL", "2") or "2"),
+            "bandwidth": _env("IPERF_BANDWIDTH", "1M") or "1M",
             "time": _env("IPERF_TIME", "0") or "0",
             "interval": _env("IPERF_INTERVAL", "1") or "1",
             "port": self.port,
@@ -174,7 +174,7 @@ class Iperf3Client:
         return (
             f"-c {host} -p {self.cfg.get('port', self.port)} -R "
             f"-P {self.cfg['parallel']} -b {self.cfg['bandwidth']} "
-            f"-t {self.cfg['time']} -i {self.cfg['interval']} --forceflush"
+            f"-t {self.cfg['time']} -i {self.cfg['interval']} --forceflush -u"
         )
 
     @staticmethod

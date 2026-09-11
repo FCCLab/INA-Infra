@@ -1,0 +1,762 @@
+ Assuring Service Level Agreements in Open Radio
+ Access Networks: An End-to-End System Design
+         Yufan He∗‡ , Tuan V. Ngo† , Mao V. Ngo† , Binbin Chen† , Tony Q. S. Quek† , and Howard H. Yang∗‡
+                                    ∗ ZJU-UIUC Institute, Zhejiang University, Haining 314400, China
+                                  † Singapore University of Technology and Design, 487372, Singapore
+     ‡ Hangzhou Dianzi University Pinghu Digital Technology Innovation Institute Company Ltd., Pinghu 314200, China
+
+
+   Abstract—We present a systematic design that ensures end-                   has developed dynamic scheduling frameworks to minimize
+to-end service level agreements (SLAs) while minimizing the                    latency or maximize spectral efficiency. However, these ap-
+operational expenditure (OPEX) in an Open Radio Access                         proaches often treat resource allocation in isolation across
+Network (O-RAN). Unlike existing frameworks, which adopted
+theoretical models that are often misaligned with industrial                   different domains. Specifically, the former focuses on static
+standards, we devise our scheme based on standard-compliant,                   reservation while neglecting millisecond-level channel fluctu-
+particularly 3GPP-specified models. We develop an algorithm                    ations, whereas the latter typically assumes fixed computing
+that decouples the complex resource management into three                      capacities, failing to coordinate with underlying infrastructure
+coordinated closed-loop control stages: long-term infrastruc-                  planning. This fragmentation across the compute-radio contin-
+ture planning, medium-term computing resource allocation, and
+short-term radio resource scheduling. The algorithm has a short                uum limits the ability to handle E2E dynamics effectively.
+execution time, making it suitable for real-world implemen-                       In terms of mathematical modeling, representative works
+tations. We corroborate the efficacy of the proposed scheme                    [8], [9] often rely on abstract resource models to construct
+through extensive numerical simulations and a prototype built                  utility functions and devise elegant resource allocation mech-
+upon an O-RAN testbed called INA-Infra, implemented using                      anisms. However, these theoretical models often lack pre-
+Nephio. Experimental results demonstrate that, compared to
+the baselines, our scheme significantly reduces SLA violations                 cise mapping to industrial standards. For instance, in the
+and enhances resource efficiency under non-stationary traffic                  3GPP TS 28.541 standard, radio resource quotas are defined
+conditions, confirming its engineering feasibility.                            through complex attributes such as RRMPolicyRatio. Con-
+                                                                               sequently, abstract models based on the (overly) simplified
+                          I. I NTRODUCTION                                     version of bandwidth cannot be directly translated into im-
+   Network Slicing is a key technology for 5G and next-                        plementable configuration parameters for commercial O-RAN
+generation communication networks to accommodate the var-                      base stations (e.g., O-DU/O-CU), rendering theoretical gains
+ious, and ever-increasing service demands [1]. In this paper,                  difficult to reproduce in operational networks.
+we demonstrate a translation of this concept from theory to                       Finally, with the rise of network intelligence, [10] demon-
+practical deployment. Unlike most existing research, which                     strated the potential of Deep Learning for slice management,
+is confined to isolated domains (either RAN or core), we                       while [11] designed Deep Reinforcement Learning (DRL)
+present a holistic End-to-End (E2E) implementation, as well as                 specifically for latency-sensitive services. More recently, [12]
+optimization, using the INA-Infra prototype [2], a real-world                  proposed a DRL-based multi-timescale architecture. Neverthe-
+experimental testbed based on O-RAN and Nephio.                                less, despite improving automation, these methods struggle
+                                                                               to provide the deterministic guarantees required for hard
+A. Background
+                                                                               slicing. DRL-based agents operate as probabilistic “black-
+   Although extensive research has addressed resource man-                     box” models that often require long online convergence times.
+agement in network slicing, transitioning these solutions to                   Unlike optimization-based approaches, they cannot theoret-
+standard-compliant systems remains challenging due to three                    ically guarantee strict Hard Isolation or bounded Service
+critical limitations discussed below.                                          Level Agreement (SLA) violations, posing significant risks for
+   Regarding the coordination of optimization timescales, [3]                  mission-critical communications.
+and [4] have proposed efficient algorithms for Virtual Net-
+work Function (VNF) placement and service chain mapping,                       B. Contributions
+whereas [5] further optimized CPU allocation in the core                          To address the above mentioned challenges, this paper pro-
+network to adapt to macroscopic traffic variations. In parallel,               poses a standard-compliant end-to-end multi-timescale joint
+research focusing on the RAN domain, such as [6] and [7],                      optimization algorithm. Unlike existing works that attempt
+                                                                               to solve all dynamics in a monolithic model, we decouple
+  This work was supported in part by National Key R&D Program of
+China under Grant 2024YFE0200700, in part by the National Natural Science      the complex E2E slicing problem into three coordinated
+Foundation of China under Grant 62201504, in part by the Intelligent Network   closed-loop control stages: long-term infrastructure planning,
+Optimization Algorithms at the Edge under Grant ZFKY20250912001, and in        medium-term computing resource scaling, and short-term radio
+part by the Startup Fund for National-Level High-Caliber Talent Recruitment
+of Purple Mountain Laboratory under Grant 70012501A01.(Corresponding           resource scheduling. This hierarchical algorithmic structure
+Author: Howard H. Yang. )                                                      not only reduces computational complexity but also achieves a
+smooth transition from millisecond-level radio scheduling to                                                                         SMO (Nephio Management Cluster)                   NSMF
+
+                                                                                                                                           Non-RT RIC       RAN NSSMF                            Core NSSMF
+                                                                                                                                          Resource Management rApp
+second-level computing resource scaling via time-scale sep-                                         E2      Near-RT RIC                           A1                                             NSSF
+                                                                                                            Network Slicing xApp
+                                                                                             F1-C
+aration. Specifically, the proposed algorithm minimizes long-                                                                                                               CU-CP
+                                                                                                                                                                                     N2
+                                                                                                                                                                                           N22
+                                                                                                                                                                                          AMF        NRF
+term resource reservation costs through infrastructure planning                                                               DNS3
+                                                                                                                                             E1
+                                                                                                                                                               DNS2                 AUSF         UDM      UDR
+                                                                                                                                                       AppS2
+while dynamically adapting to traffic and channel fluctuations       UES1                    F1-U                                                                     N4
+                                                                                                                                                                           CU-UPS1 N3 UPFS1 N4 SMFS1
+                                                                                                                   AppS3                                         N6
+
+                                                                     UES2    RU         DU                                                                            N4                      N6           N6
+                                                                                             F1-U
+                                                                                                                                        CU-UPS2 N3 UPFS2                   SMFS2          AppS1
+via medium-to-short-term loops to control dynamic allocation                      FHI
+                                                                                             F1-U                     N3
+                                                                                                                                   N6                                                                   DNS1
+                                                                     UES3                                CU-UPS3            UPFS3                                     N4
+                                                                                                                                                                           SMFS3
+costs, thereby achieving an optimal balance between resource                                                                            N6
+                                                                                                                                              AppS4
+                                                                                                                                                           DNS4
+                                                                     UES4                    F1-U
+                                                                                                     CU-UPS4          N3
+                                                                                                                            UPFS4                                     N4   SMFS4
+utilization and SLA assurance across the E2E link. Further-
+more, we validated the proposed algorithm through extensive                             DU                     Edge                                Regional                         Central
+
+numerical simulations and a prototype implementation on            Fig. 1. System architecture of the hierarchical resource orchestration frame-
+INA-Infra [2] testbed. This comprehensive evaluation verifies      work implemented on INA-Infra.
+both the engineering feasibility and the effectiveness of our      workloads, while the Regional Cloud provides a trade-off
+algorithm.                                                         between resource capacity and transmission latency.
+   The main contributions of this paper are summarized as             For the software stack, INA-Infra adopts a Kubernetes-based
+follows:                                                           cloud-native foundation to manage distributed computing re-
+  • We establish an E2E network slicing resource alloca-           sources and integrates Nephio [14] as the core engine for
+    tion model strictly following 3GPP TS 28.541 [13]. By          automated orchestration. Nephio enables the platform to man-
+    explicitly translating attributes like RRMPolicyRatio          age the lifecycle of network functions in a declarative manner
+    and Isolation Flags into optimization constraints, we          through Custom Resource Definitions. The platform supports
+    bridge the gap between theoretical models and industrial       a full 5G protocol stack from OpenAirInterface (OAI) [15],
+    standards.                                                     allowing key network elements—including the Open Dis-
+  • We propose a Three-Layer Multi-Timescale joint opti-           tributed Unit (O-DU), Open Central Unit (O-CU), and User
+    mization algorithm. By coordinating long-term planning,        Plane Function (UPF)—to be instantiated as containerized
+    medium-term scaling, and short-term scheduling, the pro-       workloads, thereby achieving software-hardware decoupling
+    posed algorithm minimizes the operational expenditure          and flexible deployment.
+    (OPEX) while effectively guaranteeing SLAs.
+  • We validate the proposed algorithm through extensive           B. Control Units
+    numerical simulations and a prototype implementation on
+    the INA-Infra testbed [2]. Experimental results demon-            The system employs a hierarchical control loop based on
+    strate that, compared to static reservation or single-         standardized O-RAN components. As illustrated in Fig. 1, the
+    timescale schemes, the proposed algorithm significantly        control logic is primarily distributed between the Non-Real-
+    improves average achievable throughput and drastically         Time RAN Intelligent Controller (Non-RT RIC) within the
+    reduces SLA violations. Furthermore, the hardware pro-         Service Management and Orchestration (SMO) system and the
+    totype confirms the engineering feasibility and validates      Near-Real-Time RAN Intelligent Controller (Near-RT RIC) at
+    the capability to effectively mitigate SLA violations and      the edge.
+    enhance system throughput in resource-constrained envi-           The Non-RT RIC is responsible for coarse-grained time-
+    ronments.                                                      scale tasks and global resource optimization. Leveraging its
+                                                                   global view of the network state, the Non-RT RIC hosts com-
+                II. S YSTEM A RCHITECTURE                          putationally intensive rApps to execute long-term topological
+                                                                   planning and medium-term resource allocations. Specifically,
+   We develop our scheme based on the INA-Infra [2], an open,      it determines, on the one hand, the (optimal) physical deploy-
+extensible, and O-RAN-compliant testbed that supports end-         ment locations for network functions (e.g., CUs, UPFs) across
+to-end system design. Below, we provide a brief introduction       Edge, Regional, and Central clouds based on long-term traffic
+to this framework.                                                 statistics, and dispatches configurations via the O1 interface
+                                                                   or the Nephio automation framework. On the other hand, it
+A. Hardware Components                                             monitors network load changes using collected performance
+   The physical infrastructure of the testbed is organized         data and dynamically adjusts computation resource allocation
+into a hierarchical cloud topology that emulates a realistic       quotas to adapt to fluctuations in traffic volume.
+telecommunications deployment environment. This topology              In contrast, the Near-RT RIC operates at the edge, near the
+comprises three distinct tiers: Edge Data Centers (Edge DCs),      RAN, and focuses on millisecond-level real-time control tasks.
+Regional Data Centers (Regional DCs), and Central Data             Through the standard E2 interface, the Near-RT RIC interacts
+Centers (Central DCs), as shown in Fig. 1. The Edge Cloud          directly with E2 nodes (e.g., DU, CU-UP) to acquire real-
+is deployed in close proximity to radio access points to           time radio channel quality indicators and scheduling requests.
+provide low-latency access, albeit with limited computation        This component primarily hosts xApps (e.g., the Network-
+and storage capacities. Conversely, the Central Cloud offers       Slicing-xApp in Fig. 1) to execute fine-grained radio resource
+abundant resource pools suitable for delay-tolerant, large-scale   management strategies, such as dynamically allocating Phys-
+ical Resource Blocks (PRBs) or enforcing isolation policies                                     Medium-term Loop
+
+between slices.                                                                                               Short-term
+                                                                    SLA                                         Loop
+   This hierarchical design enables the system to use the Near-
+RT RIC to respond rapidly to transient channel conditions                   Fix                 Compute                       PRB
+                                                                          Topology              Allocation                 Allocation Resource
+within the resource boundaries defined by the Non-RT RIC,           PL                PM                      PS                     Configuration
+thereby maximizing resource utilization while ensuring SLAs.
+C. Design Objective
+                                                                                      Traffic                Channel
+   Given the hierarchical architecture and associated deploy-                        Demand                  Quality
+ment costs, the primary objective of this paper is to minimize     Fig. 2. Hierarchical logic flow: PL enforces long-term topological deploy-
+total OPEX while ensuring SLA compliance across different          ment, PM performs dynamic compute scaling, and PS executes real-time
+network slices. We concentrate on the User Plane functions         PRB scheduling.
+(namely CU-UP and UPF) and the Application Server (APP),           [13], respectively. We also model the isolation requirements
+which dominate the resource consumption during the data            from the slice configuration [13] as hard isolation constraints.
+transition path and directly affects end-to-end service delay.     When a slice s requires strict isolation (i.e., Hs = 1), the
+Specifically, the orchestrator is tasked with determining: (i)     system enforces the constraint b̂s = b̃s . This constraint ensures
+the deployment locations of the specific slice components (i.e.,   the minimum guaranteed allocation is strictly dedicated.
+the CU-UP, UPF, and APP), (ii) the computing and memory               Regarding the radio transmissions, given the number of
+resources allocated to each slice, and (iii) the radio resources   aggregated component carriers as I, 3GPP TS 38.306 [16]
+scheduled for each slice. This requirement serves as the basis     specifies the maximum data rate R (in Mbps) as follows:
+for the mathematical formulation detailed in the following
+                                                                                   I
+section.                                                                1.2 × 10−5 X (i) (i) (i) BW (i),µ           
+                                                                     R = µ −1        v Qm f NP RB          1 − OH (i) (1)
+              III. T HEORETICAL F RAMEWORK                               Ts Rmax i=1
+A. System Modeling                                                 where v (i) denotes the maximum number of MIMO layers,
+                                                                     (i)
+   We denote by S the set of network slices. Each slice s ∈ S      Qm is the modulation order, f (i) represents the scaling factor,
+                                                                                                                          BW (i),µ
+consists of a chain of virtual network functions, comprising       and Rmax is the target coding rate. The term NP RB
+the CU-UP, UPF, and APP, that need to be processed in              denotes the maximum RB allocation in bandwidth BW (i) with
+sequence. The end-to-end SLA of slice s is characterized by        numerology µ, Tsµ is the average OFDM symbol duration, and
+a minimum throughput requirement T s and a maximum end-            OH (i) represents the overhead.
+to-end latency requirement Ds . Moreover, to align with the           As the radio resource allocation varies across time slots,
+isolation requirements defined in 3GPP, a slice can mandate        we normalize the maximum data rate onto the PRB basis by
+                                                                                          BW (i),µ
+hard isolation. We model this attribute using a binary indicator   assigning I = 1 and NP RB       = 1, which yields the expected
+Hs ∈ {0, 1}, where Hs = 1 denotes hard isolation, requiring        throughput per PRB (namely, the spectral efficiency) at any
+the minimum guaranteed resources to be fully backed by             typical time slot t:
+dedicated PRBs, while Hs = 0 indicates that such backing
+is not required.                                                                      1.2 × 10−5
+                                                                          ηs (t) =               · vQm (t)Rmax (t)(1 − OH)f                      (2)
+   We categorize the infrastructure nodes into three groups                               Tsµ
+as J = {Edge, Regional, Central}. Each element j ∈ J               in which v and f are fixed system configurations, while
+possesses certain computational resources. Specifically, for a     Qm (t) and Rmax (t) are dynamic parameters determined by
+generic node j, we denote by CjN and RjN the total CPU and         the real-time Modulation and Coding Scheme (MCS) index.
+RAM capacities available for hosting the CU-UP and UPF             We note that while the actual spectral efficiency may be
+network functions. Similarly, for the APP services, we denote      nonlinear with the system parameters due to channel fading
+by CjA , GA           A
+            j , and Rj the available CPU, GPU, and RAM             and interference, the linear approximation employed in our
+capacities at node j, respectively.                                theoretical model establishes a conservative safety margin for
+   In this system, the radio access segment comprises base         slice provisioning. In practice, the scheduler can compensate
+stations located at the edge with PRB capacity B. To               for instantaneous fluctuations by leveraging the shared re-
+ensure that the theoretical framework aligns with real-            source pool (i.e., resources not exclusively reserved), thereby
+world deployment, we leverage the key attributes de-               ensuring the stability of the slice performance.
+fined in 3GPP to characterize the radio channels. Specif-
+ically, regarding the spectral resources for each slice s,         B. Problem Formulation
+we denote by b̂s and b̃s the amount of dedicated PRBs                As the adjustment of resources residing on different parts
+reserved for and the minimum amount of PRBs allo-                  of the network normally takes place on different time scales,
+cated to this slice, respectively. Note that these two vari-       we decompose the resource orchestration problem into three
+ables correspond to the rRMPolicyDedicatedRatio and                nested optimization layers: long-term planning, medium-term
+rRMPolicyMinRatio attributes in RRMPolicyRatio                     scaling, and short-term scheduling (cf. Fig. 2). The algorithm
+follows a closed-loop, time-scale–aware design in which each                     X                X              X
+layer operates at its appropriate granularity while exchanging                   
+                                                                                 
+                                                                                       x sj =  1,      ysj = 1,      zsj = 1                     (6-1)
+                                                                                 
+constraints and feedback to ensure consistency in system                         
+                                                                                 
+                                                                                  j∈J
+                                                                                   X
+                                                                                                   j∈J            j∈J
+                                                                                 
+behavior. Concretely, the long-term planning fixes the de-                             (cC          U
+                                                                                          s xsj + cs ysj ) ≤ Cj
+                                                                                                               N
+                                                                                                                                                  (6-2)
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                 
+ployment topology, medium-term scaling adapts compute re-                        
+                                                                                 
+                                                                                  s∈S
+                                                                                 
+sources to traffic dynamics within this topology, and short-term                  X
+                                                                                       (rsC xsj + rsU ysj ) ≤ RjN                                 (6-3)
+                                                                                 
+                                                                                 
+                                                                                 
+scheduling allocates radio resources to meet instantaneous                       
+                                                                                 
+                                                                                  s∈S
+                                                                                 
+SLA requirements. Together, these layers provide a tractable                     
+                                                                                  X
+                                                                                       cAs zsj ≤ Cj
+                                                                                                    A
+                                                                                                                                                  (6-4)
+                                                                                 
+                                                                                 
+and coherent framework for end-to-end resource orchestration.                    
+                                                                                 
+                                                                                 
+                                                                                  s∈S
+   1) Long-term Planning Layer (PL ): This layer determines                      
+                                                                                 
+                                                                                  X
+                                                                                       rsA zsj ≤ RjA                                              (6-5)
+                                                                                 
+determines the locations to deploy network functions and the                     
+                                                                                 
+                                                                                 
+                                                                                 
+corresponding resources to be reserved.                                          
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                   s∈S
+                                                                                   X
+   To establish an optimization problem that adequately ac-                            gsA zsj ≤ GA                                               (6-6)
+                                                                                 
+                                                                                 
+                                                                                                   j
+counts for the key features in this layer, we first define bi-                     s∈S
+nary variables xsj , ysj , zsj ∈ {0, 1} that respectively indicate               rsC ≥ M INRCU ,
+                                                                                 
+                                                                                 
+                                                                                                            rsU ≥ M INRU P F             (6-7)
+whether the CU-UP, UPF, and APP components of a slice                            
+                                                                                                       C            U       A      A  A
+                                                                                 
+                                                                                  Ts ≤ min{κCU cs , κU P F cs , γC cs , γR rs , γG gs } (6-8)
+s are deployed at node j. For the resources reserved across                      
+                                                                                 
+                                                                                  D
+these components, we define continuous variables cC             C                  ξs ≥ Ds − Ds                                           (6-9)
+                                                                                 
+                                                        s and rs
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                 
+to be the baseline compute and memory resources reserved for                         C
+                                                                                 ξs ≥ T s − Ts                                          (6-10)
+                                                                                 
+                                                                                 
+                                                                                 
+the CU-UP CPU and CU-UP RAM, respectively. Likewise,                             
+                                                                                 
+                                                                                  ξ R
+                                                                                       ≥  T     − η  (t  ) b̃                            (6-11)
+                                                                                    s        s      s 0 s
+we define cU           U
+                                                                                 
+             s and rs as the resources reserved for the UPF
+                                                                                 
+                                                                                 
+                                                                                                                          X
+                                                                                 0 ≤ b̂s ≤ b̃s , b̂s ≥ b̃s · Hs ,             b̃s ≤ B   (6-12)
+                                                                                 
+CPU and UPF RAM, respectively. We also define variables                          
+                                                                                 
+cA    A        A
+                                                                                 
+                                                                                                                           s∈S
+ s , rs , and gs as the CPU, RAM, and GPU reservations for
+                                                                                 
+                                                                                 
+                                                                                 
+APP services, respectively. Consequently, let PjC , PjR , and PjG
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                  xsj , ysj , zsj ∈ {0, 1}, b̂s , b̃s ∈ Z≥0
+denote the unit prices for CPU, RAM, and GPU at node j,                          cC
+                                                                                        U A C U A A
+                                                                                    s , cs , cs , rs , rs , rs , gs , Ts ,
+                                                                                 
+                                                                                 
+respectively. We have the infrastructure cost, which aggregates                  
+                                                                                 
+                                                                                  D C R
+                                                                                   ξs , ξs , ξs ∈ R≥0 , ∀s ∈ S, ∀j ∈ J
+the rental expenses for all allocated CPU, RAM, and GPU
+resources across the selected deployment nodes, given by
+                                                                                  This optimization problem is subject to the constraints in
+             X                                                                (6). First, (6-1) anchors each slice component to a unique
+                    PjC cC          U        A
+                                                   
+   CI (s) =                s xsj + cs ysj + cs zsj
+                                                                               location, while (6-2)–(6-6) enforce that resource allocation
+            j∈J
+                                                                        (3)   strictly respects physical node limits. (6-7) imposes a static
+         + PjR    rsC xsj + rsU ysj + rsA zsj       + PjG gsA zsj
+                                                
+                                                                     .         RAM reservation, as the memory footprint of network func-
+                                                                               tions is primarily dominated by fixed allocations rather than
+We also define the radio cost of spectrum. Specifically, let                   dynamic throughput variations. (6-8) models the achievable
+P ded and P prio be the unit prices for dedicated and prioritized              throughput Ts , where the coefficients κ and γ represent the
+PRBs, respectively, the radio cost is                                          resource efficiency factors. Notably, experimental observations
+                                                                             confirm that packet processing exhibits a stable CPU cycle
+             CR (s) = P ded b̂s + P prio b̃s − b̂s .           (4)             cost per bit under standard conditions [2], justifying this linear
+                                                                               approximation where capacity is limited by the system bottle-
+   For notational brevity, we aggregate the decision variables                 neck. (6-9)–(6-11) quantify SLA violations. Specifically, Ds in
+into deployment vectors x, y, z, compute resource vectors                      (6-9) denotes the end-to-end delay, calculated by aggregating
+c, r, g, and radio resource vectors b̃, b̂.Subsequently, we es-                the segments connecting the CU-UP, UPF, and APP:
+tablish the following problem, aiming to minimize the in-
+                                                                                       X                   X                       X
+frastructure and radio costs while concurrently avoiding SLA                    Ds =         DjF 1 xsj +            N3
+                                                                                                                   Djk xsj ysk +            N6
+                                                                                                                                           Dkl ysk zsl
+violations, by optimizing a weighted sum of the cost and                               j∈J                 j,k∈J                   k,l∈J
+penalty:                                                                                                                                  (7)
+                                 X                                            where DjF 1 denotes the latency from the fixed DU to the CU-
+                                     W C CI (s) + CR (s)
+                                                        
+              min           ZL =                                               UP anchored at node j, DjkN3
+                                                                                                            represents the transmission delay
+        {x,y,z,c,r,g,b̃,b̂}                                                                                                               N6
+                                 s∈S                        (5)                from the CU-UP at node j to the UPF at node k, and Dkl
+                                     P  D     R    C
+                                                     
+                                 + W ξs + ξ s + ξ s                            corresponds to the delay from the UPF at node k to the APP
+                                                                               at node l. For (6-11), t0 denotes the planning decision time
+in which W C and W P are weights associated with the cost and                  instant.
+penalty, respectively, while the non-negative slack variables                     (6-12) enforces spectrum logic and mandates that for Hard
+ξsD , ξsR , and ξsC represent the degree of SLA violation in                   Isolation, the minimum guaranteed throughput must be fully
+latency, radio resources, and compute resources, respectively.                 backed by dedicated PRBs.
+   X                                                                    
+                    ∗             ∗
+   
+   
+        (cC                U
+            s (t)xsj + cs (t)ysj ) ≤ Cj
+                                            N
+                                                              (9-1)      
+                                                                         
+                                                                          0 ≤ b̂s (t) ≤ b̃s (t)                                  (11-1)
+                                                                        
+    s∈S
+                                                                          X
+                                                                               b̃s (t) ≤ B
+                                                                         
+    X                                                                   
+                                                                                                                                 (11-2)
+         (rsC (t)x∗sj + rsU (t)ysj ∗
+                                     ) ≤ RjN
+                                                                        
+                                                              (9-2)
+   
+                                                                        
+                                                                          s∈S
+   
+   
+   
+     s∈S
+                                                                           b̂s (t) ≥ b̃s (t) · Hs
+   
+   
+    X                                                                                                                           (11-3)
+                   ∗
+          cA                A
+                                                                        
+           s (t)zsj ≤ Cj                                      (9-3)
+                                                                        
+   
+                                                                        ξ P RB (t) ≥ T − η̄ (t) · b̃ (t)
+                                                                         
+                                                                                                                                  (11-4)
+   
+                                                                        
+                                                                            s                s    s    s
+    s∈S                                                                 
+                                                                                                     P RB
+                                                                        
+                                                                           b̂s (t), b̃s (t) ∈ Z≥0 , ξs    (t) ∈ R≥0 ,   ∀s ∈ S
+    X                                                                   
+                   ∗
+          rsA (t)zsj  ≤ RjA
+   
+                                                              (9-4)
+   
+   
+   
+   
+   
+     s∈S
+                                                                          3) Short-term Scheduling Layer (PS ): The Short-term
+   
+   
+   
+   X A            ∗
+          gs (t)zsj    ≤ GA j                                 (9-5)    Scheduling Layer operates within the O-RAN Near-RT RIC
+   
+   
+    s∈S                                                               on a timescale of 10 ms to 1 s. Unlike the underlying MAC
+                               C             U
+                      
+   Ts (t) ≤ min κCU cs (t), κU P F cs (t),                            scheduler, which handles millisecond-level channel fluctua-
+   
+   
+   
+                                                                       tions, this layer focuses on compensating for slow fading
+   
+                 γ C cA           A           A
+   
+                       s (t), γR rs (t), γG gs (t)            (9-6)
+   
+   
+                                                                       variations to satisfy slice SLAs. It optimizes the dynamic PRB
+   
+   
+     ξ SLA−T (t) ≥ T s − Ts (t)
+   
+                                                             (9-7)    allocation vectors b̂(t) and b̃(t), i.e., the number of dedicated
+    sDemand−T
+   
+   
+   
+   ξ s             (t) ≥ Tsdemand (t) − Ts (t)               (9-8)    and minimum guaranteed PRBs, respectively.
+   
+   
+   
+                                                                          We set up the following problem to minimize the radio costs
+     C        U
+   cs (t), cs (t), cA          C       U      A
+                       s (t), rs (t), rs (t), rs (t),
+   
+   
+                                                                       while mitigating the risk of wireless SLA violations:
+   
+   
+   g A (t), Ts (t), ξ SLA−T (t), ξ Demand−T (t) ∈ R≥0 ,
+   
+   
+   
+      s               s              s                                                       X                                  
+     ∀s ∈ S, ∀j ∈ J                                                         min ZS (t) =            W C CR (s, t) + W P ξsP RB (t) (10)
+   
+                                                                        {b̃(t),b̂(t)}
+                                                                                              s∈S
+   2) Medium-term Scaling Layer (PM ): The Medium-term
+Scaling Layer operates on a second-level time scale to adapt           where CR (s, t) represents the radio resource cost, calculated
+to real-time traffic demand fluctuations. In this layer, the           using the pricing model given in (4) with dynamic variables
+topological deployment decisions determined in PL , denoted            b̂s (t) and b̃s (t).
+as x∗ , y ∗ , z ∗ , are treated as fixed parameters. The decision          This optimization problem is subject to the set of constraints
+variables include the dynamic resource allocation vectors              in (11). Particularly, (11-1) ensures that the PRB allocation
+c(t), r(t), and g(t), representing the CPU, RAM, and GPU               adheres to 3GPP definitions (where dedicated resources are
+resources allocated to the CU-UP, UPF, and APP components              a subset of the minimum guaranteed), while (11-2) mandates
+at time t, respectively.                                               that the aggregated allocation does not exceed the total cell
+   The following problem minimizes the operational cost of             bandwidth B. (11-3) enforces mission-critical requirements:
+active resources while balancing the trade-off between strict          if a slice is configured with the hard isolation flag (Hs = 1),
+SLA compliance and dynamic demand tracking:                            its minimum guaranteed resources must be fully backed by
+                                X                                     dedicated PRBs. (11-4) quantifies potential service violations
+         min          ZM (t) =        W C CI (s, t)                    based on channel quality. To bridge the time-scale gap between
+    {c(t),r(t),g(t)}
+                                s∈S                           (8)      millisecond-level channel dynamics and the PS optimization
+                       P    SLA−T             Demand−T
+                                                                     cycle, we utilize the effective spectral efficiency η̄s (t), ob-
+                 + W ξs            (t) + β · ξs        (t)
+                                                                       tained by temporally averaging the instantaneous efficiency
+where CI (s, t) denotes the real-time infrastructure usage cost,       ηs (τ ) over the preceding PS control cycle [t − TP S , t), where
+calculated similarly to (3) but with dynamic resource variables,       TP S denotes the duration of one PS cycle and NT T I is the
+ξsSLA−T (t) and ξsDemand−T (t) represent penalties for SLA             number of TTIs within this duration:
+violations and demand mismatches, respectively, balanced by                                          1     X
+the weighting factor β.                                                                   η̄s (t) =                ηs (τ )           (12)
+                                                                                                    NT T I
+   This optimization problem is subject to the set of constraints                                      τ ∈[t−TP S ,t)
+
+formulated in (9). Specifically, (9-1)–(9-5) restrict the dynamic      This averaging process effectively filters out fast-fading fluc-
+resource scaling strictly within the physical limits of the in-        tuations while retaining the slow-fading trends. Consequently,
+frastructure nodes, anchored to the fixed deployment locations         the penalty variable ξsP RB (t) captures the deficit between the
+(x∗ , y ∗ , z ∗ ). (9-6) applies the linear bottleneck model consis-   SLA target T s and the predicted throughput derived from this
+tent with the planning layer, where the real-time throughput           smoothed efficiency.
+Ts (t) is constrained by the minimum processing capacity
+among all allocated resources. (9-7) and (9-8) quantify service        C. Complexity Analysis
+deviations, where (9-8) stipulates the system to align with the           To assess the algorithms’ efficiencies, we analyze the worst-
+requested throughput Tsdemand (t), defined as the summation of         case complexity of solving the three decoupled sub-problems.
+the packet arrival rate and the accumulated queue backlog from         First, we note that PL can be reformulated from a Mixed-
+the previous cycle, ensuring that cloud resources are scaled to        Integer Quadratic Programming (MIQP) problem to a Mixed-
+drain accumulated traffic and preventing VNF congestion.               Integer Linear Programming (MILP) model by linearizing the
+quadratic connectivity terms using standard auxiliary variables.   B. Scenario Definition
+The resulting (worst-case) complexity is determined by the            We evaluate a heterogeneous service scenario comprising
+Cartesian product of the primary binary topological variables      four concurrent network slices (S = {1, 2, 3, 4}), with diverse
+and the integer radio resource variables, quantitatively, as       traffic profiles detailed in Table II. S1 represents background
+O(23|S||J | B 2|S| ). Given the long-term operational window       IoT traffic characterized by relaxed throughput and latency
+(hours or days), this problem can be solved via standard           constraints. S2 models a delay-sensitive mission-critical con-
+branch-and-bound methods [17].                                     trol service. S3 simulates high-bandwidth HD video stream-
+   Second, PM is a Linear Programming (LP) problem with            ing, while S4 represents interactive applications (e.g., Cloud
+a polynomial time complexity. With approximately 7 contin-         Gaming) requiring both high throughput and low latency.
+uous decision variables per active slice, the complexity is           The simulation discretizes the time domain, where a single
+O((7|S|)3.5 ). This polynomial complexity ensures that the         time step corresponds to one scheduling cycle of the short-
+system converges rapidly, making it suitable for adapting to       term layer (PS ). Consequently, the medium-term layer (PM )
+traffic fluctuations within a seconds-level control loop.          executes resource scaling every 10 steps. To emulate time-
+   Finally, PS is an Integer Linear Programming (ILP) problem      varying wireless conditions, the MCS index is modeled as a
+with a worst-case complexity O(B 2|S| ). While this implies        stochastic process with temporal correlation. The MCS value
+the complexity might grow exponentially with the number of         is initialized via a uniform distribution and evolves as a
+slices, practical tractability is ensured by two key structural    Markov-like process, where the state at step t depends on step
+factors: (i) the resource capacity constraints drastically prune   t − 1 subject to bounded random variations. This mechanism
+the feasible search space from a high-dimensional hypercube        generates a dynamic spectral efficiency profile to examine the
+to a smaller simplex, and (ii) the number of concurrent            adaptability of our framework.
+slices |S| is generally small (typically 3 to 5 in commercial
+deployments), as network slices function as aggregated logical                                  TABLE II
+pipelines for service classes rather than dedicated tunnels for                 S IMULATION S CENARIO SLA R EQUIREMENTS
+individual users.                                                       Slice ID      T s (Mbps)      D s (ms)      Hs (Flag)
+                                                                           S1              10           100               0
+               IV. E XPERIMENTAL R ESULTS                                  S2              40            10               1
+A. Experimental Setup                                                      S3             100            35               0
+                                                                           S4              70            25               0
+   The simulation environment is set up based on the INA-Infra
+architecture, with parameters configured to reflect hardware          We evaluate the performance of the proposed algorithm
+heterogeneity (see Table I). Resources are distributed in a        against two baseline schemes. The static reservation baseline
+hierarchical manner: Edge DCs are resource-constrained with        executes PL only once at slice admission, keeping infrastruc-
+higher unit costs and lower latency, whereas Central DCs           ture and radio resource configurations fixed throughout the
+offer abundant, cost-effective capacity. Transport latencies are   operational period. The single-timescale baseline executes PL
+explicitly modeled based on the physical topology of each          and synchronizes PS with PM to operate on the medium-term
+segment. First, the F1 interface latency corresponds to the        timescale, specifically every ten scheduling steps.
+CU-UP deployment location: 1 ms (Edge), 15 ms (Regional),
+and 30 ms (Central). Next, the N3 interface (CU-UP to              C. Simulation Results
+UPF) introduces delays of 1 ms (Intra-site), 10 ms (1-Hop),           First of all, we validate the efficacy of the proposed algo-
+and 20 ms (2-Hop) depending on the link span. Finally, the         rithm in a real-world deployment by measuring its execution
+N6 interface (UPF to APP) imposes 5 ms, 15 ms, and 30              time on standard commercial hardware (Intel Core i5-13400F
+ms delays, likewise determined by the physical span of the         CPU, 32 GB RAM) and comparing that with practical re-
+connection.                                                        quirements. Our empirical results confirm that the optimization
+                                                                   problems PL and PM , defined for the long-term planning and
+                           TABLE I                                 medium-term control layers, respectively, can be solved in
+          H ARDWARE C APABILITIES AND R ESOURCE C OSTS             68.4 ms and 1.1 ms, safely operating within their allowable
+  Variable Unit         Edge DC Regional DC Central DC             time windows. Additionally, solving the more critical short-
+                                                                   term scheduling problem PS requires an average runtime of
+  CjN       ms            400          600          2500           merely 1.8 ms. Given that the O-RAN Near-RT Control Loop
+  CjA       ms            400          600          2500           is standardized to operate within a 10 ms to 1 s window,
+  RjN       GB             10           20           100           this performance confirms that the scheduler satisfies even
+  RjA       GB             20           40           200           the most stringent lower bound of the specification. As such,
+  GAj       Unit          150          200          1200           the proposed algorithm is proven computationally feasible and
+  PjC       $/100ms/h     0.5          0.05         0.001          suitable for deployment within the O-RAN architecture.
+  PjR       $/GB/h        0.1          0.01         0.002             Next, we examine the algorithm’s decision-making capabil-
+  PjG       $/Unit/h      1.0           0.5          0.1           ity at the long-term network planning layer. As detailed in
+  Achievable Throughput (Mbps)   400                                                        25
+                                                                                                                                                       1.0
+                                 350
+                                       312.52                  303.55                       20
+                                                                                                         19.90
+                                 300
+                                                                                                                                                       0.8
+
+
+
+
+                                                                         Violation (Mbps)
+                                 250                                                                                15.03
+                                                                                            15
+
+
+
+
+                                                                                                                                   CDF (Probability)
+                                                 200.10
+                                 200
+
+                                                                                            10
+                                 150                                                                                                                   0.6
+                                 100                                                             5.37
+                                                                                             5
+                                  50
+
+                                   0                                                         0
+                                                                                                                                                       0.4
+                                       Multi      Static       Single                            Multi   Static     Single
+
+                 (a)                                   (b)
+Fig. 3. Comparison of long-term average performance metrics. (a) Average                                                                               0.2
+achievable throughput. (b) Average violation throughput.                                                                                                                                                       Multi
+                                                                                                                                                                                                               Static
+                                                                                                                                                       0.0                                                     Single
+Table III, the algorithm formulates differentiated topological
+                                                                                                                                                             0.0      0.2       0.4        0.6     0.8           1.0
+deployment strategies based on the SLA requirements of                                                                                                                         Violation Ratio
+distinct slices: the latency-sensitive slice S2 is fully deployed                                                                                                  Fig. 4. CDF of SLA violation ratio.
+at the Edge DC to ensure strict latency compliance, while the
+                                                                                                                             the baselines exhibit distinct heavy-tailed behavior, indicating
+delay-tolerant slice S1 is consolidated at the Central DC to
+                                                                                                                             a higher risk of severe performance degradation in which a
+minimize costs. Conversely, for S3 and S4, the algorithm se-
+                                                                                                                             significant portion of the SLA remains unmet.
+lects hybrid and regional topologies, respectively, to optimize
+the trade-off between performance and resource overhead.                                                                     D. Validation on INA-Infra Testbed
+This strategic placement provides a robust baseline for the                                                                     In addition to simulations, we established an experimental
+subsequent dynamic resource scheduling.                                                                                      testbed based on the INA-Infra architecture to validate the
+                                                                                                                             practical feasibility of our scheme. The platform hosts five
+                                                              TABLE III                                                      heterogeneous slices with distinct SLA requirements (see Ta-
+                                                  O PTIMAL C OMPONENT P LACEMENT
+                                                                                                                             ble IV). Slices S1 and S2 are deployed in Central and Regional
+                                  Slice ID      CU-UP Location          UPF Location                     APP Location        nodes with relaxed constraints, while the time-critical slices
+                                       S1           Central                          Central                 Central         S3, S4, and S5 compete for resources at the constrained Edge
+                                       S2            Edge                             Edge                    Edge           node. The current testbed represents a staged implementation
+                                       S3           Regional                         Central                 Central         focusing on RAN and Core dynamics, where the APP server
+                                       S4           Regional                         Regional                Regional        is a lightweight UDP-based data server and does not yet
+   Moreover, we investigate the system stability and efficiency                                                              leverage GPU acceleration. Specifically, we use the iperf3
+under dynamic traffic conditions. We collect the statistics from                                                             tool to emulate downlink traffic (e.g., video streaming) to
+a simulation spanning 10,000 time steps following full slice                                                                 stress-test the system’s maximum throughput and validate SLA
+activation. The results are summarized in Figures 3 and 4.                                                                   enforcement under resource contention.
+   Specifically, Fig. 3 presents a comparative analysis of the
+proposed method and the baselines on average performance                                                                                                                     TABLE IV
+                                                                                                                                                             T ESTBED E XPERIMENT SLA R EQUIREMENTS
+metrics. As demonstrated by Fig. 3(a), the proposed algorithm
+attains the highest average throughput (of 312.52 Mbps),                                                                                                 Slice ID             T s (Mbps)           D s (ms)
+corresponding to 56.2% and 2.9% improvements over the                                                                                                         S1                  25                     100
+static and single-timescale approaches, respectively. Mean-                                                                                                   S2                  25                      70
+while, Fig. 3(b) shows that the proposed method effectively                                                                                                   S3                  30                      50
+contains the average throughput violation to 5.37 Mbps, mark-                                                                                                 S4                  45                      50
+ing a 73.0% and 64.3% reduction compared to the static                                                                                                        S5                  90                      50
+and single-timescale baselines, respectively. These findings                                                                    The experimental timeline is divided into five distinct tem-
+confirm that the proposed algorithm significantly enhances                                                                   poral regions (R1–R5) to simulate the progressive arrival of
+resource utilization while providing robust SLA assurance.                                                                   services. The throughput performance across these regions is
+   Fig. 4 illustrates the reliability performance by plotting                                                                illustrated in Fig. 5(a). In this figure, slices S1 to S4 are
+the cumulative distribution function (CDF) of the SLA vi-                                                                    sequentially activated across regions R1 through R4. As ob-
+olation ratio, defined as the ratio of the violation amount                                                                  served, the proposed algorithm demonstrates robust dynamic
+to the minimum throughput requirement. The figure shows                                                                      adaptation. It effectively orchestrates resource allocation to sat-
+that the proposed algorithm achieves superior reliability with                                                               isfy the minimum throughput requirements of all active slices
+a non-violation rate (NVR), defined as the probability of                                                                    while utilizing residual capacity to maximize system utility. As
+zero SLA violation, of 85.88%, significantly surpassing the                                                                  a result, the system operates stably with no significant SLA
+static (70.40%) and single-timescale (75.62%) baselines. Fur-                                                                violations during these intervals.
+thermore, the CDF of the proposed solution exhibits the                                                                         Region R5 represents the critical saturation scenario where
+steepest ascent, ensuring that the normalized violation severity                                                             all five slices are active. Specifically, slices S3, S4, and S5
+remains negligible in the vast majority of cases. Conversely,                                                                compete simultaneously for the limited computing resources
+                              250                                                                                                             70
+                                            R1                 R2             R3         R4          R5                                                    R1                 R2              R3         R4          R5
+                                                                                                                                              60
+  Maximum Throughput (Mbps)
+
+
+
+
+                                                                                                                Violation Throughput (Mbps)
+                              200
+                                                                                                                                              50
+
+                                                                                                                                                       S1 (Multi)        S5 (Multi)
+                              150                                                                                                             40
+                                                                                                                                                       S2 (Multi)        S3 (Static)
+                                                                                                                                                       S3 (Multi)        S4 (Static)
+                                                                                                                                              30       S4 (Multi)        S5 (Static)
+                              100
+
+                                                                                                                                              20
+
+                                        S1 (Multi)        S5 (Multi)
+                               50
+                                        S2 (Multi)        S3 (Static)                                                                         10
+                                        S3 (Multi)        S4 (Static)
+                                        S4 (Multi)        S5 (Static)                                                                          0
+                                0
+                                    0                50         100     150        200   250   300        350                                      0                50          100     150        200   250   300        350
+                                                                              Time (s)                                                                                                        Time (s)
+
+
+                                      (a)                                                                      (b)
+Fig. 5. Experimental results on the INA-Infra testbed. (a) Real-time throughput performance. (b) Violation throughput. Solid lines denote the proposed
+algorithm, while dashed lines represent the static baseline.
+at the Edge node. To highlight the performance divergence                                                         feasibility, demonstrating significant throughput and reliability
+under this bottleneck, we introduce a static baseline configured                                                  enhancements under dynamic conditions.
+with fixed resource allocation via static deployment. Note that
+                                                                                                                                                                                       R EFERENCES
+for clarity, this comparison focuses exclusively on the three
+Edge-hosted slices.                                                                                                [1] N. Alliance, “5G white paper,” Next generation mobile Netw., white
+                                                                                                                       paper, vol. 1, 2015.
+   As aggregate demand in Region R5 exceeds the Edge                                                               [2] N.-B.-L. Tran, T. V. Ngo, M. V. Ngo, B. Chen, J. Park, and T. Q.
+node’s physical capacity, SLA violations are unavoidable for                                                           Quek, “Ina-infra: An open and extensible infrastructure for intent-driven
+both algorithms. However, the violation throughput analysis                                                            network automation research,” in Proc. IEEE Global Commun. Conf.
+                                                                                                                       (Globecom) Workshops, Cape Town, South Africa, Dec. 2024, pp. 1–6.
+in Fig. 5(b) reveals a significant performance gap. The static                                                     [3] M. Dieye, S. Ahvar, J. Sahoo, E. Ahvar, R. Glitho, H. Elbiaze, and
+allocation strategy lacks the flexibility to handle resource                                                           N. Crespi, “CPVNF: Cost-efficient proactive VNF placement and chain-
+contention, leading to severe performance degradation, par-                                                            ing for value-added services in content delivery networks,” IEEE Trans.
+                                                                                                                       Netw. Service Manag., vol. 15, no. 2, pp. 774–786, June 2018.
+ticularly for slice S5, which exhibits a high SLA violation                                                        [4] Q. Zhang, F. Liu, and C. Zeng, “Adaptive interference-aware VNF
+rate. In contrast, the proposed algorithm actively rebalances                                                          placement for service-customized 5g network slices,” in Proc. IEEE
+the limited resources. Although it cannot create capacity out                                                          INFOCOM, Paris, France, May 2019, pp. 2449–2457.
+                                                                                                                   [5] J. Sun, F. Liu, H. Wang, and D. O. Wu, “Joint VNF placement, CPU
+of thin air, it effectively mitigates congestion, resulting in                                                         allocation, and flow routing for traffic changes,” IEEE Internet Things
+substantially lower SLA violation rates and preserving the                                                             J., vol. 10, no. 2, pp. 1208–1222, Jan. 2023.
+survivability of critical services under overload.                                                                 [6] A. Ksentini, P. A. Frangoudis, A. PC, and N. Nikaein, “Providing low
+                                                                                                                       latency guarantees for slicing-ready 5g systems via two-level MAC
+   To quantify the performance benefits in this saturation                                                             scheduling,” IEEE Netw., vol. 32, no. 6, pp. 116–123, Nov. 2018.
+scenario, we calculated the average metrics for the Edge-                                                          [7] S. Bakri, P. A. Frangoudis, and A. Ksentini, “Dynamic slicing of RAN
+hosted slices in Region R5. The static baseline yields an                                                              resources for heterogeneous coexisting 5g services,” in Proc. IEEE
+                                                                                                                       Global Commun. Conf. (Globecom), Waikoloa, HI, USA, Dec. 2019,
+average throughput of 103.23 Mbps but incurs a substantial                                                             pp. 1–6.
+average violation throughput of 66.03 Mbps. In contrast, the                                                       [8] P. Caballero, A. Banchs, G. De Veciana, and X. Costa-Pérez, “Network
+proposed algorithm improves the average throughput to 119.82                                                           slicing games: Enabling customization in multi-tenant mobile networks,”
+                                                                                                                       IEEE Trans. Netw., vol. 27, no. 2, pp. 662–675, Apr. 2019.
+Mbps, representing a 16.1% gain in resource efficiency. More                                                       [9] A. Lieto, I. Malanchini, and A. Capone, “Enabling dynamic resource
+critically, it suppresses the average violation throughput to                                                          sharing for slice customization in 5g networks,” in Proc. IEEE Global
+45.18 Mbps, corresponding to a 31.6% reduction compared                                                                Commun. Conf. (Globecom), Dec. 2018, pp. 1–6.
+                                                                                                                  [10] S.-P. Yeh, S. Bhattacharya, R. Sharma, and H. Moustafa, “Deep learning
+to the baseline. These results confirm that even under physical                                                        for intelligent and automated network slicing in 5g open RAN (ORAN)
+resource constraints, the proposed dynamic scheduling signif-                                                          deployment,” IEEE Open J. Commun. Soc., vol. 5, pp. 64–70, Dec. 2023.
+icantly enhances system capacity while mitigating the severity                                                    [11] R. Raftopoulos, S. D’Oro, T. Melodia, and G. Schembra, “DRL-based
+                                                                                                                       latency-aware network slicing in O-RAN with time-varying SLAs,” in
+of SLA breaches.                                                                                                       Proc. International Conference on Computing, Networking and Commu-
+                                                                                                                       nications (ICNC), Feb. 2024.
+                                                                  V. C ONCLUSION                                  [12] S. Mhatre, F. Adelantado, K. Ramantas, and C. Verikoukis, “AIaaS for
+                                                                                                                       ORAN-based 6g networks: Multi-time scale slice resource management
+   We proposed a standard-compliant framework for end-to-                                                              with DRL,” in Proc. Int. Conf. Commun.(ICC). IEEE, June 2024.
+end resource orchestration in O-RAN that bridges the gap be-                                                      [13] 3rd Generation Partnership Project (3GPP), “Management and orches-
+tween theoretical optimization and industrial implementation.                                                          tration; 5g network resource model (NRM); stage 2 and stage 3 (release
+                                                                                                                       18),” 3GPP, Tech. Spec. (TS) 28.541, May 2024, version 18.7.0.
+Grounded in 3GPP-specified attributes rather than abstract                                                        [14] Nephio, “Nephio wiki,” https://wiki.nephio.org/.
+models, our scheme ensures practical applicability. We devel-                                                     [15] Open Air Interface (OAI), https://openairinterface.org/.
+oped a hierarchical control strategy that decouples resource                                                      [16] 3rd Generation Partnership Project (3GPP), “NR; User Equipment (UE)
+                                                                                                                       radio access capabilities (Release 18),” 3GPP, Tech. Spec. (TS) 38.306,
+management into coordinated long-, medium-, and short-term                                                             Sept. 2025, version 18.7.0.
+loops, effectively minimizing OPEX while strictly guarantee-                                                      [17] R. J. Dakin, “A tree-search algorithm for mixed integer programming
+ing SLAs. Extensive simulations and prototype validation on                                                            problems,” The Computer Journal, vol. 8, no. 3, pp. 250–255, 1965.
+the INA-Infra testbed confirm the framework’s engineering
+

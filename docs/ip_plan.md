@@ -49,7 +49,7 @@ Single site L2 stretched across clusters via `vm-sw-*` switches. Do **not** assi
 | `.104` | edge InfluxDB | Multus macvlan on `edge-0` (port 8086) |
 | `.105` | edge Grafana | Multus macvlan on `edge-0` (port 3000) |
 | `.106` | central DynDNS | `/32` on `central-0` + hostPort 53/8088 |
-| `.107` | edge Open5GS 5GC | Multus macvlan on `cpu-edge-1` (NGAP `:38412`, GTP-U `:2152`) |
+| `.107` | edge Open5GS 5GC | Multus macvlan on `cpu-edge-1` (Web UI `:9999`, NGAP `:38412`, GTP-U `:2152`) |
 | `.110`–`.111` | `central-0`, `central-1` | K8s VMs |
 | `.120`–`.121` | `regional-0`, `regional-1` | K8s VMs |
 | `.130`–`.131` | `edge-0`, `edge-1` | K8s VMs |
@@ -161,9 +161,9 @@ Monolithic Open5GS from [FCCLab/5gc-open5gs](https://github.com/FCCLab/5gc-open5
 
 | Address | Cluster | Node | Ports | URL | DNS |
 |---------|---------|------|-------|-----|-----|
-| 10.1.137.107 | edge | `cpu-edge-1` | 38412/sctp, 2152/udp | AMF N2 / UPF N3 | `open5gs.edge.inainfra` |
+| 10.1.137.107 | edge | `cpu-edge-1` | 9999/tcp, 38412/sctp, 2152/udp | [http://10.1.137.107:9999](http://10.1.137.107:9999) | `open5gs.edge.inainfra` |
 
-Web UI (Next.js) binds the pod Flannel IP. From the operator host: `kubectl --context edge@edge -n open5gs port-forward svc/open5gs-5gc 9999:9999` then [http://127.0.0.1:9999](http://127.0.0.1:9999).
+Web UI, AMF N2, and UPF N3 share the Multus VIP. Default login is `admin` / `1423`.
 
 RAN must use PLMN 001/01 and TAC 81. Pin to `edge-2` with `./scripts/render_open5gs_gitops.sh edge-2` once that host is a Kubernetes worker.
 

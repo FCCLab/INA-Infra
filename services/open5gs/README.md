@@ -25,14 +25,12 @@ N2/N3/Web UI: Multus macvlan **`10.1.137.107`** on site L2. RAN should use PLMN 
 ```bash
 kubectl --context edge@edge -n open5gs get pods -o wide
 kubectl --context edge@edge -n open5gs logs -l app.kubernetes.io/name=open5gs-5gc --tail=50
-# Web UI (Next.js binds the pod Flannel IP; port-forward from the operator host)
-kubectl --context edge@edge -n open5gs port-forward svc/open5gs-5gc 9999:9999
-# then http://127.0.0.1:9999
+curl -sI http://10.1.137.107:9999
 ```
 
 | Endpoint | Address |
 |----------|---------|
-| Web UI | `kubectl --context edge@edge -n open5gs port-forward svc/open5gs-5gc 9999:9999` → http://127.0.0.1:9999 |
+| Web UI | http://10.1.137.107:9999 |
 | AMF NGAP (N2) | `10.1.137.107:38412` SCTP |
 | UPF GTP-U (N3) | `10.1.137.107:2152` UDP |
 | DNS | `open5gs.edge.inainfra` (N2/N3 VIP) |

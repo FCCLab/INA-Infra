@@ -3,7 +3,7 @@
 | Field | Value |
 | :--- | :--- |
 | DUT | Nephio 5G slicing testbed, one shared DU, five concurrent DL UEs |
-| Date | 2026-09-09 |
+| Date | 2026-09-11 |
 | Capture | 300 s, 1 Hz, after settle |
 | Evaluator | `compare_schemes.py` + `exp_start.SLICES` |
 | Plots | [`plots/s0_vs_s1_vs_s2_vs_s3/`](plots/s0_vs_s1_vs_s2_vs_s3/) |
@@ -54,9 +54,9 @@ workloads (§1.2) run under every scheme on one shared DU.
 | Scheme | NS | PL | PM | PS | What this run is | Capture |
 | :---: | :--- | :---: | :---: | :---: | :--- | :--- |
 | **S0** | `exp4-s0` | ✗ | ✗ | ✗ | Static baseline: all APP on edge, UPF on central (N6 hairpin), peak compute, equal PRB | `20260909-224603_300s` |
-| **S1** | `exp4-s1` | ✓ | ✗ | ✗ | S0 + **placement only**: CU-UP / UPF / APP co-located per slice; same peak requests and equal PRB | `20260909-231724_300s` |
-| **S2** | `exp4-s2` | ✓ | ✓ | ✗ | S1 + **right-size compute**: requests = S1 measured usage × 1.25; still equal PRB | `20260909-233004_300s` |
-| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | S2 + **radio slicing**: NSDL, DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on | `20260909-160900_300s` |
+| **S1** | `exp4-s1` | ✓ | ✗ | ✗ | S0 + **placement only**: CU-UP / UPF / APP co-located per slice; same peak requests and equal PRB | `20260910-124216_300s` |
+| **S2** | `exp4-s2` | ✓ | ✓ | ✗ | S1 + **right-size compute**: requests = S1 measured usage × 1.25; still equal PRB | `20260910-125308_300s` |
+| **S3** | `exp4-s3` | ✓ | ✓ | ✓ | S2 + **radio slicing**: NSDL, DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on | `20260911-232242_300s` |
 
 Each step adds one layer and holds the others fixed (ablation). S1 vs S0 isolates PL; S2 vs S1 isolates PM; S3 vs S2 isolates PS.
 
@@ -110,33 +110,47 @@ S0/S1: frozen peak. S2/S3: PM = S1 measured usage × 1.25 (run `20260909-110400_
 
 ### 2.1 SLA
 
-Source: `paper/exp4/exp_start.py` (`SLICES`, `RATE_FLOOR`).
+Source: paper eqs. **(6-9)–(6-10)** — absolute slack degree of SLA miss.
+Lab bars in `exp_start.SLICES` (\(D^s\equiv\bar D\), \(T^s\equiv\bar T\)).
 
 | Symbol | Slice | Value |
 | :--- | :---: | ---: |
-| \(\bar D\) | 1 FTP | 250 ms |
-| \(\bar D\) | 2 YOLO | 250 ms |
-| \(\bar D\) | 3 OTT | 100 ms |
-| \(\bar D\) | 4 CPU-OFF | 400 ms |
-| \(\bar D\) | 5 MQTT | 900 ms |
-| \(\bar T\) | 1 FTP | 20 Mbps |
-| \(\bar T\) | 2 YOLO | 9 Mbps |
-| \(\bar T\) | 3 OTT | 18 Mbps |
-| \(\bar T\) | 4 CPU-OFF | 8 Mbps |
-| \(\bar T\) | 5 MQTT | 2.2 Mbps |
-| \(\alpha\) | rate floor | 0.95 |
+| \(D^s\) (\(\bar D\)) | 1 FTP | 150 ms |
+| \(D^s\) | 2 YOLO | 150 ms |
+| \(D^s\) | 3 OTT | 150 ms |
+| \(D^s\) | 4 CPU-OFF | 350 ms |
+| \(D^s\) | 5 MQTT | 1000 ms |
+| \(T^s\) (\(\bar T\)) | 1 FTP | 10 Mbps |
+| \(T^s\) | 2 YOLO | 25 Mbps |
+| \(T^s\) | 3 OTT | 25 Mbps |
+| \(T^s\) | 4 CPU-OFF | 10 Mbps |
+| \(T^s\) | 5 MQTT | 3 Mbps |
+| — | rate pass | \(T_s > T^s\) |
+| — | \(w_D / w_T\) (tunable) | 0.1 / 10 |
+| — | slice \(w\) | YOLO 1, OTT 1, MQTT 1 |
 | — | strict index | slices **2, 3, 5** |
 
-Violation (binary): \(d_{\mathrm{e2e}} > \bar D\) **or** \(r < \alpha\,\bar T\).
-
-Violation score:
+Paper absolute slacks (optimizer; used as the Exp4 score):
 
 \[
-s = \max\bigl(0,\; d/\bar D - 1\bigr) + \max\bigl(0,\; 1 - r/(\alpha\,\bar T)\bigr)
+\xi_s^{D}=\max(0,\,D_s-D^s)\quad[\mathrm{ms}],\qquad
+\xi_s^{C}=\max(0,\,T^s-T_s)\quad[\mathrm{Mbps}]
 \]
 
-Strict binary % = fraction of strict-slice samples with \(s>0\).  
-Strict score = mean \(s\) over strict-slice samples.
+Per-sample score (paper \(W^P\) split into tunable \(w_D,w_T\); units differ):
+
+\[
+s = w_D\,\xi_s^{D} + w_T\,\xi_s^{C}
+\]
+
+\[
+s = 0.1\,\max(0,\,D_s-D^s) + 10\,\max(0,\,T^s-T_s)
+\]
+
+Headline / journal Fig 4A: strict mean of \(s\) over slices \(\{2,3,5\}\),
+as residual \(R_{\mathrm{sch}}=100\times s_{\mathrm{sch}}/s_{S0}\).
+Binary miss (\(D_s>D^s\) or \(T_s\le T^s\)) is in §3.1 only.
+S1 ≈ S2 on SLA (PM is OPEX-only); S0→S1 (PL) and S2→S3 (PS) move residual.
 
 ### 2.2 OPEX
 
@@ -178,34 +192,40 @@ Billing: S0/S1 = peak requests. S2/S3 = measured CPU/RAM (capped at S1 peak); GP
 
 | | S0 | S1 | S2 | S3 |
 | :--- | ---: | ---: | ---: | ---: |
-| Binary violation (%) | 97.3 | 52.2 | 48.2 | 44.8 |
-| Mean score | 1.11 | 0.41 | 0.37 | 0.42 |
-| OPEX (\$/h) | 6.00 | 4.70 | 4.09 | 4.09 |
+| Binary violation (%) | 92.1 | 77.8 | 74.9 | 69.2 |
+| Mean score | 126.37 | 45.04 | 39.31 | 25.33 |
+| Score residual (% of S0) | 100 | 35.6 | 31.1 | 20.0 |
+| OPEX (\$/h) | 44.88 | 30.36 | 20.71 | 20.75 |
+| OPEX residual (% of S0) | 100 | 67.6 | 46.1 | 46.2 |
+
+Fig 4A / 6-panel last panel use **score residual** (S0 = 100%): S0 > S1 ≈ S2 > S3
+(S1→S2 is OPEX-only on SLA). S3 capture: `20260911-232242_300s` (latest).
+OPEX S2≈S3 (±0.1 pp).
 
 ### 3.2 Per-slice means
 
 | Slice | Metric | S0 | S1 | S2 | S3 |
 | :---: | :--- | ---: | ---: | ---: | ---: |
-| 1 FTP | delay (ms) | 169 | 153 | 164 | 227 |
-| | DL (Mbps) | 11.2 | 9.31 | 9.14 | 6.58 |
-| | viol. % | 98.3 | 100 | 100 | 100 |
-| | score | 0.41 | 0.51 | 0.52 | 0.72 |
-| 2 YOLO* | delay (ms) | 211 | 156 | 166 | 187 |
-| | DL (Mbps) | 4.72 | 16.8 | 16.5 | 11.7 |
-| | viol. % | 100 | 1.3 | 5.7 | 24.8 |
-| | score | 0.46 | 0.00 | 0.01 | 0.04 |
-| 3 OTT* | delay (ms) | 205 | 176 | 187 | 204 |
-| | DL (Mbps) | 34.2 | 41.5 | 37.4 | 25.3 |
-| | viol. % | 100 | 86.1 | 96.1 | 79.2 |
-| | score | 1.06 | 0.80 | 0.90 | 1.11 |
-| 4 CPU-OFF | delay (ms) | 376 | 356 | 363 | 463 |
-| | DL (Mbps) | 11.1 | 8.42 | 8.79 | 6.51 |
-| | viol. % | 31.1 | 40.6 | 43.4 | 95.4 |
-| | score | 0.03 | 0.05 | 0.05 | 0.34 |
-| 5 MQTT* | delay (ms) | 2359 | 1132 | 891 | 824 |
-| | DL (Mbps) | 1.99 | 2.57 | 2.71 | 2.90 |
-| | viol. % | 91.9 | 68.0 | 48.1 | 33.1 |
-| | score | 1.82 | 0.41 | 0.24 | 0.14 |
+| 1 FTP | delay (ms) | 169 | 149 | 147 | 132 |
+| | DL (Mbps) | 11.2 | 10.2 | 9.83 | 9.78 |
+| | viol. % | 76.2 | 75.7 | 79.0 | 73.0 |
+| | score | 9.24 | 9.27 | 11.0 | 10.0 |
+| 2 YOLO* | delay (ms) | 211 | 159 | 159 | 162 |
+| | DL (Mbps) | 4.72 | 16.8 | 16.7 | 26.4 |
+| | viol. % | 100 | 99.6 | 99.2 | 67.6 |
+| | score | 209 | 84.2 | 84.4 | 9.95 |
+| 3 OTT* | delay (ms) | 205 | 121 | 128 | 104 |
+| | DL (Mbps) | 34.2 | 33.1 | 32.4 | 26.2 |
+| | viol. % | 82.8 | 61.4 | 61.6 | 66.8 |
+| | score | 24.9 | 33.3 | 21.8 | 52.8 |
+| 4 CPU-OFF | delay (ms) | 376 | 369 | 367 | 344 |
+| | DL (Mbps) | 11.1 | 9.20 | 8.93 | 9.90 |
+| | viol. % | 86.0 | 87.8 | 88.9 | 75.8 |
+| | score | 10.2 | 15.7 | 17.2 | 9.78 |
+| 5 MQTT* | delay (ms) | 2359 | 823 | 725 | 797 |
+| | DL (Mbps) | 1.99 | 2.56 | 2.76 | 2.55 |
+| | viol. % | 94.0 | 71.3 | 61.9 | 73.0 |
+| | score | 150 | 16.0 | 8.66 | 13.1 |
 
 \* strict SLA.
 
@@ -221,14 +241,14 @@ Billing: S0/S1 = peak requests. S2/S3 = measured CPU/RAM (capped at S1 peak); GP
 
 ### 3.4 Allocated OPEX (\$/h)
 
-| Slice | \(\rho\) S0→S1 | S0 | S1 | S2 / S3 |
-| :---: | :--- | ---: | ---: | ---: |
-| 1 FTP | 4→1 | 0.58 | 0.15 | 0.03 |
-| 2 YOLO | 4→4 | 4.00 | 4.00 | 3.94 |
-| 3 OTT | 4→2 | 0.67 | 0.33 | 0.02 |
-| 4 CPU-OFF | 4→1 | 0.58 | 0.15 | 0.04 |
-| 5 MQTT | 4→1 | 0.17 | 0.07 | 0.07 |
-| **Total** | | **6.00** | **4.70** | **4.09** |
+| Slice | \(\rho\) S0→S1 | S0 | S1 | S2 | S3 |
+| :---: | :--- | ---: | ---: | ---: | ---: |
+| 1 FTP | 4→1 | 6.72 | 1.68 | 0.23 | 0.22 |
+| 2 YOLO | 4→4 | 22.64 | 22.64 | 19.31 | 19.32 |
+| 3 OTT | 4→2 | 7.04 | 3.52 | 0.12 | 0.11 |
+| 4 CPU-OFF | 4→1 | 6.72 | 1.68 | 0.39 | 0.41 |
+| 5 MQTT | 4→1 | 1.76 | 0.84 | 0.67 | 0.68 |
+| **Total** | | **44.88** | **30.36** | **20.71** | **20.75** |
 
 CSV: [`plots/s0_vs_s1_vs_s2_vs_s3/means.csv`](plots/s0_vs_s1_vs_s2_vs_s3/means.csv).
 
@@ -254,41 +274,41 @@ Each figure is one 300 s capture (or the four-scheme overlay). Bars/lines are th
 
 *Per-slice binary violation rate (% of samples with \(d>\bar D\) or \(r<0.95\,\bar T\)). Slices 2, 3, 5 are the strict index.*
 
-**S1** — +PL only, run `20260909-231724_300s`. Same workloads, peak requests, and equal PRB as S0. Placement: PL sites (§1.4).
+**S1** — +PL only, run `20260910-124216_300s`. Same workloads, peak requests, and equal PRB as S0. Placement: PL sites (§1.4).
 
-![S1 means vs SLA](s1/data/20260909-231724_300s/plots/means_vs_sla.png)
+![S1 means vs SLA](s1/data/20260910-124216_300s/plots/means_vs_sla.png)
 
 *Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S1).*
 
-![S1 timeseries](s1/data/20260909-231724_300s/plots/timeseries_sla.png)
+![S1 timeseries](s1/data/20260910-124216_300s/plots/timeseries_sla.png)
 
 *1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S1).*
 
-![S1 violation rates](s1/data/20260909-231724_300s/plots/violation_rates.png)
+![S1 violation rates](s1/data/20260910-124216_300s/plots/violation_rates.png)
 
 *Per-slice binary violation rate (S1).*
 
-**S2** — +PL +PM, run `20260909-233004_300s`. Same placement as S1. Compute requests = S1 usage × 1.25. Equal PRB.
+**S2** — +PL +PM, run `20260910-125308_300s`. Same placement as S1. Compute requests = S1 usage × 1.25. Equal PRB.
 
-![S2 means vs SLA](s2/data/20260909-233004_300s/plots/means_vs_sla.png)
+![S2 means vs SLA](s2/data/20260910-125308_300s/plots/means_vs_sla.png)
 
 *Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S2).*
 
-![S2 timeseries](s2/data/20260909-233004_300s/plots/timeseries_sla.png)
+![S2 timeseries](s2/data/20260910-125308_300s/plots/timeseries_sla.png)
 
 *1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S2).*
 
-**S3** — +PL +PM +PS, run `20260909-160900_300s`. Same placement and PM requests as S2. DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on.
+**S3** — +PL +PM +PS, run `20260911-232242_300s`. Same placement and PM requests as S2. DL min-PRB 20/20/20/20/10 %, dedicated 0, `nws-xapp` on.
 
-![S3 means vs SLA](s3/data/20260909-160900_300s/plots/means_vs_sla.png)
+![S3 means vs SLA](s3/data/20260911-232242_300s/plots/means_vs_sla.png)
 
 *Mean E2E delay and mean DL goodput per slice vs \(\bar D\) and \(\bar T\) (S3).*
 
-![S3 timeseries](s3/data/20260909-160900_300s/plots/timeseries_sla.png)
+![S3 timeseries](s3/data/20260911-232242_300s/plots/timeseries_sla.png)
 
 *1 Hz delay and DL goodput vs SLA bars, slices 1–5 (S3).*
 
-![S3 violation rates](s3/data/20260909-160900_300s/plots/violation_rates.png)
+![S3 violation rates](s3/data/20260911-232242_300s/plots/violation_rates.png)
 
 *Per-slice binary violation rate (S3).*
 
@@ -296,13 +316,37 @@ Each figure is one 300 s capture (or the four-scheme overlay). Bars/lines are th
 
 Same five slices and SLA coefficients. Overlay of the four captures in §1.3.
 
+![journal summary](plots/s0_vs_s1_vs_s2_vs_s3/fig4_journal_summary.png)
+
+*Four-panel journal board (S0 = 100%). A: SLA score residual waterfall (strict slices 2/3/5). B: OPEX waterfall. C: useful throughput and Mbps per \$ vs S0. D: SLA–OPEX Pareto walk S0→S3.*
+
+![SLA waterfall](plots/s0_vs_s1_vs_s2_vs_s3/fig4a_sla_waterfall.png)
+
+*McKinsey waterfall of the paper SLA index: bars are S0 residual, then PL / PM / PS layer deltas, then S3 residual. Y-axis is strict mean violation score as % of S0.*
+
+![OPEX waterfall](plots/s0_vs_s1_vs_s2_vs_s3/fig4b_opex_waterfall.png)
+
+*Same waterfall layout for total allocated OPEX (\$/h) as % of S0.*
+
+![throughput efficiency](plots/s0_vs_s1_vs_s2_vs_s3/fig4c_throughput_efficiency.png)
+
+*Grouped bars: sum of per-slice mean DL goodput, and goodput / OPEX, each normalized to S0 = 100%.*
+
+![layer contribution](plots/s0_vs_s1_vs_s2_vs_s3/fig4d_layer_contribution.png)
+
+*Layer table: SLA and OPEX change in percentage points of S0 for PL (S0→S1), PM (S1→S2), PS (S2→S3), and the full stack.*
+
+![Pareto](plots/s0_vs_s1_vs_s2_vs_s3/fig4e_sla_opex_pareto.png)
+
+*Four points S0, S1, S2, S3 on the plane OPEX (% of S0) vs SLA score residual (% of S0).*
+
 ![evaluation](plots/s0_vs_s1_vs_s2_vs_s3/evaluation.png)
 
-*One-page board: per-slice mean delay, DL goodput, binary violation rate, violation score, CPU, RAM, GPU, VRAM, and OPEX; last panel is total OPEX per scheme. Marks on delay/throughput panels are \(\bar D\) / \(\bar T\).*
+*One-page board: per-slice mean delay, DL goodput, binary violation rate, SLA residual (% of S0), CPU, RAM, GPU, VRAM, and OPEX; last panel is total OPEX per scheme. Marks on delay/throughput panels are \(\bar D\) / \(\bar T\).*
 
 ![delay throughput violation OPEX](plots/s0_vs_s1_vs_s2_vs_s3/means_delay_throughput_violation_opex.png)
 
-*Grouped bars per slice: mean E2E delay, mean DL goodput, per-slice OPEX, binary violation rate, violation score; last panel is the strict-index mean score (slices 2/3/5). One bar group per scheme.*
+*Grouped bars per slice: mean E2E delay, mean DL goodput, per-slice OPEX, binary violation rate, violation score; last panel is score residual as % of S0 (strict slices 2/3/5). One bar group per scheme.*
 
 ![timeseries](plots/s0_vs_s1_vs_s2_vs_s3/timeseries_throughput_latency.png)
 
@@ -325,14 +369,11 @@ Same five slices and SLA coefficients. Overlay of the four captures in §1.3.
 ## 5. Reproduce
 
 ```bash
-python3 paper/exp4/exp_plot.py --scheme s0 --run-id 20260909-224603_300s
-python3 paper/exp4/exp_plot.py --scheme s1 --run-id 20260909-231724_300s
-python3 paper/exp4/exp_plot.py --scheme s2 --run-id 20260909-233004_300s
-python3 paper/exp4/exp_plot.py --scheme s3 --run-id 20260909-160900_300s
+# Latest complete run per scheme (summary.json mtime); omit --*-run-id to auto-pick.
+python3 paper/exp4/exp_plot.py --scheme s0
+python3 paper/exp4/exp_plot.py --scheme s1
+python3 paper/exp4/exp_plot.py --scheme s2
+python3 paper/exp4/exp_plot.py --scheme s3
 
-python3 paper/exp4/compare_schemes.py --schemes s0 s1 s2 s3 \
-    --s0-run-id 20260909-224603_300s \
-    --s1-run-id 20260909-231724_300s \
-    --s2-run-id 20260909-233004_300s \
-    --s3-run-id 20260909-160900_300s
+python3 paper/exp4/compare_schemes.py --schemes s0 s1 s2 s3
 ```

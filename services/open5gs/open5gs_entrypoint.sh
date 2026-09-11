@@ -15,8 +15,9 @@ do
     ip link set lo$IP up
 done
 
-# run webui
-cd webui && npm run dev &
+# Bind Web UI on all addresses (Kubernetes HOSTNAME is the pod name / Flannel IP).
+# That makes http://${OPEN5GS_IP}:9999 reachable on the Multus site iface.
+(cd webui && env HOSTNAME=0.0.0.0 PORT="${WEBUI_PORT:-9999}" npm run dev) &
 
 # run mongodb
 mkdir -p /data/db && mongod --logpath /tmp/mongodb.log &
@@ -72,6 +73,14 @@ fi
 
 sysctl -w net.ipv4.ip_forward=1
 iptables -t nat -A POSTROUTING -s 10.45.0.0/16 ! -o ogstun -j MASQUERADE
+
+# ogstun exists only after setup_tun.py; init PBR (tables 100/101) cannot add it.
+# Without 10.45.0.0/24 in those tables, ICMP/TCP ACKs sourced from the site VIP
+# or arriving iif site/eth0 go via 10.1.137.1 instead of GTP-U.
+ip route replace "${UE_IP_RANGE}" dev ogstun table 100
+ip route replace "${UE_IP_RANGE}" dev ogstun table 101
+ip rule del iif ogstun table 100 2>/dev/null || true
+ip rule add iif ogstun table 100 priority 99
 
 # Start iperf3 servers for network performance testing
 echo "Starting iperf3 server on port 5201..."

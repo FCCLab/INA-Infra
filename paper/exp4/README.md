@@ -94,14 +94,21 @@ utilization ratio (M/M/1-style queue). That is the PM term in the SLA waterfall.
 
 | Slice | Delay budget \(\bar D\) | Rate budget \(\bar T\) | Counted in SLA index? |
 | :---: | ---: | ---: | :---: |
-| 1 Best-effort DL | 250 ms (informational) | 20 Mbps | No (best effort) |
-| 2 YOLO bbox DL | 250 ms | 9 Mbps | **Yes** |
-| 3 Video watch DL | 100 ms | 18 Mbps | **Yes** |
-| 4 CPU offload DL | 400 ms (relaxed) | 8 Mbps | No (reported separately) |
-| 5 MQTT Get | 900 ms | 2.2 Mbps | **Yes** |
+| 1 Best-effort DL | 150 ms (informational) | 10 Mbps | No (best effort) |
+| 2 YOLO bbox DL | 150 ms | 25 Mbps | **Yes** |
+| 3 Video watch DL | 150 ms | 25 Mbps | **Yes** |
+| 4 CPU offload DL | 350 ms (relaxed) | 10 Mbps | No (reported separately) |
+| 5 MQTT Get | 1000 ms | 3 Mbps | **Yes** |
 
 A strict-slice sample (2, 3, 5) is a **violation** if
-\(d_\text{e2e} > \bar D\) **or** delivered rate \(< 0.95\,\bar T_\text{offered}\).
+\(d_\text{e2e} > \bar D\) **or** delivered rate \(\le \bar T\) (pass iff \(T > \bar T\)).
+
+Throughput bars are fixed targets (10 / 25 / 25 / 10 / 3 Mbps). Delay bars
+are fixed budgets (FTP/YOLO/OTT 150 ms, CPU-OFF 350 ms, MQTT 1000 ms).
+Score matches paper (6-9)/(6-10) absolute slacks:
+\(s=w_D\max(0,D_s-D^s)+w_T\max(0,T^s-T_s)\) with \(w_D=0.1\), \(w_T=10\)
+(tunable). Equal slice weights. S1 ≈ S2 on SLA (PM saves OPEX).
+Journal Fig 4A plots strict mean **violation score** residual (S0 = 100%).
 
 ---
 

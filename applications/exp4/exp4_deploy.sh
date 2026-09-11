@@ -368,9 +368,9 @@ extra_client_env() {
         - name: BIND_DEV
           value: "net1"
         - name: IPERF_PARALLEL
-          value: "5"
+          value: "2"
         - name: IPERF_BANDWIDTH
-          value: "10M"
+          value: "1M"
         - name: IPERF_TIME
           value: "0"
         - name: IPERF_AUTOSTART
@@ -458,9 +458,9 @@ Y
         - name: BIND_DEV
           value: "net1"
         - name: IPERF_PARALLEL
-          value: "5"
+          value: "2"
         - name: IPERF_BANDWIDTH
-          value: "10M"
+          value: "1M"
         - name: IPERF_TIME
           value: "0"
         - name: IPERF_AUTOSTART

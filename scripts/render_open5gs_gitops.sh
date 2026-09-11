@@ -17,6 +17,7 @@ OPEN5GS_IMAGE="${OPEN5GS_IMAGE:-${REGISTRY}/open5gs/5gc:${TAG}}"
 OPEN5GS_NAD_NAME="${OPEN5GS_NAD_NAME:-open5gs-site}"
 OPEN5GS_IFACE="${OPEN5GS_IFACE:-site}"
 SUBSCRIBER_DB="${SUBSCRIBER_DB:-$REPO_ROOT/services/open5gs/subscriber_db.csv}"
+ENTRYPOINT_SRC="${ENTRYPOINT_SRC:-$REPO_ROOT/services/open5gs/open5gs_entrypoint.sh}"
 WEBUI_PORT="${WEBUI_PORT:-9999}"
 NGAP_PORT="${NGAP_PORT:-38412}"
 GTPU_PORT="${GTPU_PORT:-2152}"
@@ -41,7 +42,7 @@ Build/push first:
 RAN (srsRAN / gNB) must use PLMN 001/01 and TAC 81:
   AMF NGAP  $(open5gs_vip edge):${NGAP_PORT}/sctp
   UPF GTP-U $(open5gs_vip edge):${GTPU_PORT}/udp
-  Web UI    kubectl --context edge@edge -n open5gs port-forward svc/open5gs-5gc ${WEBUI_PORT}:${WEBUI_PORT}
+  Web UI    http://$(open5gs_vip edge):${WEBUI_PORT}/
 EOF
 }
 
@@ -136,8 +137,9 @@ EOF
 write_configmaps() {
   local dir="$1"
   local vip="$2"
-  local csv_body
+  local csv_body ep_body
   csv_body="$(sed 's/^/    /' "$SUBSCRIBER_DB")"
+  ep_body="$(sed 's/^/    /' "$ENTRYPOINT_SRC")"
 
   cat >"${dir}/configmap-${OPEN5GS_NAME}-env.yaml" <<EOF
 apiVersion: v1
@@ -150,7 +152,7 @@ metadata:
 data:
   MONGODB_IP: "127.0.0.1"
   OPEN5GS_IP: "${vip}"
-  NGAP_BIND_ADDR: "0.0.0.0"
+  NGAP_BIND_ADDR: "${vip}"
   AMF_LOG_LEVEL: "info"
   UE_IP_BASE: "${UE_IP_BASE}"
   N6_IP: "${vip}"
@@ -173,6 +175,19 @@ metadata:
 data:
   subscriber_db.csv: |
 ${csv_body}
+EOF
+
+  cat >"${dir}/configmap-${OPEN5GS_NAME}-entrypoint.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${OPEN5GS_NAME}-entrypoint
+  namespace: ${OPEN5GS_NS}
+  labels:
+    app.kubernetes.io/name: ${OPEN5GS_NAME}
+data:
+  open5gs_entrypoint.sh: |
+${ep_body}
 EOF
 }
 
@@ -231,19 +246,53 @@ spec:
         - sh
         - -c
         - |
+          SITE_IFACE=${OPEN5GS_IFACE}
+          SITE_IP=${vip}
+          SITE_GW=10.1.137.1
+          FL_IFACE=eth0
           for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 20 25 30; do
-            if ip link show ${OPEN5GS_IFACE} >/dev/null 2>&1; then
-              break
-            fi
+            ip link show ${OPEN5GS_IFACE} >/dev/null 2>&1 && break
             sleep 1
           done
-          ip route add default via 10.1.137.1 dev ${OPEN5GS_IFACE} table 100 || true
-          ip rule add from ${vip} lookup 100 || true
+          FL_IP=\$(ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1 | head -n1)
+          FL_GW=\$(ip -4 route show default dev eth0 | awk '{print \$3}' | head -n1)
+          [ -n "\$FL_GW" ] || FL_GW=\$(ip -4 route show default | awk '{print \$3}' | head -n1)
+          FL_NET=\$(ip -4 route show dev eth0 proto kernel | awk '{print \$1}' | head -n1)
+          echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter || true
+          echo 2 > /proc/sys/net/ipv4/conf/default/rp_filter || true
+          echo 2 > /proc/sys/net/ipv4/conf/${OPEN5GS_IFACE}/rp_filter || true
+          echo 2 > /proc/sys/net/ipv4/conf/eth0/rp_filter || true
+          ip route flush table 100 2>/dev/null || true
+          ip route add 10.1.137.0/24 dev ${OPEN5GS_IFACE} src ${vip} table 100 || true
+          ip route add 10.1.132.0/24 via 10.1.137.1 dev ${OPEN5GS_IFACE} src ${vip} table 100 || true
+          ip route add 10.1.101.0/24 via 10.1.137.1 dev ${OPEN5GS_IFACE} src ${vip} table 100 || true
+          ip route add default via 10.1.137.1 dev ${OPEN5GS_IFACE} src ${vip} table 100 || true
+          # 10.45.0.0/24 via ogstun is added in open5gs_entrypoint.sh after TUN exists.
+          ip route flush table 101 2>/dev/null || true
+          [ -n "\$FL_NET" ] && ip route add "\$FL_NET" dev eth0 table 101 || true
+          [ -n "\$FL_GW" ] && ip route add 10.244.0.0/16 via "\$FL_GW" dev eth0 table 101 || true
+          [ -n "\$FL_GW" ] && ip route add default via "\$FL_GW" dev eth0 table 101 || true
+          ip rule del from ${vip} table 100 2>/dev/null || true
+          ip rule add from ${vip} table 100 priority 100 || true
+          ip rule del iif ${OPEN5GS_IFACE} table 100 2>/dev/null || true
+          ip rule add iif ${OPEN5GS_IFACE} table 100 priority 101 || true
+          if [ -n "\$FL_IP" ]; then
+            ip rule del from "\$FL_IP" table 101 2>/dev/null || true
+            ip rule add from "\$FL_IP" table 101 priority 102 || true
+          fi
+          ip rule del iif eth0 table 101 2>/dev/null || true
+          ip rule add iif eth0 table 101 priority 103 || true
+          echo "== pbr =="
           ip -4 addr show ${OPEN5GS_IFACE} || true
+          ip rule || true
+          echo "-- table 100 --"; ip route show table 100 || true
+          echo "-- table 101 --"; ip route show table 101 || true
+          echo "flannel_ip=\$FL_IP flannel_gw=\$FL_GW"
       containers:
       - name: 5gc
         image: ${OPEN5GS_IMAGE}
         imagePullPolicy: IfNotPresent
+        command: ["bash", "/open5gs/open5gs_entrypoint.sh"]
         args: ["5gc", "-c", "open5gs-5gc.yml"]
         envFrom:
         - configMapRef:
@@ -290,12 +339,19 @@ spec:
         - name: subscribers
           mountPath: /open5gs/subscriber_db.csv
           subPath: subscriber_db.csv
+        - name: entrypoint
+          mountPath: /open5gs/open5gs_entrypoint.sh
+          subPath: open5gs_entrypoint.sh
         - name: mongodb
           mountPath: /data/db
       volumes:
       - name: subscribers
         configMap:
           name: ${OPEN5GS_NAME}-subscribers
+      - name: entrypoint
+        configMap:
+          name: ${OPEN5GS_NAME}-entrypoint
+          defaultMode: 0755
       - name: mongodb
         emptyDir: {}
 EOF
@@ -341,6 +397,10 @@ write_cluster() {
     echo "missing ${SUBSCRIBER_DB}" >&2
     exit 1
   fi
+  if [[ ! -f "$ENTRYPOINT_SRC" ]]; then
+    echo "missing ${ENTRYPOINT_SRC}" >&2
+    exit 1
+  fi
 
   mkdir -p "$dest"
   purge_ns "$dest"
@@ -353,7 +413,7 @@ write_cluster() {
 
   echo "==> [${cluster}] ${dest}"
   echo "    node=${node}  master=${master}  vip=${vip}/24 (${OPEN5GS_IFACE})"
-  echo "    Web UI:  kubectl --context edge@edge -n ${OPEN5GS_NS} port-forward svc/${OPEN5GS_NAME} ${WEBUI_PORT}:${WEBUI_PORT}"
+  echo "    Web UI:  http://${vip}:${WEBUI_PORT}/"
   echo "    AMF N2:  ${vip}:${NGAP_PORT}/sctp"
   echo "    UPF N3:  ${vip}:${GTPU_PORT}/udp"
   if [[ "$node" == "edge-2" ]]; then

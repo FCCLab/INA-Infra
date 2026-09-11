@@ -5,9 +5,11 @@ Server CPU/RAM/GPU/VRAM: S0/S1 from scheme.py peak requests; S2/S3 from
 Influx. OPEX is $ / hour: central list prices × site ρ (edge=4,
 regional=2, central=1). See ``paper/exp4/cost_model.py``.
 
-Violation score = delay overshoot max(0, d/D̄−1) plus rate shortfall
-max(0, 1 − rate/(0.95·T̄)). Zero means the sample meets both budgets.
-D̄/T̄ are the contended five-UE bars in exp_start.SLICES (not SX isolated means).
+Headline SLA axis: strict-slice (2, 3, 5) mean violation score residual
+(% of S0). Score matches paper (6-9)/(6-10) absolute slacks:
+s = w_D·max(0, D_s−D^s) + w_T·max(0, T^s−T_s), with tunable
+SCORE_W_* / SLICES bars in ``exp_start`` (not SX isolated means).
+Binary miss rate (D_s > D^s or T_s ≤ T^s) is reported but not the journal waterfall.
 
 Usage:
   python3 paper/exp4/compare_schemes.py
@@ -41,7 +43,7 @@ from cost_model import (  # noqa: E402
     uses_allocated,
 )
 from exp_plot import load_samples_csv, load_summary_json, resolve_run_dir  # noqa: E402
-from exp_start import SLICES, parse_rfc3339, query_series, violation_score, write_points_csv  # noqa: E402
+from exp_start import SLICES, parse_rfc3339, query_series, rate_meets_sla, sla_weight, violation_score, write_points_csv  # noqa: E402
 
 SCHEME_COLORS = {
     "s0": "#7A7A7A",
@@ -98,11 +100,12 @@ def mean_violation_scores(samples: List[dict]) -> Tuple[Dict[int, float], float]
     """Per-slice and strict-index mean violation scores from samples.csv.
 
     Uses current ``SLICES`` D̄/T̄ (contended five-UE bars), not bars baked into the CSV.
+    Strict index is a ``sla_weight``-weighted mean over strict-slice samples.
     """
     sums: Dict[int, float] = {}
     counts: Dict[int, int] = {}
     strict_sum = 0.0
-    strict_n = 0
+    strict_w = 0.0
     for r in samples:
         try:
             sid = int(r["slice"])
@@ -118,20 +121,19 @@ def mean_violation_scores(samples: List[dict]) -> Tuple[Dict[int, float], float]
         sums[sid] = sums.get(sid, 0.0) + score
         counts[sid] = counts.get(sid, 0) + 1
         if spec.get("strict_sla"):
-            strict_sum += score
-            strict_n += 1
+            w = sla_weight(sid)
+            strict_sum += w * score
+            strict_w += w
     per_slice = {sid: sums[sid] / counts[sid] for sid in sums if counts[sid]}
-    strict = (strict_sum / strict_n) if strict_n else float("nan")
+    strict = (strict_sum / strict_w) if strict_w else float("nan")
     return per_slice, strict
 
 
 def violation_pct_from_samples(samples: List[dict], sid: int) -> float:
-    """Percent of samples that miss current D̄ or 0.95·T̄."""
-    from exp_start import RATE_FLOOR
-
+    """Percent of samples that miss current D̄ or T > T̄."""
     spec = SLICES[sid]
     d_bar = float(spec["d_bar_ms"])
-    floor = RATE_FLOOR * float(spec["t_bar_mbps"])
+    t_bar = float(spec["t_bar_mbps"])
     n = 0
     v = 0
     for r in samples:
@@ -143,7 +145,7 @@ def violation_pct_from_samples(samples: List[dict], sid: int) -> float:
         except (KeyError, TypeError, ValueError):
             continue
         n += 1
-        if delay > d_bar or rate < floor:
+        if delay > d_bar or not rate_meets_sla(rate, t_bar):
             v += 1
     if not n:
         return float("nan")
@@ -151,8 +153,6 @@ def violation_pct_from_samples(samples: List[dict], sid: int) -> float:
 
 
 def _strict_sla_pct_from_samples(samples: List[dict]) -> float:
-    from exp_start import RATE_FLOOR
-
     n = 0
     v = 0
     for r in samples:
@@ -166,7 +166,7 @@ def _strict_sla_pct_from_samples(samples: List[dict]) -> float:
         except (KeyError, TypeError, ValueError):
             continue
         n += 1
-        if delay > float(spec["d_bar_ms"]) or rate < RATE_FLOOR * float(spec["t_bar_mbps"]):
+        if delay > float(spec["d_bar_ms"]) or not rate_meets_sla(rate, float(spec["t_bar_mbps"])):
             v += 1
     if not n:
         return float("nan")
@@ -398,7 +398,44 @@ def _grouped_bars(ax, loaded: List[SchemeRun], values_fn, ylabel: str, title: st
     ax.grid(True, axis="y", zorder=0)
 
 
+def _draw_journal_2x2(fig, m: dict) -> None:
+    """Paper Fig 4 journal board: SLA waterfall, OPEX waterfall, thr/eff, Pareto."""
+    sla, opex, thr, eff = m["sla"], m["opex"], m["thr"], m["eff"]
+    labels_short = ["S0 Static", "S1 +PL", "S2 +PL +PM", "S3 +PL +PM +PS"]
+    xs = list(range(4))
+    w = 0.36
+    gs = fig.add_gridspec(2, 2, hspace=0.38, wspace=0.28)
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+    ax_c = fig.add_subplot(gs[1, 0])
+    ax_d = fig.add_subplot(gs[1, 1])
+    _waterfall_bars(ax_a, sla, "SLA violation score residual (% of S0)", "A. SLA violation reduction")
+    _waterfall_bars(ax_b, opex, "OPEX residual (% of S0)", "B. OPEX reduction")
+    ax_c.bar([i - w / 2 for i in xs], thr, w, label="Throughput", color="#4C78A8", edgecolor="#333", lw=0.5)
+    ax_c.bar([i + w / 2 for i in xs], eff, w, label="Efficiency", color="#54A24B", edgecolor="#333", lw=0.5)
+    ax_c.axhline(100.0, color="#888", ls=":", lw=0.8)
+    ax_c.set_xticks(xs, labels_short, fontsize=8)
+    ax_c.set_ylabel("Normalized to S0 (%)", fontweight="bold")
+    ax_c.set_title("C. Throughput and resource efficiency", fontweight="bold")
+    ax_c.legend(fontsize=7.5)
+    ax_c.yaxis.grid(True)
+    ax_c.set_axisbelow(True)
+    ax_d.plot(opex, sla, color="#888", lw=1.2, ls="--")
+    for sid, x, y in zip(("s0", "s1", "s2", "s3"), opex, sla):
+        ax_d.scatter(x, y, s=80, color=SCHEME_COLORS[sid], edgecolor="#222", lw=0.6, zorder=3)
+        ax_d.annotate(
+            sid.upper(), (x, y), textcoords="offset points", xytext=(6, 5),
+            fontsize=8, fontweight="bold", color=SCHEME_COLORS[sid],
+        )
+    ax_d.set_xlabel("OPEX (% of S0)", fontweight="bold")
+    ax_d.set_ylabel("SLA violation score (% of S0)", fontweight="bold")
+    ax_d.set_title("D. Joint SLA–OPEX Pareto walk", fontweight="bold")
+    ax_d.grid(True)
+    fig.suptitle("Experiment 4: Synergy of PL + PM + PS  (S0 = 100%)", fontsize=13, fontweight="bold", y=0.98)
+
+
 def plot_means_sla(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
+    """Six-panel live comparison: delay, throughput, OPEX, viol %, score, SLA residual."""
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -454,6 +491,25 @@ def plot_means_sla(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
     ax_t.scatter(x, [float(SLICES[s]["t_bar_mbps"]) for s in sids], marker="_", s=280, color="#2E8B57", zorder=4, label="T̄")
     ax_d.legend(fontsize=7, loc="upper left")
     ax_t.legend(fontsize=7, loc="upper right")
+    # Finer labeled log ticks so ~100–400 ms differences are readable (MQTT still needs log).
+    from matplotlib.ticker import FuncFormatter, LogLocator
+
+    delay_vals = [
+        _mean(_ps(r.summary, sid), "mean_delay_ms")
+        for r in loaded
+        for sid in sids
+        if _mean(_ps(r.summary, sid), "mean_delay_ms")
+        == _mean(_ps(r.summary, sid), "mean_delay_ms")
+    ]
+    d_bar = [float(SLICES[s]["d_bar_ms"]) for s in sids]
+    d_lo = max(50.0, 0.8 * min(delay_vals + d_bar + [100.0]))
+    d_hi = 1.35 * max(delay_vals + d_bar + [1000.0])
+    ax_d.set_ylim(d_lo, d_hi)
+    ax_d.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 1.5, 2.0, 3.0, 5.0, 7.0)))
+    ax_d.yaxis.set_minor_locator(LogLocator(base=10, subs="auto"))
+    ax_d.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:g}"))
+    ax_d.tick_params(axis="y", which="major", labelsize=7.5)
+    ax_d.grid(True, axis="y", which="both", zorder=0, alpha=0.45)
     t_bar = [float(SLICES[sid]["t_bar_mbps"]) for sid in sids]
     ymax_t = max(
         t_bar
@@ -481,16 +537,25 @@ def plot_means_sla(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
 
     xi = np.arange(n_sch)
     scores = [run.strict_score for run in loaded]
+    s0_score = next((v for run, v in zip(loaded, scores) if run.short == "s0"), float("nan"))
+    if s0_score == s0_score and s0_score > 0:
+        scores = [100.0 * v / s0_score if v == v else float("nan") for v in scores]
+        ax_i.set_ylabel("% of S0")
+        ax_i.set_title("Strict violation score (% of S0)")
+        score_fmt = "{:.1f}"
+        ax_i.axhline(100.0, color="#BBBBBB", lw=0.6, ls=":", zorder=1)
+    else:
+        ax_i.set_ylabel("score")
+        ax_i.set_title("Strict violation score (slices 2/3/5)")
+        score_fmt = "{:.2f}"
     colors = [SCHEME_COLORS.get(run.short, "#444") for run in loaded]
     sch_labels = [SCHEME_LABELS.get(run.short, run.short.upper()) for run in loaded]
     ax_i.bar(xi, [0.0 if v != v else v for v in scores], color=colors, edgecolor="#333", lw=0.5, zorder=3)
     ax_i.set_xticks(xi, sch_labels)
     for x0, v in zip(xi, scores):
         if v == v:
-            ax_i.text(x0, v, f"{v:.2f}", ha="center", va="bottom", fontsize=8)
+            ax_i.text(x0, v, score_fmt.format(v), ha="center", va="bottom", fontsize=8)
     finite = [v for v in scores if v == v]
-    ax_i.set_ylabel("score")
-    ax_i.set_title("Strict violation score (slices 2/3/5)")
     ax_i.set_ylim(0, (max(finite) if finite else 1) * 1.22)
     ax_i.grid(True, axis="y", zorder=0)
 
@@ -508,6 +573,241 @@ def plot_means_sla(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
         old = plots_dir / f"means_delay_throughput_opex{ext}"
         if old.is_file():
             old.unlink()
+    return written
+
+
+DELTA_COLORS = ("#1F77B4", "#E67E22", "#2E8B57")
+
+
+def _total_throughput_mbps(run: SchemeRun) -> float:
+    tot = 0.0
+    for sid in SLICES:
+        v = _mean(_ps(run.summary, sid), "mean_throughput_mbps")
+        if v == v:
+            tot += v
+    return tot
+
+
+def _scheme_metrics(loaded: List[SchemeRun]) -> Optional[dict]:
+    """Residuals: strict violation SCORE, OPEX, throughput, efficiency. S0 = 100%."""
+    by = {r.short: r for r in loaded}
+    if any(k not in by for k in ("s0", "s1", "s2", "s3")):
+        return None
+    ordered = [by[k] for k in ("s0", "s1", "s2", "s3")]
+    score_raw = [r.strict_score for r in ordered]
+    opex_raw = [sum(r.cost_mean.get(sid, 0.0) for sid in SLICES) for r in ordered]
+    thr_raw = [_total_throughput_mbps(r) for r in ordered]
+    if not (score_raw[0] == score_raw[0] and score_raw[0] > 0 and opex_raw[0] > 0 and thr_raw[0] > 0):
+        return None
+    eff_raw = [t / max(o, 1e-9) for t, o in zip(thr_raw, opex_raw)]
+    return {
+        "ordered": ordered,
+        "sla": [100.0 * v / score_raw[0] for v in score_raw],
+        "opex": [100.0 * v / opex_raw[0] for v in opex_raw],
+        "thr": [100.0 * v / thr_raw[0] for v in thr_raw],
+        "eff": [100.0 * v / eff_raw[0] for v in eff_raw],
+        "sla_raw": [_strict_sla_pct(r) for r in ordered],
+        "opex_raw": opex_raw,
+        "thr_raw": thr_raw,
+        "score_raw": score_raw,
+    }
+
+
+def _waterfall_bars(ax, residuals: List[float], ylabel: str, title: str) -> None:
+    """McKinsey-style waterfall: S0 total, three floating layer bars, S3 total."""
+    import matplotlib.patches as mpatches
+    import numpy as np
+
+    s0, s1, s2, s3 = residuals
+    running = [s0, s1, s2, s3]
+    deltas = [s1 - s0, s2 - s1, s3 - s2]
+    bottoms = [0.0]
+    heights = [s0]
+    colors = [SCHEME_COLORS["s0"]]
+    for i, d in enumerate(deltas):
+        colors.append(DELTA_COLORS[i])
+        if d <= 0:
+            bottoms.append(running[i + 1])
+            heights.append(-d)
+        else:
+            bottoms.append(running[i])
+            heights.append(d)
+    bottoms.append(0.0)
+    heights.append(s3)
+    colors.append(SCHEME_COLORS["s3"])
+    labels = ["S0\nStatic", "+ PL", "+ PM", "+ PS", "S3\nFull"]
+    xs = np.arange(5)
+    ax.bar(
+        xs, heights, bottom=bottoms, color=colors, width=0.62,
+        edgecolor="#333333", linewidth=0.6, zorder=3,
+    )
+    for i in range(3):
+        y = running[i]
+        ax.plot([i + 0.31, i + 1 - 0.31], [y, y], color="#555555", lw=0.8, ls="--", zorder=2)
+    ax.plot([3 + 0.31, 4 - 0.31], [s3, s3], color="#555555", lw=0.8, ls="--", zorder=2)
+    for i, (h, b, d) in enumerate(zip(heights, bottoms, [None, *deltas, None])):
+        y = b + h
+        if i == 0 or i == 4:
+            ax.text(i, y + 2.2, f"{h:.1f}%", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        elif d is not None and d <= 0:
+            ax.text(i, y + 2.2, f"−{h:.1f} pp", ha="center", va="bottom", fontsize=8, color=colors[i], fontweight="bold")
+        else:
+            ax.text(i, y + 2.2, f"+{h:.1f} pp", ha="center", va="bottom", fontsize=8, color=colors[i], fontweight="bold")
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(ylabel, fontweight="bold")
+    ax.set_title(title, fontweight="bold", pad=10)
+    ax.set_ylim(0, max(residuals + [100.0]) * 1.18)
+    ax.axhline(100.0, color="#BBBBBB", lw=0.6, ls=":", zorder=1)
+    ax.yaxis.grid(True, zorder=0)
+    ax.set_axisbelow(True)
+    ax.legend(
+        handles=[
+            mpatches.Patch(color=SCHEME_COLORS["s0"], label="S0 residual"),
+            mpatches.Patch(color=DELTA_COLORS[0], label="PL contribution"),
+            mpatches.Patch(color=DELTA_COLORS[1], label="PM contribution"),
+            mpatches.Patch(color=DELTA_COLORS[2], label="PS contribution"),
+            mpatches.Patch(color=SCHEME_COLORS["s3"], label="S3 residual"),
+        ],
+        loc="upper right",
+        fontsize=7.5,
+        framealpha=0.92,
+    )
+
+
+def _save_paper_fig(fig, plots_dir: Path, stem: str, written: List[Path], dpi: int = 300) -> None:
+    fig.tight_layout()
+    for ext in (".png", ".pdf"):
+        p = plots_dir / f"{stem}{ext}"
+        fig.savefig(p, dpi=dpi, bbox_inches="tight")
+        written.append(p)
+
+
+def _pp_delta(prev: float, nxt: float) -> str:
+    d = prev - nxt
+    if d >= 0:
+        return f"−{d:.1f}"
+    return f"+{-d:.1f}"
+
+
+def plot_paper_style(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
+    """Journal Fig 4A–4E from live captures. SLA axis = strict violation score residual, S0 = 100%."""
+    m = _scheme_metrics(loaded)
+    if m is None:
+        return []
+    import matplotlib.pyplot as plt
+
+    sla, opex, thr, eff = m["sla"], m["opex"], m["thr"], m["eff"]
+    labels_short = ["S0 Static", "S1 +PL", "S2 +PL +PM", "S3 +PL +PM +PS"]
+    written: List[Path] = []
+    dpi = 300
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=dpi)
+    _waterfall_bars(ax, sla, "SLA violation score residual (% of S0)", "Figure 4A: SLA Violation Reduction (layer waterfall)")
+    _save_paper_fig(fig, plots_dir, "fig4a_sla_waterfall", written, dpi)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=dpi)
+    _waterfall_bars(ax, opex, "OPEX residual (% of S0)", "Figure 4B: Network OPEX Reduction (layer waterfall)")
+    _save_paper_fig(fig, plots_dir, "fig4b_opex_waterfall", written, dpi)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=dpi)
+    xs = list(range(4))
+    w = 0.36
+    ax.bar([i - w / 2 for i in xs], thr, w, label="Useful throughput", color="#4C78A8", edgecolor="#333", lw=0.5)
+    ax.bar([i + w / 2 for i in xs], eff, w, label="Resource efficiency (Mbps / $)", color="#54A24B", edgecolor="#333", lw=0.5)
+    ax.axhline(100.0, color="#888", ls=":", lw=0.8, label="S0 = 100%")
+    for i, (t, e) in enumerate(zip(thr, eff)):
+        ax.text(i - w / 2, t + 1.5, f"{t:.0f}", ha="center", fontsize=8)
+        ax.text(i + w / 2, e + 1.5, f"{e:.0f}", ha="center", fontsize=8)
+    ax.set_xticks(xs, labels_short, fontsize=8)
+    ax.set_ylabel("Normalized to S0 (%)", fontweight="bold")
+    ax.set_title("Figure 4C: Throughput and Resource Efficiency", fontweight="bold", pad=10)
+    ax.legend(fontsize=8, framealpha=0.92)
+    ax.yaxis.grid(True)
+    ax.set_axisbelow(True)
+    ax.set_ylim(0, max(thr + eff + [100.0]) * 1.16)
+    _save_paper_fig(fig, plots_dir, "fig4c_throughput_efficiency", written, dpi)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8.4, 3.6), dpi=dpi)
+    ax.axis("off")
+    ax.set_title("Figure 4D: Control-Layer Contribution", fontweight="bold", pad=8)
+    cells = [
+        ["Control layer", "Primary benefit", "What moves", "SLA Δ (pp of S0)", "OPEX Δ (pp of S0)"],
+        ["PL", "Optimal placement (where)", "OPEX, E2E latency", _pp_delta(sla[0], sla[1]), _pp_delta(opex[0], opex[1])],
+        ["PM", "Elastic compute (how much)", "CPU/GPU util., queue backlog", _pp_delta(sla[1], sla[2]), _pp_delta(opex[1], opex[2])],
+        ["PS", "Channel adaptation (how radio)", "SLA violation, throughput", _pp_delta(sla[2], sla[3]), _pp_delta(opex[2], opex[3])],
+        ["PL + PM + PS", "End-to-end multi-timescale", "SLA–OPEX Pareto frontier",
+         f"{_pp_delta(sla[0], sla[3])} total", f"{_pp_delta(opex[0], opex[3])} total"],
+    ]
+    table = ax.table(cellText=cells, loc="center", cellLoc="left", colWidths=[0.18, 0.28, 0.24, 0.16, 0.16])
+    table.auto_set_font_size(False)
+    table.set_fontsize(8.2)
+    table.scale(1.0, 1.85)
+    header_color = "#2C3E50"
+    row_colors = ["#F4F6F7", "#EAF2F8", "#FEF5E7", "#E8F8F5", "#EBF5FB"]
+    for (r, c), cell in table.get_celld().items():
+        cell.set_edgecolor("#CCCCCC")
+        cell.set_linewidth(0.4)
+        if r == 0:
+            cell.set_facecolor(header_color)
+            cell.set_text_props(color="white", fontweight="bold")
+        else:
+            cell.set_facecolor(row_colors[r - 1])
+            if c >= 3:
+                cell.set_text_props(fontweight="bold", ha="center")
+                cell._loc = "center"
+    _save_paper_fig(fig, plots_dir, "fig4d_layer_contribution", written, dpi)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.8), dpi=dpi)
+    ax.plot(opex, sla, color="#888888", lw=1.2, ls="--", zorder=2)
+    for sid, x, y in zip(("s0", "s1", "s2", "s3"), opex, sla):
+        ax.scatter(x, y, s=90, color=SCHEME_COLORS[sid], zorder=3, edgecolor="#222", linewidth=0.6)
+        ax.annotate(
+            SCHEME_LABELS[sid],
+            (x, y),
+            textcoords="offset points",
+            xytext=(8, 6),
+            fontsize=8,
+            fontweight="bold",
+            color=SCHEME_COLORS[sid],
+        )
+    ax.set_xlabel("OPEX (% of S0)", fontweight="bold")
+    ax.set_ylabel("SLA violation score (% of S0)", fontweight="bold")
+    ax.set_title("Figure 4E: SLA–OPEX Pareto Walk (S0 → S3)", fontweight="bold", pad=10)
+    ax.grid(True)
+    ax.set_xlim(min(opex) * 0.85, max(opex) * 1.08)
+    ax.set_ylim(-2, max(sla) * 1.12)
+    _save_paper_fig(fig, plots_dir, "fig4e_sla_opex_pareto", written, dpi)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(11.2, 8.4), dpi=dpi)
+    _draw_journal_2x2(fig, m)
+    for ext in (".png", ".pdf"):
+        p = plots_dir / f"fig4_journal_summary{ext}"
+        fig.savefig(p, dpi=dpi, bbox_inches="tight")
+        written.append(p)
+    plt.close(fig)
+
+    ordered = m["ordered"]
+    wf_rows = []
+    for i, (sid, lab) in enumerate(zip(("s0", "s1", "s2", "s3"), labels_short)):
+        wf_rows.append({
+            "scheme": sid.upper(),
+            "label": lab,
+            "sla_violation_rate": round(m["sla_raw"][i] / 100.0, 6),
+            "sla_residual_pct": round(sla[i], 4),
+            "opex": round(m["opex_raw"][i], 6),
+            "opex_residual_pct": round(opex[i], 4),
+            "throughput_mbps": round(m["thr_raw"][i], 6),
+            "throughput_pct": round(thr[i], 4),
+            "efficiency_pct": round(eff[i], 4),
+            "strict_score": round(m["score_raw"][i], 6) if m["score_raw"][i] == m["score_raw"][i] else None,
+        })
+    write_table_csv(plots_dir / "waterfall.csv", wf_rows)
     return written
 
 
@@ -552,7 +852,7 @@ def plot_evaluation(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
         (axes[0][0], "delay", "E2E delay (ms)", "{:.0f}", True),
         (axes[0][1], "thr", "DL throughput (Mbps)", "{:.1f}", False),
         (axes[1][0], "viol", "Violation rate (%)", "{:.0f}", False),
-        (axes[1][1], "score", "Violation score", "{:.2f}", True),
+        (axes[1][1], "sla", "SLA violation (% of S0)", "{:.1f}", False),
         (axes[2][0], "cpu_m", "CPU (millicores)", "{:.0f}", False),
         (axes[2][1], "mem_mb", "RAM (MiB)", "{:.0f}", False),
         (axes[3][0], "gpu_pct", "GPU (%)", "{:.1f}", False),
@@ -601,8 +901,12 @@ def plot_evaluation(loaded: List[SchemeRun], plots_dir: Path) -> List[Path]:
             _scheme_bars(ax, totals, "OPEX", title, fmt)
             continue
         if key == "sla":
+            s0 = next((_strict_sla_pct(r) for r in loaded if r.short == "s0"), float("nan"))
             slas = [_strict_sla_pct(run) for run in loaded]
-            _scheme_bars(ax, slas, "%", title, fmt)
+            if s0 == s0 and s0 > 0:
+                slas = [100.0 * v / s0 if v == v else float("nan") for v in slas]
+            _scheme_bars(ax, slas, "% of S0", title, fmt)
+            ax.axhline(100.0, color="#BBBBBB", lw=0.6, ls=":", zorder=1)
             continue
         _grouped_bars(ax, loaded, lambda run, sid, k=key: val(run, sid, k), title, title, fmt, log=log)
         if key == "viol":
@@ -967,14 +1271,25 @@ def print_table(rows: List[dict], loaded: List[SchemeRun]) -> None:
         tot_hdr += f"  {SCHEME_LABELS.get(run.short, run.short)}={tot:.3f}"
     print(tot_hdr)
     print()
+    s0_score = next((r.strict_score for r in loaded if r.short == "s0"), float("nan"))
+    s0_opex = next(
+        (sum(r.cost_mean.get(sid, 0.0) for sid in SLICES) for r in loaded if r.short == "s0"),
+        float("nan"),
+    )
     for run in loaded:
         sla = _strict_sla_pct(run)
         sla_s = f"{sla:.2f}%" if sla == sla else "n/a"
         sc = run.strict_score
         sc_s = f"{sc:.2f}" if sc == sc else "n/a"
+        residual = ""
+        if s0_score == s0_score and s0_score > 0 and sc == sc:
+            residual = f"  score residual={100.0 * sc / s0_score:.1f}% of S0"
+        opex = sum(run.cost_mean.get(sid, 0.0) for sid in SLICES)
+        if s0_opex == s0_opex and s0_opex > 0:
+            residual += f"  OPEX residual={100.0 * opex / s0_opex:.1f}% of S0"
         print(
             f"  {SCHEME_LABELS.get(run.short, run.short)}  "
-            f"strict SLA viol={sla_s}  score={sc_s}  run={run.path.name}"
+            f"strict SLA viol={sla_s}  score={sc_s}{residual}  run={run.path.name}"
         )
 
 
@@ -1042,6 +1357,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     written = []
     written += plot_evaluation(loaded, plots_dir)
     written += plot_means_sla(loaded, plots_dir)
+    written += plot_paper_style(loaded, plots_dir)
     written += plot_means_usage(loaded, plots_dir)
     written += plot_means_cost(loaded, plots_dir)
     written += plot_timeseries_sla(loaded, plots_dir)
