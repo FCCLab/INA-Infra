@@ -35,11 +35,11 @@ GRAFANA_PUSH_URLS = (
 
 APPS = (
     # app_type, legend, color, t_bar Mbps, d_bar ms, console
-    ("exp4-s1", "S1 FTP", "#73BF69", 20.0, 250.0, "http://10.1.137.211/"),
-    ("exp4-s2", "S2 CCTV/YOLO", "#F2CC0C", 12.0, 45.0, "http://10.1.137.212/"),
-    ("exp4-s3", "S3 OTT", "#5794F2", 22.0, 58.0, "http://10.1.137.213/"),
-    ("exp4-s4", "S4 CPU offload", "#B877D9", 8.0, 400.0, "http://10.1.137.214/"),
-    ("exp4-s5", "S5 MQTT", "#FF9830", 2.0, 80.0, "http://10.1.137.215/"),
+    ("exp4-s1", "S1 FTP", "#73BF69", 20.2, 88.5, "http://10.1.137.211/"),
+    ("exp4-s2", "S2 CCTV/YOLO", "#F2CC0C", 16.8, 130.5, "http://10.1.137.212/"),
+    ("exp4-s3", "S3 OTT", "#5794F2", 56.9, 66.0, "http://10.1.137.213/"),
+    ("exp4-s4", "S4 CPU offload", "#B877D9", 18.3, 309.7, "http://10.1.137.214/"),
+    ("exp4-s5", "S5 MQTT", "#FF9830", 3.67, 75.2, "http://10.1.137.215/"),
 )
 
 SCHEMES = (

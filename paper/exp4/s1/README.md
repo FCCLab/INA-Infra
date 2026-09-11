@@ -3,15 +3,16 @@
 Dedicated deploy package for **S1**: PL on, PM frozen at peak \(\bar T\), PS off
 (equal PRB, `nws-xapp` replicas = 0). Namespace: **`exp4-s1`**.
 
-Five downlink slices, co-located CU-UP / UPF / APP:
+Copied from S0 (same workloads, IPs, compute). Only sites change —
+CU-UP / UPF / APP co-located (no N6 hairpin):
 
-| Slice | DL app | Site | N6 IP |
-| :---: | :--- | :--- | :--- |
-| 1 | iperf3 + SFTP 5 MB | central | `10.1.137.211` |
-| 2 | YOLO bbox (CCTV analyzer) | edge | `10.1.137.212` |
-| 3 | OTT / gstreamer watch | regional | `10.1.137.213` |
-| 4 | CPU offload (encrypt/zip/LUT) | central | `10.1.137.214` |
-| 5 | MQTT Get (IoT broker) | central | `10.1.137.215` |
+| Slice | DL app | CU-UP / UPF / APP | N6 IP | UE console |
+| :---: | :--- | :--- | :--- | :--- |
+| 1 | iperf3 + SFTP 5 MB | C / C / **C** | `10.1.137.211` | http://10.1.137.221/ |
+| 2 | YOLO bbox (CCTV) | **E / E / E** | `10.1.137.212` | http://10.1.137.222/ |
+| 3 | OTT / gstreamer watch | **R / R / R** | `10.1.137.213` | http://10.1.137.223/ |
+| 4 | CPU offload | C / C / **C** | `10.1.137.214` | http://10.1.137.224/ |
+| 5 | MQTT Get | C / C / **C** | `10.1.137.215` | http://10.1.137.225/ |
 
 See [`../README.md`](../README.md) for the full S0–S3 matrix.
 
@@ -29,8 +30,12 @@ python3 paper/exp4/s1/deploy.py --no-push
 
 # After RootSync is healthy:
 ./scripts/check-configsync.sh
-python3 paper/exp4/s1/deploy_ue.py
+python3 paper/exp4/s1/deploy_ue.py            # all five UEs
+python3 paper/exp4/s1/deploy_ue.py --ue 5     # MQTT only
+python3 paper/exp4/s1/deploy_ue.py 1,2,3,4
 ```
+
+Confirm S1 co-location: slice 1/4/5 APP+UPF on **central**, slice 2 on **edge**, slice 3 on **regional**.
 
 ## Undeploy
 

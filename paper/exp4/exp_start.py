@@ -6,6 +6,7 @@ covers slices 2, 3, 5. A sample is a violation if delay > D̄ or rate < 0.95·T�
 
 Usage:
   python3 paper/exp4/exp_start.py --scheme s0 --duration 300
+  python3 paper/exp4/exp_start.py --scheme sx --slices 1 --duration 300
   python3 paper/exp4/exp_start.py --scheme s0 --duration 5m
   python3 paper/exp4/exp_start.py --scheme s0 --analyze-only \\
       --start 2026-09-08T15:00:00+08:00 --stop 2026-09-08T15:05:00+08:00
@@ -48,47 +49,64 @@ INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "default")
 INFLUX_MEASUREMENT = os.environ.get("INFLUX_MEASUREMENT", "application_metrics")
 INFLUX_TZ = os.environ.get("INFLUX_TZ", "Asia/Taipei")
 
-# README §3.3 — live experiment budgets (not the simulate_exp4.py variants).
+# README §3.3 — SLA from SX uncontended measure (paper/exp4/sx/data/traffic_requirements.json).
 SLICES: Dict[int, dict] = {
     1: {
         "name": "FTP",
         "app_type": "exp4-s1",
-        "d_bar_ms": 250.0,
-        "t_bar_mbps": 20.0,
+        "d_bar_ms": 88.5,
+        "t_bar_mbps": 20.2,
         "strict_sla": False,
     },
     2: {
         "name": "YOLO",
         "app_type": "exp4-s2",
-        "d_bar_ms": 45.0,
-        "t_bar_mbps": 12.0,
+        "d_bar_ms": 130.5,
+        "t_bar_mbps": 16.8,
         "strict_sla": True,
     },
     3: {
         "name": "OTT",
         "app_type": "exp4-s3",
-        "d_bar_ms": 58.0,
-        "t_bar_mbps": 22.0,
+        "d_bar_ms": 66.0,
+        "t_bar_mbps": 56.9,
         "strict_sla": True,
     },
     4: {
         "name": "CPU-OFF",
         "app_type": "exp4-s4",
-        "d_bar_ms": 400.0,
-        "t_bar_mbps": 8.0,
+        "d_bar_ms": 309.7,
+        "t_bar_mbps": 18.3,
         "strict_sla": False,
     },
     5: {
         "name": "MQTT",
         "app_type": "exp4-s5",
-        "d_bar_ms": 80.0,
-        "t_bar_mbps": 2.0,
+        "d_bar_ms": 75.2,
+        "t_bar_mbps": 3.67,
         "strict_sla": True,
     },
 }
 
 RATE_FLOOR = 0.95  # delivered >= 0.95 * T_bar
-SCHEMES = ("s0", "s1", "s2", "s3")
+SCHEMES = ("s0", "s1", "s2", "s3", "sx")
+
+
+def violation_score(
+    delay_ms: float,
+    rate_mbps: float,
+    d_bar_ms: float,
+    t_bar_mbps: float,
+    rate_floor: float = RATE_FLOOR,
+) -> float:
+    """How far a sample misses SLA. 0 = within delay and rate budgets.
+
+    Delay term: max(0, delay/D̄ − 1). Rate term: max(0, 1 − rate/(0.95·T̄)).
+    """
+    d_term = max(0.0, float(delay_ms) / float(d_bar_ms) - 1.0) if d_bar_ms > 0 else 0.0
+    floor = rate_floor * float(t_bar_mbps)
+    r_term = max(0.0, 1.0 - float(rate_mbps) / floor) if floor > 0 else 0.0
+    return d_term + r_term
 
 
 @dataclass
@@ -278,17 +296,27 @@ def pick_delay(e2e: Optional[float], lat: Optional[float], tx: Optional[float]) 
     return None
 
 
+def slice_subset(ids: Optional[Sequence[int]] = None) -> Dict[int, dict]:
+    if not ids:
+        return dict(SLICES)
+    missing = [i for i in ids if i not in SLICES]
+    if missing:
+        raise ValueError(f"unknown slice id(s) {missing}; valid {sorted(SLICES)}")
+    return {i: SLICES[i] for i in ids}
+
+
 def evaluate_samples(
     *,
     start: datetime,
     stop: datetime,
     scheme: str,
     step_s: float = 1.0,
+    slice_ids: Optional[Sequence[int]] = None,
 ) -> Tuple[List[dict], dict]:
     samples: List[dict] = []
     per_slice: Dict[int, dict] = {}
 
-    for sid, spec in SLICES.items():
+    for sid, spec in slice_subset(slice_ids).items():
         app = spec["app_type"]
         thr = query_series(
             start=start, stop=stop, app_type=app, scheme=scheme, field="throughput_dl_mbps"
@@ -313,6 +341,7 @@ def evaluate_samples(
         viol = 0
         delay_sum = 0.0
         thr_sum = 0.0
+        score_sum = 0.0
         for idx in idxs:
             delay = pick_delay(e2e_b.get(idx), lat_b.get(idx), tx_b.get(idx))
             rate = thr_b.get(idx)
@@ -326,10 +355,12 @@ def evaluate_samples(
             rate_ok = rate >= RATE_FLOOR * t_bar
             delay_ok = delay <= d_bar
             violated = (not rate_ok) or (not delay_ok)
+            score = violation_score(delay, rate, d_bar, t_bar)
             n += 1
             viol += int(violated)
             delay_sum += delay
             thr_sum += rate
+            score_sum += score
             ts = datetime.fromtimestamp(start.timestamp() + idx * step_s, tz=timezone.utc)
             samples.append(
                 {
@@ -347,6 +378,7 @@ def evaluate_samples(
                     "rate_ok": int(rate_ok),
                     "delay_ok": int(delay_ok),
                     "violated": int(violated),
+                    "violation_score": round(score, 6),
                 }
             )
 
@@ -360,6 +392,7 @@ def evaluate_samples(
             "samples": n,
             "violations": viol,
             "violation_rate": (viol / n) if n else None,
+            "mean_violation_score": (score_sum / n) if n else None,
             "mean_delay_ms": (delay_sum / n) if n else None,
             "mean_throughput_mbps": (thr_sum / n) if n else None,
             "points_thr": len(thr),
@@ -369,11 +402,16 @@ def evaluate_samples(
 
     strict_n = 0
     strict_v = 0
+    strict_score = 0.0
     for sid, row in per_slice.items():
         if not row["strict_sla"]:
             continue
-        strict_n += int(row["samples"])
+        n_s = int(row["samples"])
+        strict_n += n_s
         strict_v += int(row["violations"])
+        ms = row.get("mean_violation_score")
+        if ms is not None:
+            strict_score += float(ms) * n_s
 
     summary = {
         "scheme": scheme,
@@ -385,6 +423,7 @@ def evaluate_samples(
         "strict_samples": strict_n,
         "strict_violations": strict_v,
         "sla_violation_rate": (strict_v / strict_n) if strict_n else None,
+        "strict_violation_score": (strict_score / strict_n) if strict_n else None,
         "per_slice": per_slice,
     }
     return samples, summary
@@ -396,6 +435,7 @@ def download_raw(
     start: datetime,
     stop: datetime,
     scheme: str,
+    slice_ids: Optional[Sequence[int]] = None,
 ) -> None:
     fields_client = (
         "throughput_dl_mbps",
@@ -409,13 +449,14 @@ def download_raw(
         "cpu_m",
         "mem_mb",
         "gpu_pct",
+        "vram_mb",
         "tcp_sendq_bytes",
         "tcp_notsent_bytes",
         "tcp_retrans",
         "tcp_cwnd",
         "tcp_rwnd_bytes",
     )
-    for sid, spec in SLICES.items():
+    for sid, spec in slice_subset(slice_ids).items():
         app = spec["app_type"]
         app_dir = out / "metrics" / app
         print(f"  download {app} …")
@@ -461,6 +502,7 @@ def write_summary(out: Path, samples: List[dict], summary: dict) -> None:
             "samples",
             "violations",
             "violation_rate",
+            "mean_violation_score",
             "mean_delay_ms",
             "mean_throughput_mbps",
             "points_thr",
@@ -498,20 +540,28 @@ def wait_until(start: datetime, stop: datetime) -> None:
 def print_summary(summary: dict) -> None:
     sla = summary.get("sla_violation_rate")
     sla_s = f"{100.0 * sla:.2f}%" if sla is not None else "n/a (no samples)"
+    score = summary.get("strict_violation_score")
+    score_s = f"{float(score):.2f}" if score is not None else "n/a"
     print(
         f"\nStrict SLA violation (slices 2/3/5): {sla_s} "
-        f"({summary.get('strict_violations')}/{summary.get('strict_samples')})"
+        f"({summary.get('strict_violations')}/{summary.get('strict_samples')})  "
+        f"score={score_s}"
     )
-    print(f"{'SLICE':<6} {'NAME':<8} {'STRICT':<6} {'N':>6} {'VIOL':>6} {'RATE':>8} {'d̄ ms':>8} {'T̄ Mbps':>8}")
+    print(
+        f"{'SLICE':<6} {'NAME':<8} {'STRICT':<6} {'N':>6} {'VIOL':>6} "
+        f"{'RATE':>8} {'SCORE':>8} {'d̄ ms':>8} {'T̄ Mbps':>8}"
+    )
     for sid in sorted(summary["per_slice"]):
         r = summary["per_slice"][sid]
         rate = r["violation_rate"]
         rate_s = f"{100.0 * rate:.1f}%" if rate is not None else "—"
         mean_d = r["mean_delay_ms"]
         mean_t = r["mean_throughput_mbps"]
+        mean_s = r.get("mean_violation_score")
         print(
             f"{sid:<6} {r['name']:<8} {str(r['strict_sla']):<6} {r['samples']:>6} "
             f"{r['violations']:>6} {rate_s:>8} "
+            f"{(f'{mean_s:.2f}' if mean_s is not None else '—'):>8} "
             f"{(f'{mean_d:.1f}' if mean_d is not None else '—'):>8} "
             f"{(f'{mean_t:.2f}' if mean_t is not None else '—'):>8}"
         )
@@ -519,7 +569,12 @@ def print_summary(summary: dict) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--scheme", default="s0", help="s0|s1|s2|s3 (default s0)")
+    p.add_argument("--scheme", default="s0", help="s0|s1|s2|s3|sx (default s0)")
+    p.add_argument(
+        "--slices",
+        default="",
+        help="comma-separated slice ids to download (default: all 1-5)",
+    )
     p.add_argument(
         "--duration",
         default=os.environ.get("EXP4_DURATION", "300"),
@@ -550,6 +605,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     short = scheme_short(sch)
+    slice_ids: Optional[List[int]] = None
+    if str(args.slices).strip():
+        try:
+            slice_ids = [int(x) for x in str(args.slices).replace(" ", ",").split(",") if x]
+            slice_subset(slice_ids)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     if args.plot_only:
         if not args.run_id.strip():
@@ -612,7 +675,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "duration_s": (stop - start).total_seconds(),
         "influx_url": INFLUX_URL,
         "influx_bucket": INFLUX_BUCKET,
-        "sla": {str(k): v for k, v in SLICES.items()},
+        "sla": {str(k): v for k, v in slice_subset(slice_ids).items()},
+        "slices": list(slice_subset(slice_ids)),
         "rate_floor": RATE_FLOOR,
         "plan_note": (
             f"{short.upper()}: follow paper/exp4/README.md §4 placement; "
@@ -634,7 +698,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print("Downloading metrics …")
     try:
-        download_raw(out=out, start=start, stop=stop, scheme=sch)
+        download_raw(out=out, start=start, stop=stop, scheme=sch, slice_ids=slice_ids)
     except Exception as exc:
         print(f"error: download failed: {exc}", file=sys.stderr)
         return 1
@@ -642,7 +706,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("Computing SLA violations …")
     try:
         samples, summary = evaluate_samples(
-            start=start, stop=stop, scheme=sch, step_s=max(0.5, float(args.step))
+            start=start,
+            stop=stop,
+            scheme=sch,
+            step_s=max(0.5, float(args.step)),
+            slice_ids=slice_ids,
         )
     except Exception as exc:
         print(f"error: evaluate failed: {exc}", file=sys.stderr)

@@ -325,8 +325,18 @@ Each scheme is a self-contained package. Run **one** at a time on the shared RAN
 | [`s1/`](s1/README.md) | S1 +PL | `exp4-s1` | ✓ / ✗ / ✗ |
 | [`s2/`](s2/README.md) | S2 +PL+PM | `exp4-s2` | ✓ / ✓ / ✗ |
 | [`s3/`](s3/README.md) | S3 +PL+PM+PS | `exp4-s3` | ✓ / ✓ / ✓ |
+| [`sx/`](sx/README.md) | SX isolated \(T\) | `exp4-sx` | S1 sites; one UE at a time |
 
 ```bash
+# End-to-end in tmux session ``exp4`` (attaches; Ctrl-b d to detach)
+python3 paper/exp4/run_experiment.py
+python3 paper/exp4/run_experiment.py --schemes s0 s1 s2 s3 --duration 300 --settle 30
+python3 paper/exp4/run_experiment.py --schemes s0 s1 s2 s3 --undeploy
+python3 paper/exp4/run_experiment.py --undeploy          # tear down all exp4-* and exit
+tmux attach -t exp4
+python3 paper/exp4/run_experiment.py --no-tmux   # current terminal
+
+# Manual (one scheme at a time):
 python3 paper/exp4/s0/deploy.py          # first: static baseline
 ./scripts/check-configsync.sh
 python3 paper/exp4/s0/deploy_ue.py
@@ -336,6 +346,15 @@ python3 paper/exp4/s1/deploy.py
 python3 paper/exp4/s2/deploy.py
 python3 paper/exp4/s3/deploy.py
 ```
+
+`run_experiment.py` starts in tmux session ``exp4`` and attaches. It undeploys
+a previous live scheme (or leftover application/UE pods) before the next one,
+waits until RAN/apps/UEs/PDU are up, holds `--settle` seconds of healthy DL
+traffic, then captures (`exp_start --no-plot`) and plots (`exp_plot`). The
+last scheme stays running. Pass `--schemes … --undeploy` to tear the last one
+down after capture. `--undeploy` with no `--schemes` (or `--undeploy-only`)
+only removes live `exp4-*` namespaces and exits. Empty schemes are skipped.
+After S0–S3 it runs `compare_schemes.py`. Default push is Gitea-only (Config Sync).
 
 Do not run an `exp4-s*` scheme while `exp1-*` or another `exp4-s*` is live.
 

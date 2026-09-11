@@ -3,3 +3,6 @@
 
 # Rendered UE YAML from python3 paper/exp4/s*/deploy_ue.py
 **/manifests/
+
+# Generated figures (compare_schemes.py, plot_exp4.py, exp_plot.py)
+plots/

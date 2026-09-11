@@ -19,11 +19,11 @@ ARCH_AMD64 = {"kubernetes.io/arch": "amd64"}
 
 from app.services.registry_service import resolve_oai_image
 
-IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.8.3-amd64"
+IMAGE_CUCP = "10.1.132.30:5000/oai-cucp:nws-v0.8.4-amd64"
 IMAGE_CUUP = "10.1.132.30:5000/oai-nr-cuup:nws-v0.8.2-amd64"
-IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.8.3-amd64"
-IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.8.2-amd64"
-IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.8.2-amd64"
+IMAGE_DU = "10.1.132.30:5000/oai-du:nws-v0.8.4-amd64"
+IMAGE_UE = "10.1.132.30:5000/oai-nr-ue:nws-v0.8.4-amd64"
+IMAGE_FLEXRIC = "10.1.132.30:5000/oai-flexric:nws-v0.8.4-amd64"
 IMAGE_DEBUG = "docker.io/nicolaka/netshoot"
 
 
@@ -749,7 +749,7 @@ def _write_edge_gnb(
                                     "env": [
                                         {
                                             "name": "USE_ADDITIONAL_OPTIONS",
-                                            "value": "--rfsim --log_config.global_log_options level,nocolor,time",
+                                            "value": "--rfsim --serveraddr server --log_config.global_log_options level,nocolor,time",
                                         }
                                     ],
                                     "ports": [
@@ -1173,7 +1173,7 @@ def generate_ue_manifests(
                         "-r 133 --numerology 1 -C 3325620000 "
                         "--ssb 144 --rfsim "
                         "--log_config.global_log_options level,nocolor,time "
-                        f"--rfsimulator.serveraddr {shared.du_rf}"
+                        f"--serveraddr {shared.du_rf}"
                     ),
                 },
                 {"name": "TZ", "value": "Europe/Paris"},

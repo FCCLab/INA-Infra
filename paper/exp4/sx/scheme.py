@@ -1,19 +1,20 @@
-"""Exp4 Scheme 0 (S0): static baseline — five DL slices.
+"""Exp4 Scheme X (SX): isolated per-slice traffic measurement.
 
-PL off, PM frozen at peak T_bar, PS equal PRB (nws-xapp idle).
-
-Anti-pattern: CU-UP + UPF pinned at central, APP pinned at edge for every
-slice (N6 hairpin). Same workloads and IPs as S1; only sites differ.
+Copied from S1 (+PL, frozen peak compute, equal PRB / nws-xapp idle).
+GitOps brings up the full S1 layout. UEs are attached **one slice at a
+time** so each app gets the cell to itself; mean DL goodput is that
+slice's traffic requirement (uncontended T).
 """
 
 from __future__ import annotations
 
-SCHEME_ID = "exp4-s0"
-SCHEME_NAME = "S0 Static"
-NAMESPACE = "exp4-s0"
+SCHEME_ID = "exp4-sx"
+SCHEME_NAME = "SX isolated T"
+NAMESPACE = "exp4-sx"
 PART_OF = "exp4"
 
-# S0: uncoordinated static — core UPF, MEC-everywhere apps.
+# Same PL sites as S1. CU-UP, UPF, and APP are co-located.
+# C=central, R=regional, E=edge
 SLICES = {
     1: {
         "name": "FTP",
@@ -21,7 +22,7 @@ SLICES = {
         "app_type": "iperf-sftp",
         "cu": "central",
         "upf": "central",
-        "app": "edge",
+        "app": "central",
         "t_bar": 20.2,
         "d_bar": 88.5,
         "strict_sla": False,
@@ -43,8 +44,8 @@ SLICES = {
         "name": "YOLO",
         "label": "YOLO bbox overlay DL",
         "app_type": "cctv",
-        "cu": "central",
-        "upf": "central",
+        "cu": "edge",
+        "upf": "edge",
         "app": "edge",
         "t_bar": 16.8,
         "d_bar": 130.5,
@@ -67,9 +68,9 @@ SLICES = {
         "name": "VIDEO",
         "label": "gstreamer / OTT watch DL",
         "app_type": "ott",
-        "cu": "central",
-        "upf": "central",
-        "app": "edge",
+        "cu": "regional",
+        "upf": "regional",
+        "app": "regional",
         "t_bar": 56.9,
         "d_bar": 66.0,
         "strict_sla": True,
@@ -93,7 +94,7 @@ SLICES = {
         "app_type": "cpu-offload",
         "cu": "central",
         "upf": "central",
-        "app": "edge",
+        "app": "central",
         "t_bar": 18.3,
         "d_bar": 309.7,
         "strict_sla": False,
@@ -117,7 +118,7 @@ SLICES = {
         "app_type": "iot",
         "cu": "central",
         "upf": "central",
-        "app": "edge",
+        "app": "central",
         "t_bar": 3.67,
         "d_bar": 75.2,
         "strict_sla": True,
@@ -130,7 +131,7 @@ SLICES = {
         "dnn": "oai5",
         "sd": "0x000005",
         "imsi": "001010000000105",
-        "cpu_app": 0.5,
+        "cpu_app": 1.0,
         "mem_app": "512Mi",
         "gpu_app": 0.0,
         "b_min": 54.6,
@@ -164,7 +165,7 @@ FABRIC = {
     for sid in SLICES
 }
 
-PL_ENABLED = False
+PL_ENABLED = True
 PM_ENABLED = False
 PS_ENABLED = False
 XAPP_REPLICAS = 0

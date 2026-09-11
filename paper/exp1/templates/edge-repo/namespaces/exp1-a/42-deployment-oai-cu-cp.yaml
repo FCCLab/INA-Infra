@@ -175,7 +175,7 @@ spec:
             cpu: 50m
             memory: 64Mi
       - name: cucp
-        image: 10.1.132.30:5000/oai-cucp:nws-v0.8.3-amd64
+        image: 10.1.132.30:5000/oai-cucp:nws-v0.8.4-amd64
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true

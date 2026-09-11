@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-"""Bring up five DL UEs + app clients on edge `usrp` for Exp4 S3 (exp4-s0)."""
+"""Bring up DL UEs + app clients on edge `usrp` for Exp4 S3 (exp4-s3).
+
+Examples:
+  python3 paper/exp4/s3/deploy_ue.py
+  python3 paper/exp4/s3/deploy_ue.py --ue 5
+  python3 paper/exp4/s3/deploy_ue.py 1,2,3,4
+  python3 paper/exp4/s3/deploy_ue.py --undeploy --ue 1,2,3,4
+"""
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -14,16 +22,19 @@ sys.path.insert(0, str(HERE.parent / "common"))
 from ott_chromium import chromium_sidecar_yaml, chromium_volumes_yaml, extra_ott_env  # noqa: E402
 from scheme import NAMESPACE, REGISTRY, SCHEME_ID, SLICES  # noqa: E402
 from ue_resources import app_client_resources_yaml, ue_ran_resources_yaml  # noqa: E402
+from ue_teardown import parse_ue_ids, undeploy_ues  # noqa: E402
 
 EDGE_CONTEXT = "edge@edge"
-UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.2-amd64"
+UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.4-amd64"
+IFACES_SH = HERE.parents[2] / "applications" / "exp4" / "common" / "ifaces.sh"
+INFLUX_PY = IFACES_SH.parent / "influx_publish.py"
 
 CLIENT_IMAGES = {
-    1: "docker.io/nicolaka/netshoot:latest",
-    2: f"{REGISTRY}/cctv-ue-console:nws-v0.9-amd64",
-    3: f"{REGISTRY}/ott-ue-console:nws-v0.33-amd64",
-    4: "docker.io/nicolaka/netshoot:latest",
-    5: f"{REGISTRY}/iot-ue-console:nws-v0.10-amd64",
+    1: f"{REGISTRY}/exp4-s1-iperf-sftp-client:nws-v0.30-amd64",
+    2: f"{REGISTRY}/exp4-s2-cctv-client:nws-v0.30-amd64",
+    3: f"{REGISTRY}/exp4-s3-ott-client:nws-v0.30-amd64",
+    4: f"{REGISTRY}/exp4-s4-cpu-offload-client:nws-v0.30-amd64",
+    5: f"{REGISTRY}/exp4-s5-iot-client:nws-v0.30-amd64",
 }
 
 
@@ -32,7 +43,7 @@ def extra_env(sid: int) -> str:
     ip = s["app_ip"]
     common = f"""
         - name: CONSOLE_ROLE
-          value: "backend"
+          value: "all"
         - name: TARGET_SERVER_IP
           value: "{ip}"
         - name: TO_SERVER_IFACE
@@ -40,11 +51,21 @@ def extra_env(sid: int) -> str:
         - name: PDU_IFACE
           value: "oaitun_ue1"
         - name: CONSOLE_IFACE
-          value: "net1"
+          value: "net2"
+        - name: MULTUS_GW
+          value: "10.1.137.1"
+        - name: PUBLIC_BASE_URL
+          value: "http://{s['ue_console_ip']}"
         - name: PDU_ROUTE_HOSTS
           value: "{ip}"
         - name: PDU_WAIT_TIMEOUT
-          value: "300"
+          value: "0"
+        - name: EXP4_APP_TYPE
+          value: "exp4-s{sid}"
+        - name: SCHEME_ID
+          value: "{SCHEME_ID}"
+        - name: EXP4_METRICS_ORIGIN
+          value: "client"
 """
     extras = {
         1: f"""
@@ -56,32 +77,92 @@ def extra_env(sid: int) -> str:
           value: "ina"
         - name: SFTP_PASS
           value: "ina"
+        - name: IPERF_AUTOSTART
+          value: "0"
+        - name: IPERF_PORT_COUNT
+          value: "8"
 """,
         2: f"""
         - name: RTSP_TARGET_HOST
           value: "{ip}"
-        - name: RTSP_PORT
-          value: "8554"
+        - name: SERVER_URL
+          value: "http://{ip}:8080"
+        - name: MTX_SOURCE_HOST
+          value: "{ip}"
+        - name: MTX_SOURCE_RTSP_PORT
+          value: "8555"
+        - name: DS_NUM_STREAMS
+          value: "4"
+        - name: STREAMING_ENABLED
+          value: "0"
+        - name: IPERF_HOST
+          value: "{ip}"
+        - name: IPERF_AUTOSTART
+          value: "0"
 """,
         3: f"""
+        - name: SERVER_HOST
+          value: "{ip}"
         - name: SERVER_URL
-          value: "http://{ip}:80"
+          value: "http://{ip}"
+        - name: SERVER_RTSP_PORT
+          value: "8555"
+        - name: IPERF_HOST
+          value: "{ip}"
+        - name: IPERF_AUTOSTART
+          value: "0"
 """
         + extra_ott_env(s["ue_console_ip"]),
         4: f"""
-        - name: DOWNLOAD_URL
-          value: "http://{ip}/download"
+        - name: SFTP_HOST
+          value: "{ip}"
+        - name: IPERF_HOST
+          value: "{ip}"
+        - name: SFTP_USER
+          value: "ina"
+        - name: SFTP_PASS
+          value: "ina"
+        - name: IPERF_AUTOSTART
+          value: "0"
+        - name: IPERF_PORT_COUNT
+          value: "8"
 """,
         5: f"""
         - name: BROKER_HOST
           value: "{ip}"
         - name: BROKER_PORT
           value: "1883"
-        - name: LATENCY_PROBE_PERIOD_S
-          value: "1.0"
+        - name: SEND_ENABLED
+          value: "0"
+        - name: LATENCY_PROBE_ENABLED
+          value: "0"
+        - name: IPERF_HOST
+          value: "{ip}"
+        - name: IPERF_AUTOSTART
+          value: "0"
 """,
     }
     return common + extras[sid]
+
+
+def ifaces_configmap_yaml() -> str:
+    def _indent(body: str) -> str:
+        return "\n".join(f"    {line}" if line else "" for line in body.splitlines())
+
+    ifaces = _indent(IFACES_SH.read_text())
+    influx = _indent(INFLUX_PY.read_text())
+    return f"""---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exp4-ifaces
+  namespace: {NAMESPACE}
+data:
+  ifaces.sh: |
+{ifaces}
+  influx_publish.py: |
+{influx}
+"""
 
 
 def generate_ue_yaml(sid: int) -> str:
@@ -186,7 +267,7 @@ spec:
         ina.lab/slice: "{sid}"
         slice: "{sid}"
       annotations:
-        k8s.v1.cni.cncf.io/networks: '[{{"name": "{rf_net}", "interface": "rf", "ips": ["{s['ue_rf']}/24"], "gateways": ["10.1.140.3"]}}, {{"name": "ue{sid}-console-multus", "interface": "net1", "ips": ["{console_ip}/24"], "mac": "{console_mac}"}}]'
+        k8s.v1.cni.cncf.io/networks: '[{{"name": "{rf_net}", "interface": "rf", "ips": ["{s['ue_rf']}/24"], "gateways": ["10.1.140.3"]}}, {{"name": "ue{sid}-console-multus", "interface": "net2", "ips": ["{console_ip}/24"], "gateways": ["10.1.137.1"], "mac": "{console_mac}"}}]'
     spec:
       serviceAccountName: {ue_name}-sa
       terminationGracePeriodSeconds: 2
@@ -201,7 +282,7 @@ spec:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --serveraddr 10.1.140.204"
         - name: TZ
           value: Europe/Paris
         volumeMounts:
@@ -210,11 +291,34 @@ spec:
           subPath: ue.conf
 {ue_ran_resources_yaml()}      - name: app-client
         image: {CLIENT_IMAGES[sid]}
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         securityContext:
           privileged: true
           capabilities:
-            add: ["NET_ADMIN", "NET_RAW"]
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        command:
+        - bash
+        - -c
+        - |
+          set -euo pipefail
+          for p in /exp4/ifaces.sh /app/common/ifaces.sh; do
+            if [ -f "$p" ]; then
+              . "$p"
+              exp4_client_ifaces || true
+              break
+            fi
+          done
+          exec /app/entrypoint.sh
+        volumeMounts:
+        - name: exp4-ifaces
+          mountPath: /exp4
+          readOnly: true
+        - name: exp4-ifaces
+          mountPath: /usr/local/bin/exp4_influx_publish.py
+          subPath: influx_publish.py
+          readOnly: true
         env:
         - name: SLICE_ID
           value: "{sid}"
@@ -231,18 +335,51 @@ spec:
       - name: configuration
         configMap:
           name: {ue_name}-configmap
+      - name: exp4-ifaces
+        configMap:
+          name: exp4-ifaces
 {chromium_volumes_yaml() if sid == 3 else ""}
 """
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=f"Deploy or undeploy {SCHEME_ID} UEs on {EDGE_CONTEXT}"
+    )
+    parser.add_argument(
+        "ues",
+        nargs="*",
+        help="UE/slice ids (default: all). Examples: 5  1,2,4  s3  oai-ue-1",
+    )
+    parser.add_argument(
+        "--ue",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="UE/slice id (repeatable or comma-separated)",
+    )
+    parser.add_argument(
+        "--undeploy",
+        action="store_true",
+        help="Remove the selected UE(s) instead of applying them",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
+    sids = parse_ue_ids(list(args.ues) + list(args.ue))
+    label = ",".join(str(s) for s in sids)
+    if args.undeploy:
+        undeploy_ues(namespace=NAMESPACE, context=EDGE_CONTEXT, sids=sids)
+        return
     print("=" * 64)
-    print(f" Bringing up {SCHEME_ID} UEs in {NAMESPACE} on {EDGE_CONTEXT}")
+    print(f" Bringing up {SCHEME_ID} UE(s) {label} in {NAMESPACE} on {EDGE_CONTEXT}")
     print("=" * 64)
     out_dir = HERE / "manifests"
     out_dir.mkdir(parents=True, exist_ok=True)
     combined = out_dir / "exp4_s3_ues.yaml"
-    parts = [generate_ue_yaml(sid) for sid in SLICES]
+    parts = [ifaces_configmap_yaml()] + [generate_ue_yaml(sid) for sid in sids]
     combined.write_text("\n".join(parts))
     print(f"  wrote {combined}")
     res = subprocess.run(
@@ -255,7 +392,7 @@ def main() -> None:
         print(res.stderr)
         sys.exit(res.returncode)
     print(res.stdout)
-    names = ",".join(f"oai-ue-{sid}" for sid in SLICES)
+    names = ",".join(f"oai-ue-{sid}" for sid in sids)
     subprocess.run(
         [
             "kubectl",

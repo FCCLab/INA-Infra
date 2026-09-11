@@ -19,5 +19,5 @@ spec:
     protocol: TCP
   - name: http-18081
     port: 18081
-    targetPort: 18080
+    targetPort: 18081
     protocol: TCP

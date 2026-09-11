@@ -95,13 +95,15 @@ spec:
             cpu: 50m
             memory: 64Mi
       - name: du
-        image: 10.1.132.30:5000/oai-du:nws-v0.8.3-amd64
+        image: 10.1.132.30:5000/oai-du:nws-v0.8.4-amd64
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         env:
+        - name: RFSIMULATOR
+          value: server
         - name: USE_ADDITIONAL_OPTIONS
-          value: --rfsim --log_config.global_log_options level,nocolor,time
+          value: --rfsim --serveraddr server --log_config.global_log_options level,nocolor,time
         ports:
         - name: f1c
           containerPort: 38472

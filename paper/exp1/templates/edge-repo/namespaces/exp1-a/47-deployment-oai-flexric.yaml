@@ -28,7 +28,7 @@ spec:
         ina-infra.nephio.lab/multus-master: enp7s0
       containers:
       - name: flexric
-        image: 10.1.132.30:5000/oai-flexric:nws-v0.8.2-amd64
+        image: 10.1.132.30:5000/oai-flexric:nws-v0.8.4-amd64
         imagePullPolicy: IfNotPresent
         workingDir: /tmp
         securityContext:

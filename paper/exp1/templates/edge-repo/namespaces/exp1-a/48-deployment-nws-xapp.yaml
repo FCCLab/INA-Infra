@@ -29,7 +29,7 @@ spec:
         ina-infra.nephio.lab/multus-master: enp7s0
       containers:
       - name: xapp
-        image: 10.1.132.30:5000/nws-xapp:nws-v0.6-amd64
+        image: 10.1.132.30:5000/nws-xapp:nws-v0.8.4-amd64
         imagePullPolicy: IfNotPresent
         securityContext:
           capabilities:
@@ -39,8 +39,9 @@ spec:
         command:
         - bash
         - -lc
-        - set -e; echo "waiting 30s for DU E2 attach to ${NEAR_RIC_IP}"; sleep 30;
-          exec python3 -u /xapp/xapp_slice.py --conf /etc/flexric/flexric.conf --out
+        - set -e; python3 -u /xapp/frontend/serve.py --host 0.0.0.0 --port 18081 --backend-port 18080 &
+          echo "waiting 30s for DU E2 attach to ${NEAR_RIC_IP}"; sleep 30;
+          exec python3 -u /xapp/backend/xapp_slice.py --conf /etc/flexric/flexric.conf --out
           /tmp/rt_slice_stats.json --ns-out /tmp/rt_ns_slice_policy.json --print
         env:
         - name: PYTHONPATH
@@ -53,6 +54,8 @@ spec:
           value: '1'
         - name: NEAR_RIC_IP
           value: 10.1.140.205
+        - name: NWS_XAPP_SKIP_RIC_WAIT
+          value: '1'
         - name: NWS_XAPP_API_HOST
           value: 0.0.0.0
         - name: NWS_XAPP_API_PORT
@@ -62,6 +65,9 @@ spec:
         ports:
         - name: http
           containerPort: 18080
+          protocol: TCP
+        - name: console
+          containerPort: 18081
           protocol: TCP
         volumeMounts:
         - name: configuration

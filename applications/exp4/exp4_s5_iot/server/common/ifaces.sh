@@ -32,6 +32,19 @@ exp4_is_cluster_iface() {
   return 1
 }
 
+# Write a namespaced sysctl via /proc (images often have no sysctl binary).
+# Refuses net.core.* and tcp_adv_win_scale (host-global / unsafe).
+exp4_sysctl_write() {
+  local key="${1:-}" val="${2:-}" path
+  [ -z "$key" ] && return 0
+  case "$key" in
+    net.core.*|*.tcp_adv_win_scale) return 0 ;;
+  esac
+  path="/proc/sys/${key//./\/}"
+  [ -w "$path" ] || return 0
+  printf '%s\n' "$val" >"$path" 2>/dev/null || true
+}
+
 exp4_table_for_ip() {
   local ip="${1:-}"
   local oct="${ip##*.}"
@@ -91,7 +104,7 @@ exp4_multus_route_profile() {
   [ -z "$subnet" ] && subnet="$MULTUS_SUBNET"
   [ -z "$table" ] && table="$(exp4_table_for_ip "$ip")"
 
-  sysctl -w "net.ipv4.conf.${iface}.rp_filter=2" >/dev/null 2>&1 || true
+  exp4_sysctl_write "net.ipv4.conf.${iface}.rp_filter" 2
   ip route replace "${subnet}" dev "$iface" || true
   ip route replace "${subnet}" dev "$iface" table "${table}" || true
   if [ -n "$gw" ]; then
@@ -110,6 +123,7 @@ exp4_sim5g_subnet() {
 }
 
 exp4_server_ifaces() {
+  exp4_tune_tcp
   TO_CLIENT_IFACE="${TO_CLIENT_IFACE:-${OTA_IFACE:-net1}}"
   if exp4_no5g; then
     CONSOLE_IFACE="${CONSOLE_IFACE:-net2}"
@@ -118,6 +132,7 @@ exp4_server_ifaces() {
   fi
   exp4_log info "to_client=${TO_CLIENT_IFACE} console=${CONSOLE_IFACE}"
   exp4_wait_iface "$TO_CLIENT_IFACE"
+  exp4_tune_tcp_iface "$TO_CLIENT_IFACE"
   exp4_wait_iface "$CONSOLE_IFACE"
 
   local data_ip="${SIM5G_IP:-${MULTUS_IP:-}}"
@@ -227,6 +242,7 @@ exp4_pin_to_server() {
       ip route replace "${h}/32" dev "$iface" || true
     fi
   done < <(exp4_to_server_hosts | awk 'NF && !seen[$0]++')
+  exp4_tune_tcp_iface "$iface"
   return 0
 }
 
@@ -248,7 +264,44 @@ exp4_watch_to_server_pin() {
   exp4_log info "auto-detect to-server iface and pin app-server /32 (background)"
 }
 
+# Pod netns only. Do not touch net.core.* or tcp_adv_win_scale (those are
+# host-global / unsafe and took down usrp + gpu-a40). Host rmem_max still
+# caps actual socket memory (~208KiB unless the node raises it).
+exp4_tune_tcp() {
+  exp4_sysctl_write net.ipv4.tcp_rmem "4096 131072 16777216"
+  exp4_sysctl_write net.ipv4.tcp_wmem "4096 16384 16777216"
+  exp4_sysctl_write net.ipv4.tcp_window_scaling 1
+  exp4_sysctl_write net.ipv4.tcp_timestamps 1
+  exp4_sysctl_write net.ipv4.tcp_sack 1
+  exp4_sysctl_write net.ipv4.tcp_slow_start_after_idle 0
+  exp4_sysctl_write net.ipv4.tcp_no_metrics_save 1
+  exp4_sysctl_write net.ipv4.tcp_mtu_probing 1
+  exp4_sysctl_write net.ipv4.tcp_autocorking 0
+  exp4_sysctl_write net.ipv4.tcp_congestion_control cubic
+  exp4_log info "tcp netns cubic rmem/wmem max=16M (host rmem_max still caps)"
+}
+
+# Per-iface, pod netns: when to-server / to-client has IPv4.
+exp4_tune_tcp_iface() {
+  local iface="${1:-}" line
+  [ -z "$iface" ] && return 0
+  exp4_is_cluster_iface "$iface" && return 0
+  ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet ' || return 0
+  if [ "${EXP4_TCP_IFACE_DONE:-}" = "$iface" ]; then
+    return 0
+  fi
+  EXP4_TCP_IFACE_DONE="$iface"
+  exp4_sysctl_write "net.ipv4.conf.${iface}.rp_filter" 2
+  ip link set dev "$iface" txqueuelen 10000 2>/dev/null || true
+  while read -r line; do
+    [ -z "$line" ] && continue
+    ip route change $line initcwnd 32 initrwnd 32 2>/dev/null || true
+  done < <(ip -4 route show dev "$iface" 2>/dev/null)
+  exp4_log info "tcp iface ${iface} txqueuelen=10000 initcwnd=32"
+}
+
 exp4_client_ifaces() {
+  exp4_tune_tcp
   if exp4_no5g; then
     TO_SERVER_IFACE="${TO_SERVER_IFACE:-${PDU_IFACE:-net1}}"
     CONSOLE_IFACE="${CONSOLE_IFACE:-net2}"
@@ -274,7 +327,7 @@ exp4_client_ifaces() {
     exp4_announce "$TO_SERVER_IFACE" "$data_ip"
     exp4_pin_to_server "$TO_SERVER_IFACE" || true
   else
-    # PDU appears later; keep installing /32s so app data never uses net2.
+    # PDU appears later; pin /32s and apply to-server TCP when the tunnel is up.
     exp4_watch_to_server_pin
   fi
 }

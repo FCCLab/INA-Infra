@@ -1,6 +1,9 @@
 """Exp4 Scheme 1 (S1): +PL only — five DL slices.
 
 PL on, PM frozen at peak T_bar, PS equal PRB (nws-xapp idle).
+
+Copied from S0: same workloads, IPs, and compute. Only sites change —
+CU-UP, UPF, and APP are co-located (no N6 hairpin).
 """
 
 from __future__ import annotations
@@ -20,22 +23,22 @@ SLICES = {
         "cu": "central",
         "upf": "central",
         "app": "central",
-        "t_bar": 20.0,
-        "d_bar": 250.0,
+        "t_bar": 20.2,
+        "d_bar": 88.5,
         "strict_sla": False,
         "h_s": 0,
         "eta_t0": 2.4,
         "app_ip": "10.1.137.211",
         "app_mac": "02:0a:89:a0:00:01",
         "ue_rf": "10.1.140.141",
-        "ue_console_ip": "10.1.137.220",
+        "ue_console_ip": "10.1.137.221",
         "dnn": "oai1",
         "sd": "0x000001",
         "imsi": "001010000000101",
         "cpu_app": 2.0,
         "mem_app": "1Gi",
         "gpu_app": 0.0,
-        "b_min": 54.6,  # equal 1/5 of 273
+        "b_min": 54.6,
     },
     2: {
         "name": "YOLO",
@@ -44,20 +47,20 @@ SLICES = {
         "cu": "edge",
         "upf": "edge",
         "app": "edge",
-        "t_bar": 12.0,
-        "d_bar": 45.0,
+        "t_bar": 16.8,
+        "d_bar": 130.5,
         "strict_sla": True,
         "h_s": 1,
         "eta_t0": 2.2,
         "app_ip": "10.1.137.212",
         "app_mac": "02:0a:89:a0:00:02",
         "ue_rf": "10.1.140.142",
-        "ue_console_ip": "10.1.137.230",
+        "ue_console_ip": "10.1.137.222",
         "dnn": "oai2",
         "sd": "0x000002",
         "imsi": "001010000000102",
-        "cpu_app": 2.0,
-        "mem_app": "4Gi",
+        "cpu_app": 4,
+        "mem_app": "12Gi",
         "gpu_app": 1.0,
         "b_min": 54.6,
     },
@@ -68,15 +71,15 @@ SLICES = {
         "cu": "regional",
         "upf": "regional",
         "app": "regional",
-        "t_bar": 22.0,
-        "d_bar": 58.0,
+        "t_bar": 56.9,
+        "d_bar": 66.0,
         "strict_sla": True,
         "h_s": 0,
         "eta_t0": 2.5,
         "app_ip": "10.1.137.213",
         "app_mac": "02:0a:89:a0:00:03",
         "ue_rf": "10.1.140.143",
-        "ue_console_ip": "10.1.137.240",
+        "ue_console_ip": "10.1.137.223",
         "dnn": "oai3",
         "sd": "0x000003",
         "imsi": "001010000000103",
@@ -92,15 +95,15 @@ SLICES = {
         "cu": "central",
         "upf": "central",
         "app": "central",
-        "t_bar": 8.0,
-        "d_bar": 400.0,
+        "t_bar": 18.3,
+        "d_bar": 309.7,
         "strict_sla": False,
         "h_s": 0,
         "eta_t0": 2.3,
         "app_ip": "10.1.137.214",
         "app_mac": "02:0a:89:a0:00:04",
         "ue_rf": "10.1.140.144",
-        "ue_console_ip": "10.1.137.250",
+        "ue_console_ip": "10.1.137.224",
         "dnn": "oai4",
         "sd": "0x000004",
         "imsi": "001010000000104",
@@ -116,19 +119,19 @@ SLICES = {
         "cu": "central",
         "upf": "central",
         "app": "central",
-        "t_bar": 2.0,
-        "d_bar": 80.0,
+        "t_bar": 3.67,
+        "d_bar": 75.2,
         "strict_sla": True,
         "h_s": 0,
         "eta_t0": 2.6,
         "app_ip": "10.1.137.215",
         "app_mac": "02:0a:89:a0:00:05",
         "ue_rf": "10.1.140.145",
-        "ue_console_ip": "10.1.137.210",
+        "ue_console_ip": "10.1.137.225",
         "dnn": "oai5",
         "sd": "0x000005",
         "imsi": "001010000000105",
-        "cpu_app": 0.5,
+        "cpu_app": 1.0,
         "mem_app": "512Mi",
         "gpu_app": 0.0,
         "b_min": 54.6,
@@ -149,7 +152,6 @@ KUBE_CONTEXT = {
     "edge": "edge@edge",
 }
 
-# Fabric IPs (10.1.140) — same numbering as exp1, plus slice 5.
 FABRIC = {
     sid: {
         "upf_n3": f"10.1.140.{20 + sid}",
@@ -163,11 +165,10 @@ FABRIC = {
     for sid in SLICES
 }
 
-# S1 knobs
 PL_ENABLED = True
 PM_ENABLED = False
 PS_ENABLED = False
-XAPP_REPLICAS = 0  # PS off: equal PRB, no live reservation
+XAPP_REPLICAS = 0
 REGISTRY = "10.1.132.30:5000"
 
 

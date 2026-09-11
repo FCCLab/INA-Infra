@@ -25,7 +25,7 @@ from ue_resources import app_client_resources_yaml, ue_ran_resources_yaml  # noq
 from ue_teardown import parse_ue_ids, undeploy_ues  # noqa: E402
 
 EDGE_CONTEXT = "edge@edge"
-UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.2-amd64"
+UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.4-amd64"
 IFACES_SH = HERE.parents[2] / "applications" / "exp4" / "common" / "ifaces.sh"
 INFLUX_PY = IFACES_SH.parent / "influx_publish.py"
 
@@ -282,7 +282,7 @@ spec:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --serveraddr 10.1.140.204"
         - name: TZ
           value: Europe/Paris
         volumeMounts:

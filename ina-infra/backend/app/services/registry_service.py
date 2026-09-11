@@ -20,12 +20,12 @@ OAI_COMPONENT_REPOS: Dict[str, Dict[str, Any]] = {
     "cucp": {
         "repo": "oai-cucp",
         "name": "OAI CU-CP",
-        "fallback_tag": "nws-v0.8.3-amd64",
+        "fallback_tag": "nws-v0.8.4-amd64",
     },
     "du": {
         "repo": "oai-du",
         "name": "OAI DU",
-        "fallback_tag": "nws-v0.8.3-amd64",
+        "fallback_tag": "nws-v0.8.4-amd64",
     },
     "cuup": {
         "repo": "oai-nr-cuup",
@@ -35,7 +35,7 @@ OAI_COMPONENT_REPOS: Dict[str, Dict[str, Any]] = {
     "ue": {
         "repo": "oai-nr-ue",
         "name": "OAI UE Simulator",
-        "fallback_tag": "nws-v0.8.2-amd64",
+        "fallback_tag": "nws-v0.8.4-amd64",
     },
     "flexric": {
         "repo": "oai-flexric",

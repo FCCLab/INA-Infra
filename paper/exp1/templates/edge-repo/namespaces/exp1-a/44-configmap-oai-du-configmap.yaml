@@ -61,7 +61,7 @@ data:
     \ = [0];\n    bf_weights = [0x00007fff, 0x0000, 0x0000, 0x0000];\n    clock_src\
     \ = \"internal\";\n    }\n);\n\nrfsimulator: {\n    serveraddr = \"server\";\n\
     \    serverport = \"4043\";\n    options = ();\n    modelname = \"AWGN\";\n  \
-    \  IQfile = \"/tmp/rfsimulator.iqs\"\n}\n\n# DU is time source; CU-CP connects\
+    \  IQfile = \"/tmp/rfsimulator.iqs\";\n}\n\n# DU is time source; CU-CP connects\
     \ as client (OAI CU/DU iq_samples).\ntime_management = {\n  time_source = \"iq_samples\"\
     ;\n  mode = \"server\";\n  server_ip = \"10.1.140.203\";\n  server_port = 7374;\n\
     };log_config :\n{\n    global_log_level = \"info\";\n    hw_log_level = \"info\"\

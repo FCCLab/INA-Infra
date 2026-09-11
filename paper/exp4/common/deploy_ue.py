@@ -15,7 +15,7 @@ from scheme import NAMESPACE, REGISTRY, SLICES  # noqa: E402
 from ue_resources import app_client_resources_yaml, ue_ran_resources_yaml  # noqa: E402
 
 EDGE_CONTEXT = "edge@edge"
-UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.2-amd64"
+UE_IMAGE = f"{REGISTRY}/oai-nr-ue:nws-v0.8.4-amd64"
 
 CLIENT_IMAGES = {
     1: "docker.io/nicolaka/netshoot:latest",
@@ -200,7 +200,7 @@ spec:
           privileged: true
         env:
         - name: USE_ADDITIONAL_OPTIONS
-          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --rfsimulator.serveraddr 10.1.140.204"
+          value: "-r 133 --numerology 1 -C 3325620000 --ssb 144 --rfsim --log_config.global_log_options level,nocolor,time --serveraddr 10.1.140.204"
         - name: TZ
           value: Europe/Paris
         volumeMounts:

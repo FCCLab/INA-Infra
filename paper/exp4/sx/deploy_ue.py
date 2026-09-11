@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Bring up DL UEs + app clients on edge `usrp` for Exp4 S2 (exp4-s2).
+"""Bring up DL UEs + app clients on edge `usrp` for Exp4 SX (exp4-sx).
 
-Examples:
-  python3 paper/exp4/s2/deploy_ue.py
-  python3 paper/exp4/s2/deploy_ue.py --ue 5
-  python3 paper/exp4/s2/deploy_ue.py 1,2,3,4
-  python3 paper/exp4/s2/deploy_ue.py --undeploy --ue 1,2,3,4
+SX attaches **one slice at a time** (see measure.py). Examples:
+  python3 paper/exp4/sx/deploy_ue.py --ue 1
+  python3 paper/exp4/sx/deploy_ue.py --ue 5
+  python3 paper/exp4/sx/deploy_ue.py --undeploy --ue 1
 """
 
 from __future__ import annotations
@@ -378,12 +377,19 @@ def main(argv: list[str] | None = None) -> None:
     print("=" * 64)
     out_dir = HERE / "manifests"
     out_dir.mkdir(parents=True, exist_ok=True)
-    combined = out_dir / "exp4_s2_ues.yaml"
+    combined = out_dir / f"{NAMESPACE.replace('-', '_')}_ues.yaml"
     parts = [ifaces_configmap_yaml()] + [generate_ue_yaml(sid) for sid in sids]
     combined.write_text("\n".join(parts))
     print(f"  wrote {combined}")
     res = subprocess.run(
-        ["kubectl", f"--context={EDGE_CONTEXT}", "apply", "-f", str(combined)],
+        [
+            "kubectl",
+            f"--context={EDGE_CONTEXT}",
+            "--request-timeout=20s",
+            "apply",
+            "-f",
+            str(combined),
+        ],
         capture_output=True,
         text=True,
     )

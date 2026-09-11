@@ -47,6 +47,12 @@ def undeploy_ues(
         f"Undeploying {scheme.SCHEME_ID} UE(s) {','.join(str(s) for s in targets)} "
         f"from {ns} on {context}"
     )
+    try:
+        from k8s_cleanup import hnc_fail_open
+
+        hnc_fail_open(context)
+    except Exception as exc:
+        print(f"  warn: hnc fail-open skipped ({exc})")
     if all_ues:
         subprocess.run(
             [
@@ -63,6 +69,7 @@ def undeploy_ues(
                 "--ignore-not-found=true",
             ],
             check=False,
+            timeout=25,
         )
     for sid in targets:
         for kind, name in (
@@ -90,6 +97,7 @@ def undeploy_ues(
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=25,
             )
     print("UEs removed.")
 

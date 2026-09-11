@@ -318,6 +318,42 @@ def copy_shared_and_nfs() -> None:
                 text = rewrite_ips_sites(text, sid)
             if name.startswith("48-deployment-nws-xapp"):
                 text = re.sub(r"(?m)^  replicas:\s*\d+", f"  replicas: {XAPP_REPLICAS}", text)
+                text = re.sub(
+                    r"image:\s*\S*nws-xapp:\S+",
+                    "image: 10.1.132.30:5000/nws-xapp:nws-v0.8.4-amd64",
+                    text,
+                )
+                text = text.replace("/xapp/xapp_slice.py", "/xapp/backend/xapp_slice.py")
+                if "NWS_XAPP_SKIP_RIC_WAIT" not in text:
+                    text = text.replace(
+                        "        - name: NWS_XAPP_API_HOST",
+                        "        - name: NWS_XAPP_SKIP_RIC_WAIT\n"
+                        "          value: '1'\n"
+                        "        - name: NWS_XAPP_API_HOST",
+                    )
+                if "frontend/serve.py" not in text:
+                    text = text.replace(
+                        'set -e; echo "waiting 30s',
+                        "set -e; python3 -u /xapp/frontend/serve.py --host 0.0.0.0 --port 18081 --backend-port 18080 &\n"
+                        '          echo "waiting 30s',
+                    )
+                if "containerPort: 18081" not in text:
+                    text = text.replace(
+                        "        - name: http\n          containerPort: 18080\n          protocol: TCP",
+                        "        - name: http\n          containerPort: 18080\n          protocol: TCP\n"
+                        "        - name: console\n          containerPort: 18081\n          protocol: TCP",
+                    )
+            if name.startswith("49-service-nws-xapp"):
+                text = text.replace(
+                    "  - name: http-18081\n    port: 18081\n    targetPort: 18080",
+                    "  - name: http-18081\n    port: 18081\n    targetPort: 18081",
+                )
+            if name.startswith("47-deployment-oai-flexric"):
+                text = re.sub(
+                    r"image:\s*\S*oai-flexric:\S+",
+                    "image: 10.1.132.30:5000/oai-flexric:nws-v0.8.4-amd64",
+                    text,
+                )
             write_text(ns_dir(dest_repo) / name, text)
 
 
@@ -477,7 +513,7 @@ def _route_init(ip: str) -> str:
 def _server_influx_env(sid: int, app_type: str, cluster: str, app_name: str) -> str:
     """Influx + probe env for the application server container."""
     return f"""        - name: INFLUXDB_URL
-          value: http://influxdb.influxdb.svc:8086
+          value: http://10.1.132.230:8086
         - name: INFLUXDB_TOKEN
           value: ina-infra-influxdb-token
         - name: INFLUXDB_ORG
@@ -802,18 +838,43 @@ def _nssai_sd(sid: int) -> str:
     return "0xFFFFFF" if sid == 0 else f"0x{sid:06x}"
 
 
+def _gnb_prb_ratios(sid: int) -> tuple[float, float, float]:
+    """dedicated / min / max PRB % for one NSSAI (sid 0 = default)."""
+    if sid == 0 or sid not in SLICES:
+        return GNB_SLICE_DEDICATED, GNB_SLICE_MIN, GNB_SLICE_MAX
+    s = SLICES[sid]
+    return (
+        float(s.get("dedicated_prb_ratio", GNB_SLICE_DEDICATED)),
+        float(s.get("min_prb_ratio", GNB_SLICE_MIN)),
+        float(s.get("max_prb_ratio", GNB_SLICE_MAX)),
+    )
+
+
 def _build_gnb_slices_block() -> str:
     sids = [0, *sorted(SLICES)]
     rows = []
+    dl_only = bool(PS_ENABLED)
     for i, sid in enumerate(sids):
         comma = "," if i < len(sids) - 1 else ""
-        rows.append(
+        ded, mn, mx = _gnb_prb_ratios(sid)
+        row = (
             "  { slice_id = "
             f"{sid}; sst = 1; sd = {_gnb_slice_sd(sid)}; "
-            f"dedicated_prb_ratio = {GNB_SLICE_DEDICATED:.1f}; "
-            f"min_prb_ratio = {GNB_SLICE_MIN:.1f}; "
-            f"max_prb_ratio = {GNB_SLICE_MAX:.1f}; }}{comma}"
+            f"dedicated_prb_ratio = {ded:.1f}; "
+            f"min_prb_ratio = {mn:.1f}; "
+            f"max_prb_ratio = {mx:.1f};"
         )
+        if dl_only:
+            row += (
+                f" dl_dedicated_prb_ratio = {ded:.1f}; "
+                f"dl_min_prb_ratio = {mn:.1f}; "
+                f"dl_max_prb_ratio = {mx:.1f}; "
+                "ul_dedicated_prb_ratio = 0.0; "
+                "ul_min_prb_ratio = 0.0; "
+                "ul_max_prb_ratio = 100.0;"
+            )
+        row += f" }}{comma}"
+        rows.append(row)
     return "Slices = (\n" + "\n".join(rows) + "\n)"
 
 
@@ -827,9 +888,35 @@ def _patch_gnb_conf(conf: str, *, slices: bool) -> str:
         conf, n = re.subn(r"Slices\s*=\s*\(.*?\n\)", _build_gnb_slices_block(), conf, count=1, flags=re.S)
         if n != 1:
             raise SystemExit("failed to patch gNB Slices block")
+        if PS_ENABLED:
+            # NSDL: NS PRB floors on DL only; UL stays PF (TCP ACKs not partitioned).
+            conf, n = re.subn(r"ul_scheduler_type\s*=\s*\d+\s*;", "ul_scheduler_type = 0;", conf)
+            if n < 1:
+                raise SystemExit("failed to patch ul_scheduler_type for NSDL")
+            conf = conf.replace(
+                "# NSBOTH: same NS scheduler for UL and DL; slice list from profile n_slices.",
+                "# NSDL: NS on DL only (ul_scheduler_type=0 PF); slice min_prb is DL.",
+            )
     conf, n = re.subn(r"snssaiList\s*=\s*\([^)]*\)", _build_snssai_list(), conf, count=1)
     if n != 1:
         raise SystemExit("failed to patch gNB snssaiList")
+    # nws-v0.8.4 config_getlist() only honors rfsimulator as an array. A group
+    # `{ serveraddr = "server"; }` is ignored and defaults to client 127.0.0.1.
+    if "rfsimulator = (" not in conf:
+        conf = re.sub(
+            r"rfsimulator\s*:\s*\{(.*?)\n\}",
+            lambda m: "rfsimulator = (\n  {" + m.group(1) + "\n  }\n)",
+            conf,
+            count=1,
+            flags=re.S,
+        )
+    # libconfig needs a semicolon after IQfile or the rfsimulator block is dropped.
+    conf = re.sub(
+        r'IQfile\s*=\s*"/tmp/rfsimulator\.iqs"\s*\n\s*\}',
+        'IQfile = "/tmp/rfsimulator.iqs";\n  }',
+        conf,
+        count=1,
+    )
     return conf
 
 
@@ -849,11 +936,11 @@ def patch_gnb_slices() -> None:
     _rewrite_cm_gnb_conf(du, _patch_gnb_conf(du_doc["data"]["gnb.conf"], slices=True))
     cucp_doc = yaml.safe_load(cucp.read_text())
     _rewrite_cm_gnb_conf(cucp, _patch_gnb_conf(cucp_doc["data"]["gnb.conf"], slices=False))
-    print(
-        f"  gNB slices default dedicated/min/max="
-        f"{GNB_SLICE_DEDICATED:.0f}/{GNB_SLICE_MIN:.0f}/{GNB_SLICE_MAX:.0f} "
-        f"(ids 0,{','.join(str(s) for s in sorted(SLICES))})"
+    mins = ", ".join(
+        f"{sid}={_gnb_prb_ratios(sid)[1]:.1f}" for sid in (0, *sorted(SLICES))
     )
+    sch = "NSDL (DL NS / UL PF)" if PS_ENABLED else "NSBOTH"
+    print(f"  gNB {sch} min_prb_ratio %: {mins} (max=100, dedicated=0)")
 
 
 def _mysql_sql_json(obj: object) -> str:
